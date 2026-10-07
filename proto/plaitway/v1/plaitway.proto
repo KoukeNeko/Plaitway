@@ -1,0 +1,371 @@
+// Single source of truth for the Plaitway daemon control API.
+//
+// Authorization (enforced by the daemon from the caller's uid and groups, see
+// cmd/plaitwayd/auth.go):
+//   read and connect  - the console user, administrators and root:
+//     GetDaemonInfo, GetDiagnostics, ListProfiles, WatchProfiles, WatchLogs,
+//     SetProfileEnabled, ProvideCredentials, Resync
+//   modify            - administrators and root:
+//     ImportProfile, UpdateProfile, UpdateProfileContent, DeleteProfile,
+//     ReorderProfiles, RemoveStaleRoute, GetProfileContent (it returns the secrets)
+syntax = "proto3";
+
+package plaitway.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/KoukeNeko/Plaitway/internal/gen/plaitway/v1;plaitwayv1";
+
+service DaemonService {
+  rpc GetDaemonInfo(GetDaemonInfoRequest) returns (DaemonInfo);
+  rpc GetDiagnostics(GetDiagnosticsRequest) returns (Diagnostics);
+
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
+  // Validates and stores a profile. Rejected content fails with
+  // INVALID_ARGUMENT; stripped or ignored directives are returned as warnings.
+  rpc ImportProfile(ImportProfileRequest) returns (ImportProfileResponse);
+  // Unknown id fails with NOT_FOUND. A new priority applies to a connected
+  // profile at once; the name, auto-connect and tunnel mode apply on its next
+  // connection.
+  rpc UpdateProfile(UpdateProfileRequest) returns (Profile);
+  // The stored profile text, private keys and inline certificates included.
+  // Unknown id fails with NOT_FOUND.
+  rpc GetProfileContent(GetProfileContentRequest) returns (GetProfileContentResponse);
+  // Validates and stores new text for an existing profile, with the same
+  // checks as ImportProfile (INVALID_ARGUMENT with the line, warnings in the
+  // response). The text has to be of the profile's kind. Unknown id fails with
+  // NOT_FOUND.
+  rpc UpdateProfileContent(UpdateProfileContentRequest) returns (ImportProfileResponse);
+  // Disconnects the profile first. Unknown id fails with NOT_FOUND.
+  rpc DeleteProfile(DeleteProfileRequest) returns (DeleteProfileResponse);
+  // ids lists every profile in the new priority order, highest priority first.
+  rpc ReorderProfiles(ReorderProfilesRequest) returns (ListProfilesResponse);
+
+  // Unknown id fails with NOT_FOUND.
+  rpc SetProfileEnabled(SetProfileEnabledRequest) returns (Profile);
+  // Answers a credential_request. Held in memory only, never written to disk.
+  rpc ProvideCredentials(ProvideCredentialsRequest) returns (Profile);
+
+  // First message is a full snapshot, then one message per change. Runs until
+  // the client cancels.
+  rpc WatchProfiles(WatchProfilesRequest) returns (stream ProfileEvent);
+  // Buffered tail first, then live lines. An empty profile_id is the daemon's own log.
+  rpc WatchLogs(WatchLogsRequest) returns (stream LogLine);
+
+  // Re-reads the network and rebuilds every route and DNS entry the daemon owns.
+  rpc Resync(ResyncRequest) returns (ResyncResponse);
+  // Deletes a stale route that Diagnostics reported. Routes the daemon does
+  // not own are only removed through this call, never automatically.
+  rpc RemoveStaleRoute(RemoveStaleRouteRequest) returns (RemoveStaleRouteResponse);
+}
+
+// ---- daemon ----
+
+message GetDaemonInfoRequest {}
+
+message DaemonInfo {
+  string version = 1;
+  uint32 protocol_version = 2;
+  bool privileged = 3; // false means it cannot create tunnels or change routes
+  repeated EngineInfo engines = 4;
+}
+
+message EngineInfo {
+  ProfileKind kind = 1;
+  bool available = 2;
+  string version = 3;
+  string detail = 4; // why it is unavailable, empty otherwise
+}
+
+// ---- profiles ----
+
+enum ProfileKind {
+  PROFILE_KIND_UNSPECIFIED = 0;
+  PROFILE_KIND_OPENVPN = 1;
+  PROFILE_KIND_WIREGUARD = 2;
+}
+
+enum ProfileState {
+  PROFILE_STATE_UNSPECIFIED = 0;
+  PROFILE_STATE_DISCONNECTED = 1;
+  PROFILE_STATE_CONNECTING = 2;
+  PROFILE_STATE_CONNECTED = 3;
+  PROFILE_STATE_DISCONNECTING = 4;
+  PROFILE_STATE_FAILED = 5;
+  PROFILE_STATE_RECONNECTING = 6; // underlay network changed, tunnel being re-established
+  PROFILE_STATE_AWAITING_CREDENTIALS = 7; // see Profile.credential_request
+}
+
+enum TunnelMode {
+  TUNNEL_MODE_UNSPECIFIED = 0;
+  TUNNEL_MODE_AUTO = 1;  // as the profile itself says
+  TUNNEL_MODE_FULL = 2;  // send all traffic through the tunnel
+  TUNNEL_MODE_SPLIT = 3; // only the routes the profile names; ignore any default route
+}
+
+message ProfileSettings {
+  bool auto_connect = 1; // connect when the daemon starts
+  TunnelMode tunnel_mode = 2;
+  // Lower numbers win overlapping routes and DNS domains. ReorderProfiles
+  // rewrites this for every profile.
+  int32 priority = 3;
+  // WireGuard: leave the private ranges (10.0.0.0/8, 172.16.0.0/12,
+  // 192.168.0.0/16, 169.254.0.0/16, fc00::/7, fe80::/10) out of AllowedIPs, so
+  // the local network is not sent through the tunnel.
+  bool exclude_private_ips = 4;
+  OnDemandRules on_demand = 5;
+}
+
+// Connects the profile while the Mac's primary network is one of the checked
+// types and disconnects it on any other. Active when either is set. A manual
+// connect or disconnect holds until the primary network type changes.
+message OnDemandRules {
+  bool ethernet = 1;
+  bool wifi = 2;
+}
+
+message Endpoint {
+  string host = 1;
+  uint32 port = 2;
+  string protocol = 3; // "udp", "tcp" (OpenVPN); empty for WireGuard
+}
+
+// Facts read from the profile content at import time.
+message ProfileSummary {
+  repeated Endpoint endpoints = 1;
+  repeated string routes = 2;        // prefixes the profile names itself, CIDR
+  bool redirects_default_route = 3;
+  bool requires_credentials = 4;     // username and password are asked at connect
+  repeated string dns_servers = 5;
+  repeated string addresses = 6;     // addresses configured on the tunnel interface, CIDR
+  string public_key = 7;             // WireGuard: derived from the private key, for configuring the peer
+}
+
+enum CredentialKind {
+  CREDENTIAL_KIND_UNSPECIFIED = 0;
+  CREDENTIAL_KIND_USER_PASSWORD = 1;
+  CREDENTIAL_KIND_KEY_PASSPHRASE = 2;
+}
+
+message CredentialRequest {
+  CredentialKind kind = 1;
+}
+
+enum RouteState {
+  ROUTE_STATE_UNSPECIFIED = 0;
+  ROUTE_STATE_PENDING = 1;
+  ROUTE_STATE_INSTALLED = 2;
+  ROUTE_STATE_SHADOWED = 3; // another profile with higher priority owns the prefix
+  ROUTE_STATE_BLOCKED = 4;  // conflicts with a directly attached local subnet
+  ROUTE_STATE_FAILED = 5;
+}
+
+message RouteStatus {
+  string prefix = 1;
+  RouteState state = 2;
+  string detail = 3;       // why it is not installed, empty when installed
+  string shadowed_by = 4;  // profile id, when state is SHADOWED
+}
+
+message DnsStatus {
+  repeated string servers = 1;
+  repeated string match_domains = 2; // "." means everything
+  RouteState state = 3;
+  string detail = 4;
+}
+
+// Live facts about a connection; empty while disconnected.
+message TunnelStatus {
+  string interface_name = 1;
+  repeated string addresses = 2;
+  string remote = 3; // the endpoint in use
+  google.protobuf.Timestamp connected_since = 4;
+  uint64 rx_bytes = 5;
+  uint64 tx_bytes = 6;
+  repeated RouteStatus routes = 7;
+  repeated DnsStatus dns = 8;
+  repeated string warnings = 9;
+}
+
+message Profile {
+  string id = 1; // stable
+  string name = 2;
+  ProfileKind kind = 3;
+  bool desired_enabled = 4;
+  ProfileState state = 5;
+  string last_error = 6; // empty when none
+  ProfileSettings settings = 7;
+  ProfileSummary summary = 8;
+  TunnelStatus status = 9;
+  CredentialRequest credential_request = 10; // set while state is AWAITING_CREDENTIALS
+}
+
+message ListProfilesRequest {}
+
+message ListProfilesResponse {
+  repeated Profile profiles = 1;
+}
+
+message ImportProfileRequest {
+  string name = 1;            // empty: derived from source_filename
+  bytes content = 2;          // the profile file as text (.ovpn or wg-quick .conf); never a path
+  string source_filename = 3; // hint for the name and for detecting the kind
+  ProfileKind kind = 4;       // UNSPECIFIED: detected from the content
+  ProfileSettings settings = 5;
+}
+
+message ImportWarning {
+  int32 line = 1;
+  string directive = 2;
+  string message = 3;
+}
+
+message ImportProfileResponse {
+  Profile profile = 1;
+  repeated ImportWarning warnings = 2;
+}
+
+message UpdateProfileRequest {
+  string id = 1;
+  optional string name = 2;
+  optional ProfileSettings settings = 3;
+}
+
+message GetProfileContentRequest {
+  string id = 1;
+}
+
+message GetProfileContentResponse {
+  bytes content = 1;
+}
+
+message UpdateProfileContentRequest {
+  string id = 1;
+  bytes content = 2;
+  // Restarts an enabled profile with the new text at once. Otherwise the text
+  // applies on the next connection.
+  bool reconnect = 3;
+}
+
+message DeleteProfileRequest {
+  string id = 1;
+}
+
+message DeleteProfileResponse {}
+
+message ReorderProfilesRequest {
+  repeated string ids = 1;
+}
+
+message SetProfileEnabledRequest {
+  string id = 1;
+  bool enabled = 2;
+}
+
+message ProvideCredentialsRequest {
+  string profile_id = 1;
+  CredentialKind kind = 2;
+  string username = 3; // USER_PASSWORD only
+  string password = 4; // the password, or the key passphrase
+}
+
+message WatchProfilesRequest {}
+
+message ProfileSnapshot {
+  repeated Profile profiles = 1;
+}
+
+message ProfileEvent {
+  oneof event {
+    ProfileSnapshot snapshot = 1; // first message only
+    Profile changed = 2;          // added or changed
+    string removed = 3;           // id of a deleted profile
+  }
+}
+
+// ---- logs ----
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+message WatchLogsRequest {
+  string profile_id = 1;
+  int32 tail_lines = 2; // 0 means the default of 200
+}
+
+message LogLine {
+  google.protobuf.Timestamp time = 1;
+  LogLevel level = 2;
+  string profile_id = 3;
+  string text = 4;
+}
+
+// ---- diagnostics ----
+
+message GetDiagnosticsRequest {}
+
+message NetworkInfo {
+  string default_gateway_v4 = 1;
+  string default_interface_v4 = 2;
+  string default_gateway_v6 = 3;
+  string default_interface_v6 = 4;
+  repeated string interfaces = 5;
+  google.protobuf.Timestamp last_change = 6;
+  string last_change_reason = 7; // route change, wake, heartbeat, manual
+}
+
+enum RouteKind {
+  ROUTE_KIND_UNSPECIFIED = 0;
+  ROUTE_KIND_TUNNEL = 1;  // bound to the tunnel interface
+  ROUTE_KIND_BYPASS = 2;  // keeps a tunnel endpoint reachable outside the tunnel
+  ROUTE_KIND_DEFAULT = 3; // half of a split default route (0.0.0.0/1, 128.0.0.0/1)
+}
+
+message OwnedRoute {
+  string prefix = 1;
+  string owner = 2; // profile id
+  RouteKind kind = 3;
+  string via = 4;   // interface name or gateway
+  RouteState state = 5;
+}
+
+message StaleRoute {
+  string key = 1; // pass to RemoveStaleRoute
+  string prefix = 2;
+  string gateway = 3;
+  string interface = 4;
+  string reason = 5;
+  bool owned = 6; // true when the journal says Plaitway installed it
+}
+
+message JournalEntry {
+  google.protobuf.Timestamp time = 1;
+  string owner = 2;
+  string kind = 3;   // route, resolver
+  string key = 4;
+  string state = 5;  // pending, applied, removed
+}
+
+message Diagnostics {
+  DaemonInfo daemon = 1;
+  NetworkInfo network = 2;
+  repeated OwnedRoute owned_routes = 3;
+  repeated StaleRoute stale_routes = 4;
+  repeated string resolver_entries = 5;
+  repeated JournalEntry recent_journal = 6;
+}
+
+message ResyncRequest {}
+
+message ResyncResponse {}
+
+message RemoveStaleRouteRequest {
+  string key = 1;
+}
+
+message RemoveStaleRouteResponse {}
