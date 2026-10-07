@@ -163,10 +163,9 @@ section 3(a). `THIRD_PARTY_NOTICES.md` repeats this as a written offer (section 
 its license text, and carries the OpenVPN and WireGuard trademark notice. `Credits.rtf` makes the About panel point to
 both. `notices/` generates the file during `make app`.
 
-Plaitway's own code has no license: the repository has no `LICENSE` file, and the notices say nothing about it. That
-is the owner's decision and must be made before anyone else receives the app. The same goes for the copyright line in
-`Info.plist` (a GitHub handle today) and for the address in the written offer, which is derived from the `go.mod`
-module path and must be a place that serves the source for three years.
+Plaitway's own code is MIT licensed (`LICENSE` in the repository, and in `Contents/Resources/LICENSE` of the app). The
+copyright line in `Info.plist` is `package-app.sh`'s `COPYRIGHT` and names the same holder. The address in the written
+offer is derived from the `go.mod` module path and must be a place that serves the source for three years.
 
 BoringSSL, which swift-nio-ssl and swift-crypto compile into the app, has no license file in either package, so its
 license text is not in the notices. Add it from the BoringSSL repository at the commit named in each package's

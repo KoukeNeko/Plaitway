@@ -99,6 +99,8 @@ done
 cp "$OPENVPN" "$APP/Contents/Resources/bin/openvpn"
 cp "$STAGE/Plaitway.icns" "$APP/Contents/Resources/Plaitway.icns"
 cp "$PACKAGING_DIR/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
+# Plaitway's own license (MIT) travels with every copy of the app.
+cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
 
 # The corresponding source of the GPL parts of openvpn travels with the
 # binary (GPLv2 section 3(a)), together with the scripts that build it.
@@ -114,7 +116,7 @@ cp "$PACKAGING_DIR/build-openvpn.sh" "$PACKAGING_DIR/lib.sh" "$PACKAGING_DIR/ope
 # The standard About panel shows Credits.rtf from the main bundle.
 cat >"$APP/Contents/Resources/Credits.rtf" <<'EOF'
 {\rtf1\ansi\deff0{\fonttbl{\f0\fswiss Helvetica;}}\f0\fs18
-Plaitway includes OpenVPN, LZO, LZ4, OpenSSL and wireguard-go, among other open source software.\par
+Plaitway is released under the MIT license (Contents/Resources/LICENSE). It includes OpenVPN, LZO, LZ4, OpenSSL and wireguard-go, among other open source software.\par
 \par
 The source code of OpenVPN and LZO and the scripts that build them are in Contents/Resources/Source of this app. Licenses, the written offer for the source code and trademark notices are in Contents/Resources/THIRD_PARTY_NOTICES.md.\par
 }

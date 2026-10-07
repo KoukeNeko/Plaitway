@@ -85,7 +85,7 @@ version_le() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ]
 
 echo "== structure"
 for entry in Contents/Info.plist Contents/Resources/Plaitway.icns Contents/Resources/THIRD_PARTY_NOTICES.md \
-    Contents/Resources/Credits.rtf "Contents/Library/LaunchDaemons/$DAEMON_LABEL.plist"; do
+    Contents/Resources/LICENSE Contents/Resources/Credits.rtf "Contents/Library/LaunchDaemons/$DAEMON_LABEL.plist"; do
     check "$entry exists" test -f "$APP/$entry"
 done
 for entry in Contents/MacOS/Plaitway Contents/MacOS/plaitwayd Contents/Resources/bin/openvpn Contents/Resources/bin/plaitway; do
@@ -268,6 +268,7 @@ for binary in "$DAEMON" "$CLI"; do
     fi
 done
 check "notices match packaging/THIRD_PARTY_NOTICES.md" cmp -s "$NOTICES" "$PACKAGING_DIR/THIRD_PARTY_NOTICES.md"
+check "the license is the repository's LICENSE" cmp -s "$APP/Contents/Resources/LICENSE" "$ROOT/LICENSE"
 # The source that accompanies the binary: the archives of the pinned sources
 # and the scripts that built openvpn, as they are in packaging/.
 for pair in "$OPENVPN_URL:$OPENVPN_SHA256" "$LZO_URL:$LZO_SHA256" "$LZ4_URL:$LZ4_SHA256"; do

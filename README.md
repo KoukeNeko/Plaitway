@@ -435,13 +435,16 @@ menu and the command line work without it.
   <a href="https://github.com/grpc/grpc-swift-2"><img alt="gRPC" src="https://img.shields.io/badge/GRPC-244C5A?style=for-the-badge&logo=grpc&logoColor=white"></a>
   <a href="https://git.zx2c4.com/wireguard-go/"><img alt="wireguard-go" src="https://img.shields.io/badge/WIREGUARD--GO-88171A?style=for-the-badge&logo=wireguard&logoColor=white"></a>
   <a href="https://openvpn.net/community/"><img alt="OpenVPN" src="https://img.shields.io/badge/OPENVPN-2.7-EA7E20?style=for-the-badge&logo=openvpn&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/LICENSE-MIT-2196F3?style=for-the-badge&logo=github"></a>
 </p>
 
 ## License
 
-The project has no license file yet. Third-party components keep their own
-terms; the bundled ones, including the GPL source offer for OpenVPN, LZO and
-LZ4, are listed in [packaging/THIRD_PARTY_NOTICES.md](packaging/THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE) © KoukeNeko
+
+Third-party components keep their own terms. The bundled ones, including the
+GPL source offer for OpenVPN, LZO and LZ4, are listed in
+[packaging/THIRD_PARTY_NOTICES.md](packaging/THIRD_PARTY_NOTICES.md).
 
 ### Trademarks
 
