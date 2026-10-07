@@ -70,7 +70,9 @@ final class WindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: NSHostingController(rootView: RootView().environment(model)))
         // The title says where the person is (a profile, Diagnostics); the app's name is in the menu bar.
         window.title = ""
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        // The sidebar runs the full height of the window, with the traffic lights on it, and the
+        // toolbar floats over the page: the content reaches under the title bar.
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.setContentSize(NSSize(width: 960, height: 620))

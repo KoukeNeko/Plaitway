@@ -6,15 +6,17 @@ import SwiftUI
 // yellow and green are below 3:1 against a white window.
 
 extension ProfileState {
+    /// The shield of the menu bar item, in the state of the profile: the same family in the
+    /// sidebar, on the page and in the menu bar.
     var symbolName: String {
         switch self {
-        case .connected: "checkmark.circle.fill"
-        case .connecting: "circle.dotted"
+        case .connected: "lock.shield.fill"
+        case .connecting: "lock.rotation"
         case .reconnecting: "arrow.triangle.2.circlepath"
-        case .disconnecting: "circle.dashed"
+        case .disconnecting: "lock.open"
         case .awaitingCredentials: "key.fill"
-        case .failed: "xmark.octagon.fill"
-        case .disconnected, .unspecified, .UNRECOGNIZED: "circle"
+        case .failed: "exclamationmark.shield.fill"
+        case .disconnected, .unspecified, .UNRECOGNIZED: "lock.shield"
         }
     }
 
@@ -91,41 +93,6 @@ struct StatusGlyph: View {
             .foregroundStyle(tint)
             .symbolEffect(.pulse, isActive: isActive && !reduceMotion)
             .accessibilityHidden(true)
-    }
-}
-
-/// The state of a profile in a list: a rounded square in the state's colour with a glyph of its
-/// own inside. A sidebar paints the symbols it is given in its own tint, so the colour is a
-/// shape here, as in the icons of System Settings.
-struct StatusBadge: View {
-    let state: ProfileState
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(state == .disconnected ? Color.secondary.opacity(0.45) : state.tint)
-            .frame(width: 22, height: 22)
-            .overlay {
-                Image(systemName: state.badgeSymbolName)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-                    .symbolEffect(.pulse, isActive: state.isTransitional && !reduceMotion)
-            }
-            .accessibilityHidden(true)
-    }
-}
-
-extension ProfileState {
-    /// The glyph inside a `StatusBadge`; the square around it is already the shape.
-    var badgeSymbolName: String {
-        switch self {
-        case .connected: "checkmark"
-        case .connecting, .disconnecting: "ellipsis"
-        case .reconnecting: "arrow.triangle.2.circlepath"
-        case .awaitingCredentials: "key.fill"
-        case .failed: "exclamationmark"
-        case .disconnected, .unspecified, .UNRECOGNIZED: "power"
-        }
     }
 }
 

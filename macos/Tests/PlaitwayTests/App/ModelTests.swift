@@ -373,19 +373,22 @@ struct StatusPresentationTests {
 
     @Test(arguments: profileStates)
     @MainActor
-    func everyProfileStateHasSymbolsThatExist(state: ProfileState) {
+    func everyProfileStateHasASymbolThatExists(state: ProfileState) {
         #expect(NSImage(systemSymbolName: state.symbolName, accessibilityDescription: nil) != nil, "\(state.symbolName)")
-        #expect(NSImage(systemSymbolName: state.badgeSymbolName, accessibilityDescription: nil) != nil, "\(state.badgeSymbolName)")
     }
 
     @Test func noTwoProfileStatesShareAShape() {
         // Colour is the third channel: the glyph and the word already tell the states apart.
-        // Connecting and disconnecting differ in the word (and in the colour of nothing), so
-        // they may share a glyph in the badge but not in the page.
         let symbols = Self.profileStates.map(\.symbolName)
         #expect(Set(symbols).count == symbols.count)
-        let badges = Self.profileStates.filter { $0 != .disconnecting }.map(\.badgeSymbolName)
-        #expect(Set(badges).count == badges.count)
+    }
+
+    @Test func theSidebarUsesTheShieldsOfTheMenuBarItem() {
+        // A profile is the shield the menu bar item draws for the same state.
+        #expect(ProfileState.connected.symbolName == AggregateState.connected.symbolName)
+        #expect(ProfileState.disconnected.symbolName == AggregateState.idle.symbolName)
+        #expect(ProfileState.connecting.symbolName == AggregateState.connecting.symbolName)
+        #expect(ProfileState.awaitingCredentials.symbolName == AggregateState.needsCredentials.symbolName)
     }
 
     @Test(arguments: routeStates)

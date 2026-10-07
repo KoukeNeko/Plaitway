@@ -89,8 +89,17 @@ struct SidebarView: View {
             }
 
             Section {
-                Label { Text("Diagnostics", bundle: .module) } icon: { Image(systemName: "stethoscope") }
-                    .tag(SidebarItem.diagnostics)
+                HStack(spacing: 10) {
+                    // The same column as the shields above it.
+                    Image(systemName: "stethoscope")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30)
+                        .accessibilityHidden(true)
+                    Text("Diagnostics", bundle: .module)
+                }
+                .padding(.vertical, 3)
+                .tag(SidebarItem.diagnostics)
                     .accessibilityIdentifier("sidebar.diagnostics")
             }
         }
@@ -99,12 +108,16 @@ struct SidebarView: View {
     }
 }
 
+/// A profile in the sidebar: its shield in the colour of its state, its name, and under it what
+/// it is and how it stands.
 private struct ProfileRow: View {
     let profile: Profile
 
     var body: some View {
         HStack(spacing: 10) {
-            StatusBadge(state: profile.state)
+            StatusGlyph(profile.state)
+                .font(.system(size: 22))
+                .frame(width: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: profile.name)
                     .lineLimit(1)
@@ -115,6 +128,7 @@ private struct ProfileRow: View {
                     .lineLimit(1)
             }
         }
+        .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("sidebar.profile.\(profile.id)")
     }
