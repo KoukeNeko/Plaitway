@@ -121,13 +121,145 @@ func isDefault(p netip.Prefix) bool {
 	return p.Bits() == 0 || slices.Contains(v4Halves, p) || slices.Contains(v6Halves, p)
 }
 
-// defaultHolder is the best RoleFull tunnel that asks for a default route; live
-// is already in precedence order.
+// redirectsAll reports whether routes send the whole internet through the
+// tunnel: a default route or its halves, or a list that leaves out only what is
+// not on the internet. That is the list of a full tunnel with the private
+// ranges taken out ("0.0.0.0/5, 8.0.0.0/7, 11.0.0.0/8, ..."), which has no
+// default route although it is the tunnel everything goes through. A list with
+// any other hole does not count: the traffic in the hole would then have no
+// tunnel at all, where a lower priority tunnel's default route would have
+// caught it.
+func redirectsAll(routes []netip.Prefix) bool {
+	var v4, v6 []netip.Prefix
+	for _, p := range routes {
+		if !p.IsValid() {
+			continue
+		}
+		p = p.Masked()
+		if isDefault(p) {
+			return true
+		}
+		if p.Addr().Is4() {
+			v4 = append(v4, p)
+		} else {
+			v6 = append(v6, p)
+		}
+	}
+	return coversAllBut(v4, internetV4, notOnTheInternetV4) || coversAllBut(v6, internetV6, nil)
+}
+
+var (
+	// internetV4 is the unicast space, and internetV6 the global unicast range.
+	internetV4 = [2]netip.Addr{netip.MustParseAddr("1.0.0.0"), netip.MustParseAddr("223.255.255.255")}
+	internetV6 = [2]netip.Addr{netip.MustParseAddr("2000::"), netip.MustParseAddr("3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")}
+	// notOnTheInternetV4 is what a list may leave out of internetV4: the private ranges and
+	// the ones the kernel keeps for itself.
+	notOnTheInternetV4 = pfxs4("10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16")
+)
+
+func pfxs4(prefixes ...string) []netip.Prefix {
+	out := make([]netip.Prefix, len(prefixes))
+	for i, p := range prefixes {
+		out[i] = netip.MustParsePrefix(p)
+	}
+	return out
+}
+
+// addrBytes is an address as 16 bytes, which orders both families and can be stepped.
+type addrBytes [16]byte
+
+func (a addrBytes) next() addrBytes {
+	for i := len(a) - 1; i >= 0; i-- {
+		a[i]++
+		if a[i] != 0 {
+			break
+		}
+	}
+	return a
+}
+
+func (a addrBytes) prev() addrBytes {
+	for i := len(a) - 1; i >= 0; i-- {
+		a[i]--
+		if a[i] != 0xff {
+			break
+		}
+	}
+	return a
+}
+
+func (a addrBytes) less(b addrBytes) bool { return slices.Compare(a[:], b[:]) < 0 }
+
+// span is the addresses of a prefix, first to last.
+type span struct{ first, last addrBytes }
+
+func spanOf(p netip.Prefix) span {
+	first := addrBytes(p.Addr().As16())
+	last := first
+	bits := p.Bits()
+	if p.Addr().Is4() {
+		bits += 96
+	}
+	for i := bits; i < 128; i++ {
+		last[i/8] |= 0x80 >> (i % 8)
+	}
+	return span{first, last}
+}
+
+// merged returns the spans of the prefixes in order, with overlapping and adjacent ones joined.
+func merged(prefixes []netip.Prefix) []span {
+	spans := make([]span, len(prefixes))
+	for i, p := range prefixes {
+		spans[i] = spanOf(p)
+	}
+	slices.SortFunc(spans, func(a, b span) int { return slices.Compare(a.first[:], b.first[:]) })
+	var out []span
+	for _, s := range spans {
+		if n := len(out); n > 0 && !out[n-1].last.next().less(s.first) {
+			if out[n-1].last.less(s.last) {
+				out[n-1].last = s.last
+			}
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// coversAllBut reports whether prefixes cover every address from universe[0] to
+// universe[1] except those inside the allowed prefixes.
+func coversAllBut(prefixes []netip.Prefix, universe [2]netip.Addr, allowed []netip.Prefix) bool {
+	cover, allowedSpans := merged(prefixes), merged(allowed)
+	within := func(gap span) bool {
+		return slices.ContainsFunc(allowedSpans, func(a span) bool { return !gap.first.less(a.first) && !a.last.less(gap.last) })
+	}
+	cursor, end := addrBytes(universe[0].As16()), addrBytes(universe[1].As16())
+	for _, s := range cover {
+		if s.last.less(cursor) {
+			continue
+		}
+		if cursor.less(s.first) {
+			gap := span{cursor, s.first.prev()}
+			if end.less(gap.last) {
+				gap.last = end
+			}
+			if !within(gap) {
+				return false
+			}
+		}
+		if end.less(s.last) {
+			return true
+		}
+		cursor = s.last.next()
+	}
+	return end.less(cursor) || within(span{cursor, end})
+}
+
+// defaultHolder is the best RoleFull tunnel that sends the internet through
+// itself; live is already in precedence order.
 func defaultHolder(live []tunnel.Intent) tunnel.OwnerID {
 	for _, in := range live {
-		if in.Role == tunnel.RoleFull && carriesRoutes(in.State) && slices.ContainsFunc(in.Routes, func(p netip.Prefix) bool {
-			return p.IsValid() && isDefault(p.Masked())
-		}) {
+		if in.Role == tunnel.RoleFull && carriesRoutes(in.State) && redirectsAll(in.Routes) {
 			return in.Owner
 		}
 	}

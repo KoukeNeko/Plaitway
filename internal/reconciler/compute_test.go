@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"fmt"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
@@ -734,4 +735,105 @@ func cloneAll(in []tunnel.Intent) []tunnel.Intent {
 		out[i] = cloneIntent(x)
 	}
 	return out
+}
+
+// allExcept lists the prefixes that cover p except for what the excluded ones cover, the way
+// a full tunnel with the private ranges taken out announces it.
+func allExcept(p netip.Prefix, excluded []netip.Prefix) []netip.Prefix {
+	overlapping := false
+	for _, e := range excluded {
+		if e.Bits() <= p.Bits() && e.Contains(p.Addr()) {
+			return nil
+		}
+		overlapping = overlapping || p.Overlaps(e)
+	}
+	if !overlapping {
+		return []netip.Prefix{p}
+	}
+	low := netip.PrefixFrom(p.Addr(), p.Bits()+1)
+	var highBytes [4]byte
+	if p.Addr().Is4() {
+		highBytes = p.Addr().As4()
+		highBytes[p.Bits()/8] |= 0x80 >> (p.Bits() % 8)
+	}
+	high := netip.PrefixFrom(netip.AddrFrom4(highBytes), p.Bits()+1)
+	return append(allExcept(low, excluded), allExcept(high, excluded)...)
+}
+
+var privateV4 = pfxs("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")
+
+func TestRedirectsAll(t *testing.T) {
+	everythingButPrivate := allExcept(netip.MustParsePrefix("0.0.0.0/0"), privateV4)
+	if len(everythingButPrivate) < 20 {
+		t.Fatalf("the helper made %d prefixes: %v", len(everythingButPrivate), everythingButPrivate)
+	}
+	tests := []struct {
+		name   string
+		routes []netip.Prefix
+		want   bool
+	}{
+		{"a default route", pfxs("0.0.0.0/0"), true},
+		{"the halves of one", pfxs("0.0.0.0/1", "128.0.0.0/1"), true},
+		{"an IPv6 default route", pfxs("::/0"), true},
+		{"everything but the private ranges", everythingButPrivate, true},
+		{"everything but the private ranges, with other routes", append(pfxs("10.8.0.0/24"), everythingButPrivate...), true},
+		{"everything but the private ranges and a /8", allExcept(netip.MustParsePrefix("0.0.0.0/0"), append(pfxs("44.0.0.0/8"), privateV4...)), false},
+		{"everything but the private ranges and a /24", allExcept(netip.MustParsePrefix("0.0.0.0/0"), append(pfxs("44.1.2.0/24"), privateV4...)), false},
+		{"exactly the unicast space, in pieces", pfxs("1.0.0.0/8", "2.0.0.0/7", "4.0.0.0/6", "8.0.0.0/5", "16.0.0.0/4", "32.0.0.0/3", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/3"), true},
+		{"the unicast space without its first /8", pfxs("2.0.0.0/7", "4.0.0.0/6", "8.0.0.0/5", "16.0.0.0/4", "32.0.0.0/3", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/3"), false},
+		{"the unicast space without its last /8", pfxs("1.0.0.0/8", "2.0.0.0/7", "4.0.0.0/6", "8.0.0.0/5", "16.0.0.0/4", "32.0.0.0/3", "64.0.0.0/2", "128.0.0.0/2", "192.0.0.0/4", "208.0.0.0/5", "216.0.0.0/6", "220.0.0.0/7"), false},
+		{"the IPv6 global unicast range", pfxs("2000::/3"), true},
+		{"the IPv6 global unicast range, in pieces", pfxs("3000::/5", "2000::/4", "3800::/5"), true},
+		{"half of the IPv6 global unicast range", pfxs("2000::/4"), false},
+		{"a private network only", pfxs("10.0.0.0/8"), false},
+		{"a public network only", pfxs("203.0.113.0/24"), false},
+		{"no routes", nil, false},
+		{"an invalid prefix", []netip.Prefix{{}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := redirectsAll(tt.routes); got != tt.want {
+				t.Errorf("redirectsAll = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A full tunnel that leaves the private ranges out has no default route, and is still the
+// tunnel everything goes through: it gets the catch-all DNS, and a lower priority full tunnel
+// stands by.
+func TestAFullTunnelWithoutThePrivateRangesHoldsTheDefault(t *testing.T) {
+	routes := allExcept(netip.MustParsePrefix("0.0.0.0/0"), privateV4)
+	names := make([]string, len(routes))
+	for i, p := range routes {
+		names[i] = p.String()
+	}
+	wg := nameserver(up("wg", 1, "utun10", tunnel.RoleFull, names...), "1.1.1.1", ".")
+	ovpn := nameserver(up("ovpn", 2, "utun11", tunnel.RoleFull, "0.0.0.0/0"), "9.9.9.9", ".")
+
+	d := Compute([]tunnel.Intent{wg, ovpn}, homeNet())
+
+	states := make(map[tunnel.OwnerID]tunnel.RouteState)
+	for _, p := range d.DNS {
+		states[p.Owner] = p.State
+	}
+	// Its nameserver is reached through wg, which holds those prefixes, so the lower tunnel's
+	// catch-all is not installed either way.
+	if states["wg"] != tunnel.RoutePending || states["ovpn"] == tunnel.RoutePending || len(states) != 2 {
+		t.Errorf("DNS states = %v, want the catch-all for wg to install and none for ovpn", states)
+	}
+	for _, r := range d.Routes {
+		if r.Owner == "ovpn" && r.Kind == tunnel.RouteDefaultHalf && r.State != tunnel.RouteShadowed {
+			t.Errorf("a default half of the lower priority tunnel is %v, want standby: %v", r.State, r)
+		}
+	}
+	installed := 0
+	for _, r := range d.Routes {
+		if r.Owner == "wg" && r.Install {
+			installed++
+		}
+	}
+	if installed < 20 {
+		t.Errorf("only %d of the routes of the tunnel are installed", installed)
+	}
 }
