@@ -6,7 +6,9 @@ let package = Package(
     defaultLocalization: "en",
     // grpc-swift 2.x requires macOS 15.
     platforms: [.macOS("15.0")],
-    products: [],
+    products: [
+        .executable(name: "Plaitway", targets: ["PlaitwayMenuBar"]),
+    ],
     dependencies: [
         .package(url: "https://github.com/grpc/grpc-swift-2.git", exact: "2.4.3"),
         .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.10.0"),
@@ -34,9 +36,17 @@ let package = Package(
                 .product(name: "GRPCNIOTransportHTTP2Posix", package: "grpc-swift-nio-transport"),
             ]
         ),
+        .executableTarget(
+            name: "PlaitwayMenuBar",
+            dependencies: ["PlaitwayClient", "PlaitwayAPI"],
+            resources: [.process("Resources")],
+            // SwiftPM stamps the deployment target (15.0) as the SDK version, and macOS draws an app
+            // linked that way in the pre-Tahoe design. The binary still runs on macOS 15.
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-platform_version", "-Xlinker", "macos", "-Xlinker", "15.0", "-Xlinker", "27.0"])]
+        ),
         .testTarget(
             name: "PlaitwayTests",
-            dependencies: ["PlaitwayClient", "PlaitwayAPI"]
+            dependencies: ["PlaitwayClient", "PlaitwayAPI", "PlaitwayMenuBar"]
         ),
     ],
     swiftLanguageModes: [.v6]
