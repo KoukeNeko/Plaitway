@@ -1,0 +1,18 @@
+version: v2
+plugins:
+  # Go plugins come from the go.mod `tool` directive (pinned in go.mod/go.sum).
+  - local: [go, tool, protoc-gen-go]
+    out: .
+    opt: [module=github.com/KoukeNeko/Plaitway]
+  - local: [go, tool, protoc-gen-go-grpc]
+    out: .
+    opt: [module=github.com/KoukeNeko/Plaitway]
+  # Swift plugins are built from the versions pinned in macos/Package.resolved:
+  #   swift build -c release --package-path macos --product protoc-gen-swift
+  #   swift build -c release --package-path macos --product protoc-gen-grpc-swift-2
+  - local: macos/.build/release/protoc-gen-swift
+    out: macos/Sources/PlaitwayAPI
+    opt: [Visibility=Public, FileNaming=DropPath]
+  - local: macos/.build/release/protoc-gen-grpc-swift-2
+    out: macos/Sources/PlaitwayAPI
+    opt: [Visibility=Public, Server=false, Client=true, FileNaming=DropPath]

@@ -1,0 +1,7 @@
+/bin/
+/macos/.build/
+.DS_Store
+/build/
+/plaitwayd
+/plaitway
+/data/

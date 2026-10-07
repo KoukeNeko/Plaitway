@@ -1,0 +1,10 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # The spec fixes GetDaemonInfo -> DaemonInfo and SetProfileEnabled -> Profile.
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
