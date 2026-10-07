@@ -1,0 +1,41 @@
+# Name: ASUS Router
+client
+dev tun
+proto tcp-client
+remote vpn.example.net 1194
+float
+nobind
+sndbuf 0
+rcvbuf 0
+keepalive 10 30
+comp-lzo yes
+auth-user-pass
+auth-nocache
+auth SHA1
+cipher AES-128-CBC
+data-ciphers AES-128-CBC
+ignore-unknown-option cipher data-ciphers
+ignore-unknown-option block-outside-dns
+remote-cert-tls server
+pull-filter ignore redirect-gateway
+pull-filter ignore block-outside-dns
+pull-filter ignore dhcp-option
+route 192.168.1.0 255.255.255.0
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIUQ0ZBS0VDQVBFTUZPUlRFU1RJTkdPTkxZMA0GCSqGSIb3
+DQEBCwUAMBcxFTATBgNVBAMMDEZha2UgVGVzdCBDQTAeFw0yNjAxMDEwMDAwMDBa
+-----END CERTIFICATE-----
+</ca>
+<cert>
+-----BEGIN CERTIFICATE-----
+MIIDBjCCAe6gAwIBAgIUQ0xJRU5UQ0VSVEZPUlRFU1RJTkdPTkxZMA0GCSqGSIb3
+DQEBCwUAMBcxFTATBgNVBAMMDEZha2UgVGVzdCBDQTAeFw0yNjAxMDEwMDAwMDBa
+-----END CERTIFICATE-----
+</cert>
+<key>
+-----BEGIN PRIVATE KEY-----
+TUlJRXZRSUJBREFOQmdrcWhraUc5dzBCQVFFRkFBU0NCS2N3Z2dTakFnRUFBb0lC
+RkFLRUZBS0VGQUtFRkFLRUZBS0VGQUtFRkFLRUZBS0VGQUtFRkFLRUZBS0VGQUtF
+-----END PRIVATE KEY-----
+</key>

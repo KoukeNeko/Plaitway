@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("remote \"0\"\nroute 0")

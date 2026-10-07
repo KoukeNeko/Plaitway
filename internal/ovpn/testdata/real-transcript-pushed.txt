@@ -1,0 +1,59 @@
+>INFO:OpenVPN Management Interface Version 6 -- type 'help' for more info
+>HOLD:Waiting for hold release:0
+SUCCESS: real-time state notification set to ON
+SUCCESS: bytecount interval changed
+SUCCESS: real-time log notification set to ON
+SUCCESS: hold release succeeded
+>STATE:1760000000,TCP_CONNECT,,,,,,
+>STATE:1760000000,WAIT,,,,,,
+>STATE:1760000000,AUTH,,,,,,
+>UPDOWN:UP
+>UPDOWN:ENV,dev_type=tun
+>UPDOWN:ENV,dev=null
+>UPDOWN:ENV,tun_mtu=1500
+>UPDOWN:ENV,script_context=init
+>UPDOWN:ENV,route_ipv6_gateway_1=::
+>UPDOWN:ENV,route_ipv6_network_1=2001:db8:5::/48
+>UPDOWN:ENV,route_gateway_2=10.8.0.1
+>UPDOWN:ENV,route_netmask_2=255.255.0.0
+>UPDOWN:ENV,route_network_2=10.20.0.0
+>UPDOWN:ENV,route_gateway_1=10.8.0.1
+>UPDOWN:ENV,route_netmask_1=255.255.255.0
+>UPDOWN:ENV,route_network_1=192.168.1.0
+>UPDOWN:ENV,route_vpn_gateway=10.8.0.1
+>UPDOWN:ENV,route_net_gateway=192.168.51.1
+>UPDOWN:ENV,ifconfig_netmask=255.255.255.0
+>UPDOWN:ENV,ifconfig_local=10.8.0.2
+>UPDOWN:ENV,foreign_option_2=dhcp-option DOMAIN corp.example
+>UPDOWN:ENV,foreign_option_1=dhcp-option DNS 10.8.0.1
+>UPDOWN:ENV,route_redirect_gateway_ipv4=1
+>UPDOWN:ENV,common_name=plaitway-test-server
+>UPDOWN:ENV,trusted_port=1194
+>UPDOWN:ENV,trusted_ip=127.0.0.1
+>UPDOWN:ENV,untrusted_port=1194
+>UPDOWN:ENV,untrusted_ip=127.0.0.1
+>UPDOWN:ENV,tls_serial_hex_0=02
+>UPDOWN:ENV,tls_serial_0=2
+>UPDOWN:ENV,tls_digest_sha256_0=cd:9d:d2:9b:d6:44:f0:be:ad:41:65:f6:52:99:1d:92:33:ff:41:6b:58:22:b2:b5:c9:66:0a:b8:49:26:b3:18
+>UPDOWN:ENV,tls_digest_0=28:d7:f4:35:04:5c:99:64:d7:41:37:3b:71:fe:79:aa:42:15:51:6d
+>UPDOWN:ENV,tls_id_0=CN=plaitway-test-server
+>UPDOWN:ENV,X509_0_CN=plaitway-test-server
+>UPDOWN:ENV,tls_serial_hex_1=01
+>UPDOWN:ENV,tls_serial_1=1
+>UPDOWN:ENV,tls_digest_sha256_1=17:0f:02:79:8f:d9:b6:92:9b:2b:7e:99:25:69:a0:1b:c9:12:3b:78:62:45:df:49:48:4e:a1:42:87:1e:84:45
+>UPDOWN:ENV,tls_digest_1=08:3b:52:57:77:d5:c5:6d:c1:05:06:d6:fd:d0:2d:34:5b:9a:3e:e9
+>UPDOWN:ENV,tls_id_1=CN=Plaitway Test CA
+>UPDOWN:ENV,X509_1_CN=Plaitway Test CA
+>UPDOWN:ENV,config=/var/run/plaitway/ovpn-0123456789ab/profile.ovpn
+>UPDOWN:ENV,verb=4
+>UPDOWN:ENV,daemon=0
+>UPDOWN:ENV,daemon_log_redirect=0
+>UPDOWN:ENV,daemon_start_time=1760000000
+>UPDOWN:ENV,daemon_pid=4242
+>UPDOWN:ENV,remote_1=127.0.0.1
+>UPDOWN:ENV,remote_port_1=1194
+>UPDOWN:ENV,proto_1=tcp-client
+>UPDOWN:ENV,local_port_1=1194
+>UPDOWN:ENV,END
+>STATE:1760000000,CONNECTED,SUCCESS,10.8.0.2,127.0.0.1,1194,192.168.51.185,54321
+>BYTECOUNT:4350,4192
