@@ -63,6 +63,8 @@ final class ProfileEditor {
             show(stored)
             phase = .ready
         } catch {
+            // A read that was cancelled by leaving the page says nothing; the next visit reads again.
+            guard !Task.isCancelled else { return }
             // An edit in progress stays on screen; a failed first read says why.
             if phase != .ready { phase = .unavailable(userMessage(for: error)) }
         }
@@ -71,6 +73,8 @@ final class ProfileEditor {
     /// Shows the secrets, or hides them again with whatever the person typed in the meantime.
     func toggleSecrets() {
         guard phase == .ready else { return }
+        // A mark is a line of the text as it was shown, and showing or hiding a key block changes the lines.
+        diagnostic = nil
         if showsSecrets {
             mask = SecretMask(text: text, kind: kind)
             text = mask.displayText
@@ -86,6 +90,17 @@ final class ProfileEditor {
                 diagnostic = ConfigDiagnostic(line: nil, message: userMessage(for: error))
             }
         }
+    }
+
+    /// Hides the secrets again, with the edits made while they were shown. The editor outlives the
+    /// page, and the keys must not be on screen when the person comes back to it.
+    func hideSecrets() {
+        if showsSecrets { toggleSecrets() }
+    }
+
+    /// The profile connected again: it runs the text that is stored now.
+    func noteRestart() {
+        runsOldText = false
     }
 
     func revert() {

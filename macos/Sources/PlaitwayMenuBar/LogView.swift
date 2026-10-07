@@ -35,6 +35,7 @@ struct LogView: View {
     @State private var query = ""
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var isAtEnd = true
+    @FocusState private var isSearching: Bool
 
     var body: some View {
         let lines = visibleLines
@@ -69,6 +70,8 @@ struct LogView: View {
             }
         }
         .searchable(text: $query, placement: .toolbar, prompt: Text("Search Logs", bundle: .module))
+        .searchFocused($isSearching)
+        .onChange(of: model.searchRequest) { isSearching = true }
         .toolbar {
             ToolbarItem {
                 Picker(selection: $filter) {

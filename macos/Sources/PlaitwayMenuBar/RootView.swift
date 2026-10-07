@@ -29,19 +29,13 @@ struct RootView: View {
         } isTargeted: { isDropTargeted = $0 }
         .sheet(item: credentialPrompt) { prompt in
             CredentialSheet(prompt: prompt, profileName: model.profileName(prompt.profileID) ?? prompt.profileID)
+                // Another profile's prompt is a new sheet: its fields start empty.
+                .id(prompt.profileID)
         }
         .sheet(item: $model.importReport) { report in
             ImportReportSheet(report: report)
         }
-        .alert(
-            Text(verbatim: model.alert?.title ?? ""),
-            isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } }),
-            presenting: model.alert
-        ) { _ in
-            Button { } label: { Text("Close", bundle: .module) }
-        } message: { alert in
-            Text(verbatim: alert.message)
-        }
+        .modifier(AlertPresenter())
         .confirmationDialog(
             Text("Delete “\(deletionName)”?", bundle: .module),
             isPresented: Binding(get: { model.pendingDeletion != nil }, set: { if !$0 { model.pendingDeletion = nil } }),
@@ -78,6 +72,24 @@ struct RootView: View {
     /// The sheet is answered with its own buttons; a dismissal by the system is not a decision.
     private var credentialPrompt: Binding<CredentialPrompt?> {
         Binding(get: { model.store.credentialPrompts.first }, set: { _ in })
+    }
+}
+
+/// The alert for what a command did not manage. Every window that can start a command presents it:
+/// an alert nobody can see is no report.
+struct AlertPresenter: ViewModifier {
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.alert(
+            Text(verbatim: model.alert?.title ?? ""),
+            isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } }),
+            presenting: model.alert
+        ) { _ in
+            Button { } label: { Text("Close", bundle: .module) }
+        } message: { alert in
+            Text(verbatim: alert.message)
+        }
     }
 }
 

@@ -93,6 +93,8 @@ final class AppModel {
     var selection: SidebarItem?
     /// The page of a profile that is open; it stays when another profile is selected.
     var profileSection: ProfileSection = .overview
+    /// Counts Command-F: the log on screen moves the focus to its search field.
+    var searchRequest = 0
     /// The menu bar item is the user's to hide: here, in System Settings and by dragging it out.
     var showsMenuBarItem: Bool {
         didSet { UserDefaults.standard.set(showsMenuBarItem, forKey: Self.showsMenuBarItemKey) }
@@ -108,9 +110,11 @@ final class AppModel {
     @ObservationIgnored private var editors: [String: ProfileEditor] = [:]
     @ObservationIgnored private var settling: Task<Void, Never>?
     @ObservationIgnored private var polling: Task<Void, Never>?
+    @ObservationIgnored private var sampling: Task<Void, Never>?
     private static let showsMenuBarItemKey = "showsMenuBarItem"
     private static let settleDuration: Duration = .seconds(8)
     private static let pollInterval: Duration = .seconds(2)
+    private static let sampleInterval: Duration = .seconds(2)
     private static let logger = Logger(subsystem: "Plaitway", category: "AppModel")
 
     init(
@@ -165,6 +169,7 @@ final class AppModel {
     func start() {
         store.start()
         trackTraffic()
+        sampling = Task { await sampleTrafficWhileIdle() }
         polling = Task { await pollHelperStatus() }
     }
 
@@ -179,8 +184,18 @@ final class AppModel {
         traffic.record(profiles)
     }
 
+    /// The daemon reports a profile only when something about it changes: a tunnel that has gone
+    /// quiet sends nothing, and would keep its last rate and draw a line across the silence.
+    private func sampleTrafficWhileIdle() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: Self.sampleInterval)
+            traffic.record(store.profiles)
+        }
+    }
+
     func stop() async {
         polling?.cancel()
+        sampling?.cancel()
         settling?.cancel()
         await store.stop()
     }
@@ -195,6 +210,11 @@ final class AppModel {
         let editor = ProfileEditor(profileID: profile.id, kind: profile.kind)
         editors[profile.id] = editor
         return editor
+    }
+
+    /// Profile text was changed in an editor and not saved.
+    var hasUnsavedEdits: Bool {
+        editors.values.contains { $0.isDirty }
     }
 
     var selectedProfile: Profile? {
@@ -297,16 +317,23 @@ final class AppModel {
     /// Switches off every profile that is on. Returns whether all of them are off;
     /// a profile that stays on is reported.
     func disconnectAll() async -> Bool {
-        var allOff = true
-        for profile in switchedOnProfiles {
-            do {
-                try await store.setEnabled(false, profileID: profile.id)
-            } catch {
-                report(error, as: .connectFailed)
-                allOff = false
+        // Together: each stop can take seconds, and the app waits for the last of them to quit.
+        let stops = switchedOnProfiles.map(\.id).map { id in
+            Task { @MainActor () -> (any Error)? in
+                do {
+                    try await store.setEnabled(false, profileID: id)
+                    return nil
+                } catch {
+                    return error
+                }
             }
         }
-        return allOff
+        var failures: [any Error] = []
+        for stop in stops {
+            if let failure = await stop.value { failures.append(failure) }
+        }
+        for failure in failures { report(failure, as: .connectFailed) }
+        return failures.isEmpty
     }
 
     /// Imports the files in order and selects the last profile that was stored.

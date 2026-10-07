@@ -67,6 +67,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+        .modifier(AlertPresenter())
         .onAppear {
             model.installer.refresh()
             model.loginItem.refresh()

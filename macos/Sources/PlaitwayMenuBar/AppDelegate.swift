@@ -47,10 +47,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // The item can be dragged out of the menu bar with Command, or switched off in System
         // Settings; the setting in this app follows what the person did.
         statusItem.behavior = .removalAllowed
-        visibilityObservation = statusItem.observe(\.isVisible) { [weak self] item, _ in
-            let isVisible = item.isVisible
+        // The setting follows what the system says in both directions, and what the system
+        // remembered from the last run is what the setting starts as.
+        model.showsMenuBarItem = statusItem.isVisible
+        visibilityObservation = statusItem.observe(\.isVisible) { [weak self] _, _ in
             Task { @MainActor in
-                if let self, !isVisible, self.model.showsMenuBarItem { self.model.showsMenuBarItem = false }
+                guard let self else { return }
+                let isVisible = self.statusItem.isVisible
+                if self.model.showsMenuBarItem != isVisible { self.model.showsMenuBarItem = isVisible }
             }
         }
         // Logging out or shutting down must not wait for an answer to the quit prompt.
@@ -64,6 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// The helper keeps its profiles connected when the app is gone, which is not what
     /// everyone expects of Quit: with profiles switched on, the user chooses.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Profile text that was changed and not saved is lost with the app.
+        if !isPoweringOff, model.hasUnsavedEdits, !QuitPrompt.confirmDiscardingEdits() {
+            windows.show()
+            return .terminateCancel
+        }
         guard !isPoweringOff, !model.switchedOnProfiles.isEmpty else { return .terminateNow }
         switch QuitPrompt.ask() {
         case .quit:
@@ -96,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// The Dock icon is there while a window is open; its menu is the profiles, as in the menu bar.
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let dock = NSMenu()
+        dock.autoenablesItems = false
         populate(dock, with: MenuModel(setup: model.setup, profiles: model.store.profiles), includesWindowCommands: false)
         return dock
     }
@@ -253,6 +263,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         model.profileSection = ProfileSection.allCases[sender.tag]
     }
 
+    /// Command-F: the search field of a log, or the find bar of the editor.
+    @objc func findInPage() {
+        if model.selectedProfile != nil && model.profileSection == .configuration {
+            guard let editor = Self.configurationEditor(in: NSApp.keyWindow?.contentView) else { return }
+            editor.window?.makeFirstResponder(editor)
+            // The text view reads which find action it is from the tag of its sender.
+            let sender = NSMenuItem()
+            sender.tag = NSTextFinder.Action.showFindInterface.rawValue
+            editor.performTextFinderAction(sender)
+        } else {
+            model.searchRequest += 1
+        }
+    }
+
+    private static func configurationEditor(in view: NSView?) -> NSTextView? {
+        guard let view else { return nil }
+        if let text = view as? NSTextView, text.accessibilityIdentifier() == "configuration.editor" { return text }
+        for subview in view.subviews {
+            if let found = configurationEditor(in: subview) { return found }
+        }
+        return nil
+    }
+
     @objc func showDiagnostics() {
         windows.show()
         model.selection = .diagnostics
@@ -263,7 +296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        let hasProfile = model.selectedProfile != nil && model.setup.isUsable
+        // The Profile menu acts on what the main window shows: not on a profile that is selected
+        // in a window nobody is looking at.
+        let hasProfile = model.selectedProfile != nil && model.setup.isUsable && windows.isMainWindowKey
         switch item.action {
         case #selector(toggleSelectedProfile):
             let profile = model.selectedProfile
@@ -271,9 +306,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return hasProfile && profile?.state != .disconnecting
         case #selector(showProfileSection(_:)):
             item.state = model.selectedProfile != nil && ProfileSection.allCases.firstIndex(of: model.profileSection) == item.tag ? .on : .off
-            return model.setup.isUsable && !model.store.profiles.isEmpty
+            return model.setup.isUsable && !model.store.profiles.isEmpty && windows.isMainWindowKey
+        case #selector(findInPage):
+            guard windows.isMainWindowKey, model.setup.isUsable else { return false }
+            if model.selection == .diagnostics { return true }
+            return model.selectedProfile != nil && [.logs, .configuration].contains(model.profileSection)
         case #selector(deleteSelectedProfile):
-            return hasProfile
+            // Command-Delete also deletes to the start of a line in a text field.
+            return hasProfile && !(NSApp.keyWindow?.firstResponder is NSText)
         case #selector(moveSelectedProfileUp):
             return hasProfile && model.store.profiles.first?.id != model.selectedProfile?.id
         case #selector(moveSelectedProfileDown):
@@ -289,3 +329,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 }
+

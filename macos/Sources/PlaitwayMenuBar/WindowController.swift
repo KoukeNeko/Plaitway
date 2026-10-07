@@ -17,6 +17,8 @@ final class WindowController: NSObject, NSWindowDelegate {
 
     /// The management window is open.
     var isVisible: Bool { mainWindow?.isVisible ?? false }
+    /// The management window is the one that takes the keyboard.
+    var isMainWindowKey: Bool { mainWindow?.isKeyWindow ?? false }
 
     init(model: AppModel) {
         self.model = model
@@ -34,6 +36,7 @@ final class WindowController: NSObject, NSWindowDelegate {
 
     private func bringForward(_ window: NSWindow?) {
         NSApp.setActivationPolicy(.regular)
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
         // Since macOS 26 an activation from a status menu can leave the window behind the front

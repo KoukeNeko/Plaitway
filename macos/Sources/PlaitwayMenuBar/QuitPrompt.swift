@@ -25,4 +25,16 @@ enum QuitPrompt {
         default: return .cancel
         }
     }
+
+    /// Edits of profile text that were not saved go with the app. True when the person quits anyway.
+    static func confirmDiscardingEdits() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Quit with unsaved changes?", bundle: .module)
+        alert.informativeText = String(localized: "Changes to a profile's text are not saved.", bundle: .module)
+        alert.addButton(withTitle: String(localized: "Quit", bundle: .module))
+        let cancel = alert.addButton(withTitle: String(localized: "Cancel", bundle: .module))
+        cancel.keyEquivalent = "\u{1b}"
+        NSApp.activate()
+        return alert.runModal() == .alertFirstButtonReturn
+    }
 }

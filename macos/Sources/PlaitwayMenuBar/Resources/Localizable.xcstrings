@@ -191,6 +191,16 @@
         }
       }
     },
+    "Changes to a profile's text are not saved." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定檔內容的變更尚未儲存。"
+          }
+        }
+      }
+    },
     "Close" : {
       "localizations" : {
         "zh-Hant" : {
@@ -1297,6 +1307,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "結束 Plaitway？"
+          }
+        }
+      }
+    },
+    "Quit with unsaved changes?" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要在尚未儲存變更時結束嗎？"
           }
         }
       }

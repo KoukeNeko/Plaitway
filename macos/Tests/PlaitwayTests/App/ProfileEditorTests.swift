@@ -170,4 +170,65 @@ struct ProfileEditorTests {
             #expect(!editor.isDirty)
         }
     }
+
+    @Test func hidesTheSecretsAgainWhenThePageIsLeft() async throws {
+        try await withDaemon { _, store in
+            let (editor, _) = try await loadedEditor(store)
+            editor.toggleSecrets()
+            editor.text = editor.text.replacingOccurrences(of: "10.6.0.2/32", with: "10.6.0.8/32")
+
+            editor.hideSecrets()
+
+            #expect(!editor.showsSecrets)
+            #expect(!editor.text.contains(Self.privateKey))
+            #expect(editor.text.contains("10.6.0.8/32"), "the edit made while they were shown stays")
+            #expect(editor.isDirty)
+            // Nothing to hide: nothing happens.
+            let hidden = editor.text
+            editor.hideSecrets()
+            #expect(editor.text == hidden)
+        }
+    }
+
+    @Test func showingOrHidingTheSecretsClearsAMarkThatNamedALineOfTheOtherView() async throws {
+        try await withDaemon { _, store in
+            let id = try await store.importFixture("office.ovpn", Fixture.openVPN())
+            let editor = ProfileEditor(profileID: id, kind: .openvpn)
+            await editor.load(from: store)
+            editor.text += "# fake: reject\n"
+            #expect(try await !editor.save(to: store, reconnect: false, isOn: false))
+            #expect(editor.diagnostic != nil)
+
+            editor.toggleSecrets()
+
+            #expect(editor.diagnostic == nil, "the line it named is not the same line any more")
+        }
+    }
+
+    @Test func aProfileThatConnectsAgainRunsTheSavedText() async throws {
+        try await withDaemon { _, store in
+            let (editor, _) = try await loadedEditor(store)
+            editor.text += "# a note\n"
+            #expect(try await editor.save(to: store, reconnect: false, isOn: true))
+            #expect(editor.runsOldText)
+            editor.noteRestart()
+            #expect(!editor.runsOldText)
+        }
+    }
+
+    @Test func theModelKnowsOfEditsThatAreNotSaved() async throws {
+        try await withDaemon { _, store in
+            let model = AppModel(store: store, installer: DaemonInstaller(service: FakeDaemonService(.enabled)), loginItem: LoginItem(), appVersion: nil, isOverridden: false)
+            let id = try await store.importFixture("home.conf", Fixture.wireGuard())
+            let profile = try #require(store.profile(id))
+            #expect(!model.hasUnsavedEdits)
+            let editor = model.editor(for: profile)
+            await editor.load(from: store)
+            #expect(!model.hasUnsavedEdits, "reading the text is not an edit")
+            editor.text += "# unsaved\n"
+            #expect(model.hasUnsavedEdits)
+            editor.revert()
+            #expect(!model.hasUnsavedEdits)
+        }
+    }
 }

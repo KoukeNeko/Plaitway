@@ -21,6 +21,8 @@ final class LogTail {
     private(set) var entries: [Entry] = []
 
     @ObservationIgnored private var nextID = 0
+    /// The stream is new and its first line has not come: the lines shown are the old stream's.
+    @ObservationIgnored private var replacesEntries = false
 
     /// Lines kept; the daemon keeps 1000 itself, so this only bounds a long session.
     static let capacity = 2000
@@ -34,8 +36,9 @@ final class LogTail {
     /// restarts. A profile that no longer exists ends it.
     func run(store: ProfileStore, profileID: String) async {
         while !Task.isCancelled {
-            // A new stream starts with the buffered tail again.
-            entries = []
+            // A new stream starts with the buffered tail again: what is shown stays until its first
+            // line arrives, so that a helper restart does not empty the log for the seconds it takes.
+            replacesEntries = true
             do {
                 for try await line in store.logs(profileID: profileID) {
                     append(line)
@@ -48,6 +51,10 @@ final class LogTail {
     }
 
     func append(_ line: LogLine) {
+        if replacesEntries {
+            entries = []
+            replacesEntries = false
+        }
         entries.append(Entry(id: nextID, date: line.date, level: line.level, text: line.text))
         nextID += 1
         // Trim in batches so that a full buffer does not shift on every line.

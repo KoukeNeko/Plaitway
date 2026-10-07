@@ -32,8 +32,8 @@ enum MainMenu {
             item(String(localized: "Paste", bundle: .module), #selector(NSText.paste(_:)), "v"),
             item(String(localized: "Select All", bundle: .module), #selector(NSText.selectAll(_:)), "a"),
             .separator(),
-            // The editor's find bar, and the search field of the logs: whichever has the focus answers.
-            findItem(String(localized: "Find…", bundle: .module)),
+            // The search field of the logs, or the find bar of the editor, on the pages that have one.
+            item(String(localized: "Find…", bundle: .module), #selector(AppDelegate.findInPage), "f", target: target),
         ]))
         main.addItem(submenu(title: String(localized: "Profile", bundle: .module), items: [
             // The title follows the profile: Connect, or Disconnect when it is on.
@@ -64,12 +64,6 @@ enum MainMenu {
         main.addItem(window)
         NSApp.windowsMenu = window.submenu
         return main
-    }
-
-    private static func findItem(_ title: String) -> NSMenuItem {
-        let item = item(title, #selector(NSTextView.performTextFinderAction(_:)), "f")
-        item.tag = NSTextFinder.Action.showFindInterface.rawValue
-        return item
     }
 
     private static func submenu(title: String, items: [NSMenuItem]) -> NSMenuItem {

@@ -11,6 +11,8 @@ struct ConfigEditorView: NSViewRepresentable {
     let kind: ProfileKind
     /// A line of `text` (1-based) to mark as wrong.
     let markedLine: Int?
+    /// False while the text is being saved: what is typed then would be replaced by what comes back.
+    var isEditable = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -31,6 +33,8 @@ struct ConfigEditorView: NSViewRepresentable {
         textView.isAutomaticLinkDetectionEnabled = false
         textView.isAutomaticDataDetectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
+        // Profile text holds keys while they are shown: it goes nowhere else.
+        textView.writingToolsBehavior = .none
         textView.font = Coordinator.font
         textView.textColor = .labelColor
         textView.drawsBackground = false
@@ -60,6 +64,7 @@ struct ConfigEditorView: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.parent = self
         guard let textView = coordinator.textView else { return }
+        textView.isEditable = isEditable
         if textView.string != text {
             // The model changed the text (a revert, secrets shown or hidden): the typing history is of another text.
             let selection = textView.selectedRange()
@@ -68,6 +73,11 @@ struct ConfigEditorView: NSViewRepresentable {
             textView.undoManager?.removeAllActions()
         }
         coordinator.restyle()
+    }
+
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        // What was typed while keys were shown stays in the undo history of the view otherwise.
+        (scrollView.documentView as? NSTextView)?.undoManager?.removeAllActions()
     }
 
     @MainActor

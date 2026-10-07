@@ -62,6 +62,14 @@ private struct DNSList: View {
     let declared: [String]
 
     var body: some View {
+        ScrollView {
+            list
+        }
+        .frame(maxHeight: 200)
+        .accessibilityIdentifier("profile.dns")
+    }
+
+    private var list: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("DNS", bundle: .module).font(.headline)
             if rows.isEmpty {
@@ -83,6 +91,5 @@ private struct DNSList: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .accessibilityIdentifier("profile.dns")
     }
 }
