@@ -178,7 +178,9 @@ func TestStatusOfOneProfileShowsItsSettingsAndPublicKey(t *testing.T) {
 }
 
 // The daemon takes the settings as one message, so the command has to send what
-// it has read back with the change merged in.
+// it has read back with the change merged in, except for the priority: the
+// helper keeps the one it has when it gets none, and a reorder made since the
+// read must not be undone.
 func TestSetSendsTheMergedSettings(t *testing.T) {
 	t.Parallel()
 	current := &pb.ProfileSettings{AutoConnect: true, TunnelMode: pb.TunnelMode_TUNNEL_MODE_FULL, Priority: 3,
@@ -207,10 +209,10 @@ func TestSetSendsTheMergedSettings(t *testing.T) {
 		wantName *string
 		want     *pb.ProfileSettings // nil: no settings are sent
 	}{
-		"on-demand":     {[]string{"-on-demand=ethernet", "home"}, nil, &pb.ProfileSettings{AutoConnect: true, TunnelMode: pb.TunnelMode_TUNNEL_MODE_FULL, Priority: 3, ExcludePrivateIps: true, OnDemand: &pb.OnDemandRules{Ethernet: true}}},
-		"auto-connect":  {[]string{"-auto-connect=false", "home"}, nil, &pb.ProfileSettings{TunnelMode: pb.TunnelMode_TUNNEL_MODE_FULL, Priority: 3, ExcludePrivateIps: true, OnDemand: &pb.OnDemandRules{Wifi: true}}},
+		"on-demand":     {[]string{"-on-demand=ethernet", "home"}, nil, &pb.ProfileSettings{AutoConnect: true, TunnelMode: pb.TunnelMode_TUNNEL_MODE_FULL, ExcludePrivateIps: true, OnDemand: &pb.OnDemandRules{Ethernet: true}}},
+		"auto-connect":  {[]string{"-auto-connect=false", "home"}, nil, &pb.ProfileSettings{TunnelMode: pb.TunnelMode_TUNNEL_MODE_FULL, ExcludePrivateIps: true, OnDemand: &pb.OnDemandRules{Wifi: true}}},
 		"name only":     {[]string{"-name", "office", "home"}, proto.String("office"), nil},
-		"name and mode": {[]string{"-name=office", "-tunnel-mode=auto", "home"}, proto.String("office"), &pb.ProfileSettings{AutoConnect: true, TunnelMode: pb.TunnelMode_TUNNEL_MODE_AUTO, Priority: 3, ExcludePrivateIps: true, OnDemand: &pb.OnDemandRules{Wifi: true}}},
+		"name and mode": {[]string{"-name=office", "-tunnel-mode=auto", "home"}, proto.String("office"), &pb.ProfileSettings{AutoConnect: true, TunnelMode: pb.TunnelMode_TUNNEL_MODE_AUTO, ExcludePrivateIps: true, OnDemand: &pb.OnDemandRules{Wifi: true}}},
 	} {
 		mu.Lock()
 		requests = nil

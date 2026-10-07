@@ -181,6 +181,10 @@ func TestMaskSecrets(t *testing.T) {
 			"-----BEGIN RSA PRIVATE KEY-----\nA\n-----END RSA PRIVATE KEY-----\n-----BEGIN ENCRYPTED PRIVATE KEY-----\nB\n-----END ENCRYPTED PRIVATE KEY-----\n-----BEGIN OpenVPN Static key V1-----\nC\n-----END OpenVPN Static key V1-----\n",
 			"-----BEGIN RSA PRIVATE KEY-----\n[hidden]\n-----END RSA PRIVATE KEY-----\n-----BEGIN ENCRYPTED PRIVATE KEY-----\n[hidden]\n-----END ENCRYPTED PRIVATE KEY-----\n-----BEGIN OpenVPN Static key V1-----\n[hidden]\n-----END OpenVPN Static key V1-----\n",
 		},
+		"pem tls-crypt-v2 client key outside a block": {
+			"<cert>\n-----BEGIN OpenVPN tls-crypt-v2 client key-----\nSECRET\n-----END OpenVPN tls-crypt-v2 client key-----\n</cert>\n",
+			"<cert>\n-----BEGIN OpenVPN tls-crypt-v2 client key-----\n[hidden]\n-----END OpenVPN tls-crypt-v2 client key-----\n</cert>\n",
+		},
 		"pem public key": {"-----BEGIN PUBLIC KEY-----\nPUB\n-----END PUBLIC KEY-----\n", "-----BEGIN PUBLIC KEY-----\nPUB\n-----END PUBLIC KEY-----\n"},
 		"two blocks":     {"<key>\nA\n</key>\n<tls-auth>\nB\n</tls-auth>\n", "<key>\n[hidden]\n</key>\n<tls-auth>\n[hidden]\n</tls-auth>\n"},
 	}
@@ -711,5 +715,114 @@ func TestHelpListsTheEditingCommands(t *testing.T) {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("help lacks %q:\n%s", want, r.stdout)
 		}
+	}
+}
+
+// The whole text is sent, so a profile that somebody else saved while the editor was open would be
+// replaced without a word.
+func TestEditAsksBeforeReplacingATextThatChangedMeanwhile(t *testing.T) {
+	t.Parallel()
+	const stored, changed, edited = "client\nremote a 1\n", "client\nremote b 2\n", "client\nremote c 3\n"
+	newDaemon := func() (string, *[]string) {
+		var (
+			mu    sync.Mutex
+			reads int
+			sent  []string
+		)
+		socket := (&scripted{
+			list: func() ([]*pb.Profile, error) {
+				return []*pb.Profile{profileOf("ID", "home", pb.ProfileState_PROFILE_STATE_DISCONNECTED)}, nil
+			},
+			getContent: func(*pb.GetProfileContentRequest) (*pb.GetProfileContentResponse, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				reads++
+				// The first read is the text the editor starts from; later ones find another.
+				if reads == 1 {
+					return &pb.GetProfileContentResponse{Content: []byte(stored)}, nil
+				}
+				return &pb.GetProfileContentResponse{Content: []byte(changed)}, nil
+			},
+			updateContent: func(req *pb.UpdateProfileContentRequest) (*pb.ImportProfileResponse, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				sent = append(sent, string(req.Content))
+				return &pb.ImportProfileResponse{Profile: profileOf("ID", "home", pb.ProfileState_PROFILE_STATE_DISCONNECTED)}, nil
+			},
+		}).serve(t)
+		return socket, &sent
+	}
+
+	t.Run("no replaces nothing", func(t *testing.T) {
+		t.Parallel()
+		socket, sent := newDaemon()
+		editor := newFakeEditor(t, edited)
+		var asked []string
+		r := runAt(t, socket, "", tweaks(withEditor(editor.command), answering(&asked, "n")), "edit", "home")
+		if r.code != exitFailure || !strings.HasSuffix(r.stderr, "plaitway: changes discarded\n") || len(*sent) != 0 {
+			t.Errorf("edit: %+v, sent %q", r, *sent)
+		}
+		if len(asked) != 1 || !strings.HasPrefix(asked[0], "The profile changed while you were editing it.") {
+			t.Errorf("asked %q", asked)
+		}
+	})
+	t.Run("yes replaces it", func(t *testing.T) {
+		t.Parallel()
+		socket, sent := newDaemon()
+		editor := newFakeEditor(t, edited)
+		var asked []string
+		r := runAt(t, socket, "", tweaks(withEditor(editor.command), answering(&asked, "y")), "edit", "home")
+		if r.code != 0 || len(*sent) != 1 || (*sent)[0] != edited {
+			t.Errorf("edit: %+v, sent %q", r, *sent)
+		}
+	})
+	t.Run("without a terminal nothing is replaced", func(t *testing.T) {
+		t.Parallel()
+		socket, sent := newDaemon()
+		editor := newFakeEditor(t, edited)
+		r := runAt(t, socket, "", withEditor(editor.command), "edit", "home")
+		if r.code != exitFailure || len(*sent) != 0 {
+			t.Errorf("edit: %+v, sent %q", r, *sent)
+		}
+	})
+}
+
+// A failure that is not a refusal of the text (the helper restarting, a deadline) must not throw
+// the edit away with the temporary file.
+func TestEditKeepsTheEditWhenTheHelperFailsToSaveIt(t *testing.T) {
+	t.Parallel()
+	const stored, edited = "client\nremote a 1\n", "client\nremote c 3\n"
+	var (
+		mu    sync.Mutex
+		tries int
+		sent  []string
+	)
+	socket := (&scripted{
+		list: func() ([]*pb.Profile, error) {
+			return []*pb.Profile{profileOf("ID", "home", pb.ProfileState_PROFILE_STATE_DISCONNECTED)}, nil
+		},
+		getContent: func(*pb.GetProfileContentRequest) (*pb.GetProfileContentResponse, error) {
+			return &pb.GetProfileContentResponse{Content: []byte(stored)}, nil
+		},
+		updateContent: func(req *pb.UpdateProfileContentRequest) (*pb.ImportProfileResponse, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			tries++
+			sent = append(sent, string(req.Content))
+			if tries == 1 {
+				return nil, status.Error(codes.Unavailable, "the helper is restarting")
+			}
+			return &pb.ImportProfileResponse{Profile: profileOf("ID", "home", pb.ProfileState_PROFILE_STATE_DISCONNECTED)}, nil
+		},
+	}).serve(t)
+	editor := newFakeEditor(t, edited)
+	var asked []string
+	r := runAt(t, socket, "", tweaks(withEditor(editor.command), answering(&asked, "")), "edit", "home")
+	if r.code != 0 || !strings.Contains(r.stderr, "not saved:") || len(sent) != 2 || sent[0] != edited || sent[1] != edited {
+		t.Errorf("edit: %+v, sent %q", r, sent)
+	}
+	// The second round starts from the person's text, which is still in the file.
+	if editor.runs(t) != 2 || editor.saw(t, 2) != edited {
+		t.Errorf("%d editor runs; the second was given %q", editor.runs(t), editor.saw(t, 2))
 	}
 }

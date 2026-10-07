@@ -73,6 +73,9 @@ func (a *app) set(ctx context.Context, args []string) error {
 		settings.OnDemand = rules
 	}
 	if changesSettings {
+		// Zero keeps the priority the helper has now: the settings above were read a moment ago,
+		// and a reorder in the app since would be undone by sending the old one back.
+		settings.Priority = 0
 		req.Settings = settings
 	}
 

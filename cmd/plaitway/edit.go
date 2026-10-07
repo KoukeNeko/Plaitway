@@ -110,7 +110,9 @@ func secretBlockEnd(line string) (closing string, ok bool) {
 	}
 	// A key may also be in PEM form inside a block that is not secret as a whole.
 	label, found := strings.CutPrefix(strings.ToLower(strings.TrimSpace(line)), "-----begin ")
-	if found && (strings.HasSuffix(label, "private key-----") || strings.Contains(label, "static key")) {
+	// The same labels the app's SecretMask hides: a private key of any kind, and anything OpenVPN
+	// itself writes (static keys, tls-crypt-v2 client keys).
+	if found && (strings.Contains(label, "private key") || strings.HasPrefix(label, "openvpn")) {
 		return "-----end " + label, true
 	}
 	return "", false
@@ -191,6 +193,7 @@ func (a *app) edit(ctx context.Context, args []string) (err error) {
 		// What the daemon refuses, and a file that cannot be read back as
 		// text, leave the edit in the file for another round.
 		var rejected string
+		failed := false
 		edited, readErr := readText(path, profile.MaxContentSize)
 		switch {
 		case readErr != nil:
@@ -199,18 +202,43 @@ func (a *app) edit(ctx context.Context, args []string) (err error) {
 			fmt.Fprintf(a.stdout, "%s: unchanged\n", clean(p.Name))
 			return nil
 		default:
-			resp, reason, err := c.updateContent(ctx, p.Id, edited, *reconnect)
+			// Somebody else may have saved the profile meanwhile (the app, another edit): the
+			// whole text is sent, so theirs would be lost without a word.
+			current, err := c.content(ctx, p.Id)
 			if err != nil {
 				return err
 			}
-			if reason == "" {
+			if !bytes.Equal(current, original) {
+				replace, err := a.confirm(ctx, "The profile changed while you were editing it. Replace it with your text? [y/N] ")
+				if err != nil {
+					return err
+				}
+				if !replace {
+					return errors.New("changes discarded")
+				}
+				original = current
+			}
+			resp, reason, err := c.updateContent(ctx, p.Id, edited, *reconnect)
+			if err != nil && (ctx.Err() != nil || errors.Is(err, errInterrupted)) {
+				return err
+			}
+			if err != nil {
+				// The helper may be restarting, or may have saved the text already: the edit is
+				// kept in the file for another round rather than lost with the error.
+				rejected, failed = err.Error(), true
+			} else if reason == "" {
 				a.printUpdated(resp, *reconnect)
 				return nil
+			} else {
+				rejected = reason
 			}
-			rejected = reason
 		}
 
-		fmt.Fprintf(a.stderr, "rejected: %s\n", clean(rejected))
+		if failed {
+			fmt.Fprintf(a.stderr, "not saved: %s\n", clean(rejected))
+		} else {
+			fmt.Fprintf(a.stderr, "rejected: %s\n", clean(rejected))
+		}
 		again, err := a.askEditAgain(ctx)
 		if err != nil {
 			return err
@@ -280,6 +308,28 @@ func (a *app) printUpdated(resp *pb.ImportProfileResponse, reconnect bool) {
 		line += " (applies on the next connection)"
 	}
 	fmt.Fprintln(a.stdout, line)
+}
+
+// confirm asks a yes or no question, to which nothing and no terminal mean no.
+func (a *app) confirm(ctx context.Context, question string) (bool, error) {
+	if a.prompt == nil {
+		return false, nil
+	}
+	for {
+		answer, err := a.prompt(ctx, question, false)
+		switch {
+		case errors.Is(err, io.EOF):
+			return false, nil
+		case err != nil:
+			return false, err
+		}
+		switch strings.ToLower(strings.TrimSpace(answer)) {
+		case "y", "yes":
+			return true, nil
+		case "", "n", "no":
+			return false, nil
+		}
+	}
 }
 
 // askEditAgain asks whether to edit the refused text again. Without a terminal
