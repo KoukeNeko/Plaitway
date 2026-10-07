@@ -220,6 +220,23 @@ func TestPlan(t *testing.T) {
 			wantRole:       tunnel.RoleSplit,
 		},
 		{
+			// Written as two halves it is the same default route: a split tunnel drops it, and the
+			// exclusion must not make a full tunnel of what is left.
+			name:           "split mode drops the halves of a default route, with or without the exclusion",
+			profile:        head + peer + "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1, 203.0.113.0/24\n",
+			mode:           tunnel.ModeSplit,
+			excludePrivate: true,
+			wantRoutes:     pfx("203.0.113.0/24"),
+			wantRole:       tunnel.RoleSplit,
+		},
+		{
+			name:       "split mode without the exclusion drops them too",
+			profile:    head + peer + "0.0.0.0/1, 128.0.0.0/1, 203.0.113.0/24\n",
+			mode:       tunnel.ModeSplit,
+			wantRoutes: pfx("203.0.113.0/24"),
+			wantRole:   tunnel.RoleSplit,
+		},
+		{
 			name:           "split mode with only a default route has nothing to warn about",
 			profile:        head + peer + "0.0.0.0/0\n",
 			mode:           tunnel.ModeSplit,

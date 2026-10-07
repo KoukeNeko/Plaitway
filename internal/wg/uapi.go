@@ -33,7 +33,7 @@ func (p *profile) uapiConfig(endpoints []netip.AddrPort) string {
 		b.WriteString("replace_allowed_ips=true\n")
 		allowed := peer.allowedIPs
 		if p.excludePrivate {
-			allowed = p.withoutPrivate(allowed)
+			allowed = p.withoutPrivate(allowed, i)
 		}
 		for _, prefix := range allowed {
 			fmt.Fprintf(&b, "allowed_ip=%s\n", prefix)

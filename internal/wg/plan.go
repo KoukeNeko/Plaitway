@@ -34,7 +34,9 @@ func (p *profile) plan(mode tunnel.Mode) plan {
 
 	switch mode {
 	case tunnel.ModeSplit:
-		pl.routes = slices.DeleteFunc(pl.routes, isDefaultRoute)
+		// The halves of a default route go too: the Reconciler drops them for a split tunnel,
+		// and the exclusion below would otherwise turn them into prefixes that stay.
+		pl.routes = slices.DeleteFunc(pl.routes, func(r netip.Prefix) bool { return isDefaultRoute(r) || isDefaultHalf(r) })
 	case tunnel.ModeFull:
 		// Everything sent into the tunnel has to be something the peers accept,
 		// so a family is only redirected when AllowedIPs already cover all of it.
@@ -60,7 +62,7 @@ func (p *profile) plan(mode tunnel.Mode) plan {
 	// default route is now a list of prefixes. And Split mode has already
 	// dropped the default routes, so they do not come back as prefixes.
 	if p.excludePrivate && len(pl.routes) > 0 {
-		pl.routes = p.withoutPrivate(pl.routes)
+		pl.routes = p.withoutPrivate(pl.routes, -1)
 		if len(pl.routes) == 0 {
 			pl.warnings = append(pl.warnings, "No route left after excluding private ranges")
 		}

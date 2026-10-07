@@ -111,6 +111,26 @@ AllowedIPs = 203.0.113.0/24
 				"public_key=" + hexKey(2) + "\npersistent_keepalive_interval=0\nreplace_allowed_ips=true\n" + allowedIPLines(mergePrefixes(slices.Concat(publicV4, pfx("10.6.0.1/32")))) +
 				"public_key=" + hexKey(3) + "\npersistent_keepalive_interval=0\nreplace_allowed_ips=true\nallowed_ip=203.0.113.0/24\n",
 		},
+		{
+			// Both peers allow the host, and wireguard-go gives it to the one it reads last: it has to be
+			// the one that held it before, the peer with the longest prefix.
+			name: "a DNS server is kept for the one peer that held it",
+			profile: fill(`[Interface]
+PrivateKey = KEYA
+DNS = 10.0.0.1
+[Peer]
+PublicKey = KEYB
+AllowedIPs = 10.0.0.0/8
+[Peer]
+PublicKey = KEYC
+AllowedIPs = 0.0.0.0/0
+`),
+			excludePrivate: true,
+			endpoints:      []netip.AddrPort{{}, {}},
+			want: "private_key=" + hexKey(1) + "\nreplace_peers=true\n" +
+				"public_key=" + hexKey(2) + "\npersistent_keepalive_interval=0\nreplace_allowed_ips=true\nallowed_ip=10.0.0.1/32\n" +
+				"public_key=" + hexKey(3) + "\npersistent_keepalive_interval=0\nreplace_allowed_ips=true\n" + allowedIPLines(publicV4),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

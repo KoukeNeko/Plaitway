@@ -387,3 +387,14 @@ func (p *profile) publicKey() (string, error) {
 }
 
 func isDefaultRoute(p netip.Prefix) bool { return p.Bits() == 0 }
+
+// isDefaultHalf is one of the two halves a default route is often written as:
+// 0.0.0.0/1 and 128.0.0.0/1, or ::/1 and 8000::/1.
+func isDefaultHalf(p netip.Prefix) bool {
+	return p.Bits() == 1 && slices.Contains(defaultHalves, p.Masked())
+}
+
+var defaultHalves = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/1"), netip.MustParsePrefix("128.0.0.0/1"),
+	netip.MustParsePrefix("::/1"), netip.MustParsePrefix("8000::/1"),
+}
