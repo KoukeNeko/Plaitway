@@ -1081,8 +1081,12 @@ func TestEngineWaitsOutOpenVPNsPauseAndSaysWhyItCannotConnect(t *testing.T) {
 	})
 	h.start()
 
-	stuck := h.waitFor("the reason", func(s tunnel.Status) bool { return s.Err != "" })
-	if stuck.State != tunnel.StateConnecting || stuck.Err != "cannot reach 192.0.2.1:1194: connection refused" {
+	// On a busy machine the grace can end before the first refusal has been logged, and the
+	// status first says that the server does not answer: the concrete reason follows from the
+	// next attempt, and is the one this test is about.
+	const reason = "cannot reach 192.0.2.1:1194: connection refused"
+	stuck := h.waitFor("the reason", func(s tunnel.Status) bool { return s.Err == reason })
+	if stuck.State != tunnel.StateConnecting {
 		t.Errorf("status = %+v, want Connecting with the reason", stuck)
 	}
 	up := h.waitFor("Up", h.stateIs(tunnel.StateUp))
