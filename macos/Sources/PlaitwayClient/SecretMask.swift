@@ -151,6 +151,9 @@ public struct SecretMask: Sendable {
         var found: [Range<String.Index>] = []
         // The block whose lines are verbatim text and not directives.
         var verbatimBlock: String?
+        // Labels of PEM blocks that have no END line after the last place that was looked: a
+        // text of many BEGIN lines and no END would otherwise be searched to its end for each.
+        var withoutFooter: Set<String> = []
         var index = 0
         while index < lines.count {
             let line = lines[index]
@@ -171,9 +174,9 @@ public struct SecretMask: Sendable {
                 } else if tag != "connection" {
                     verbatimBlock = tag
                 }
-            } else if verbatimBlock == nil, readsWireGuard, let value = wireGuardSecret(in: line, utf8) {
+            } else if verbatimBlock == nil, readsWireGuard, let value = wireGuardSecret(in: line, text) {
                 found.append(value)
-            } else if let (range, last) = privateKeyPEM(at: index, lines: lines, utf8) {
+            } else if let (range, last) = privateKeyPEM(at: index, lines: lines, utf8, withoutFooter: &withoutFooter) {
                 found.append(range)
                 next = last + 1
             }
@@ -183,31 +186,39 @@ public struct SecretMask: Sendable {
     }
 
     /// The value of a `PrivateKey` or `PresharedKey` line. A commented-out key
-    /// is as secret as a live one.
-    private static func wireGuardSecret(in line: Range<String.Index>, _ utf8: String.UTF8View) -> Range<String.Index>? {
+    /// is as secret as a live one. The daemon trims every part of the line with
+    /// Go's `strings.TrimSpace`, which takes in the no-break space, the ideographic
+    /// space and the other Unicode white space, so this reads scalars and not bytes: a
+    /// key behind a no-break space is a key the daemon accepts.
+    private static func wireGuardSecret(in line: Range<String.Index>, _ text: String) -> Range<String.Index>? {
+        let scalars = text.unicodeScalars
+        func isBlank(_ scalar: Unicode.Scalar) -> Bool { scalar.properties.isWhitespace }
         var cursor = line.lowerBound
-        while cursor < line.upperBound, String.UTF8View.isBlank(utf8[cursor]) || utf8[cursor] == UInt8(ascii: "#") {
-            cursor = utf8.index(after: cursor)
+        while cursor < line.upperBound, isBlank(scalars[cursor]) || scalars[cursor] == "#" {
+            cursor = scalars.index(after: cursor)
         }
         var nameEnd = cursor
-        while nameEnd < line.upperBound, utf8[nameEnd] != UInt8(ascii: "="), !String.UTF8View.isBlank(utf8[nameEnd]) {
-            nameEnd = utf8.index(after: nameEnd)
+        while nameEnd < line.upperBound, scalars[nameEnd] != "=", !isBlank(scalars[nameEnd]) {
+            nameEnd = scalars.index(after: nameEnd)
         }
-        let name = utf8.string(cursor..<nameEnd).lowercased()
+        let name = String(scalars[cursor..<nameEnd]).lowercased()
         guard name == "privatekey" || name == "presharedkey" else { return nil }
         var equals = nameEnd
-        while equals < line.upperBound, String.UTF8View.isBlank(utf8[equals]) { equals = utf8.index(after: equals) }
-        guard equals < line.upperBound, utf8[equals] == UInt8(ascii: "=") else { return nil }
-        let valueStart = utf8.index(after: equals)
-        let valueEnd = utf8[valueStart..<line.upperBound].firstIndex(of: UInt8(ascii: "#")) ?? line.upperBound
-        let value = utf8.trimmed(valueStart..<valueEnd)
-        return value.isEmpty ? nil : value
+        while equals < line.upperBound, isBlank(scalars[equals]) { equals = scalars.index(after: equals) }
+        guard equals < line.upperBound, scalars[equals] == "=" else { return nil }
+        let valueStart = scalars.index(after: equals)
+        let valueEnd = scalars[valueStart..<line.upperBound].firstIndex(of: "#") ?? line.upperBound
+        var first = valueStart
+        var last = valueEnd
+        while first < last, isBlank(scalars[first]) { first = scalars.index(after: first) }
+        while first < last, isBlank(scalars[scalars.index(before: last)]) { last = scalars.index(before: last) }
+        return first < last ? first..<last : nil
     }
 
     /// A PEM private key or an OpenVPN static key that starts on line `first`:
     /// from its BEGIN line to its END line. Without an END line it is not one.
     private static func privateKeyPEM(
-        at first: Int, lines: [Range<String.Index>], _ utf8: String.UTF8View
+        at first: Int, lines: [Range<String.Index>], _ utf8: String.UTF8View, withoutFooter: inout Set<String>
     ) -> (range: Range<String.Index>, last: Int)? {
         let begin = utf8.trimmed(lines[first])
         guard utf8[begin].starts(with: "-----BEGIN ".utf8) else { return nil }
@@ -216,8 +227,13 @@ public struct SecretMask: Sendable {
         let label = header.dropFirst("-----BEGIN ".count).dropLast("-----".count)
         let upperLabel = label.uppercased()
         guard upperLabel.contains("PRIVATE KEY") || upperLabel.hasPrefix("OPENVPN") else { return nil }
-        let footer = "-----END \(label)-----"
-        guard let last = lines[(first + 1)...].firstIndex(where: { utf8.string(utf8.trimmed($0)) == footer }) else { return nil }
+        // No footer was found after an earlier BEGIN of this label, so there is none after this one.
+        guard !withoutFooter.contains(String(label)) else { return nil }
+        let footer = Array("-----END \(label)-----".utf8)
+        guard let last = lines[(first + 1)...].firstIndex(where: { utf8[utf8.trimmed($0)].elementsEqual(footer) }) else {
+            withoutFooter.insert(String(label))
+            return nil
+        }
         return (begin.lowerBound..<utf8.trimmed(lines[last]).upperBound, last)
     }
 }

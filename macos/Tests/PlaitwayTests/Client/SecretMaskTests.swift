@@ -57,6 +57,24 @@ struct SecretMaskTests {
         #expect(try restored(mask, mask.displayText) == text.replacingOccurrences(of: "§", with: privateKey))
     }
 
+    /// The daemon trims a line with Go's strings.TrimSpace, which takes in the no-break space, the
+    /// ideographic space and the rest of Unicode white space: a key behind one of them is accepted.
+    @Test(arguments: ["\u{A0}", "\u{3000}", "\u{2003}", "\u{85}", "\u{B}", "\u{C}", "\u{202F}", "\u{1680}"])
+    func aKeyBehindUnicodeWhiteSpaceIsHidden(space: String) throws {
+        for name in ["PrivateKey", "PresharedKey"] {
+            for text in [
+                "[Interface]\n\(space)\(name) = \(privateKey)\n",
+                "[Interface]\n\(name)\(space)=\(space)\(privateKey)\(space)\n",
+                "[Interface]\n#\(space)\(name)\(space)=\(privateKey)\n",
+            ] {
+                let mask = wireGuard(text)
+                #expect(!mask.displayText.contains(privateKey), "\(name) behind U+\(String(space.unicodeScalars.first!.value, radix: 16)) is shown: \(mask.displayText)")
+                #expect(mask.displayText.contains("‹secret 1›"))
+                #expect(try restored(mask, mask.displayText) == text)
+            }
+        }
+    }
+
     @Test func aCommentAfterTheKeyStaysVisible() {
         let mask = wireGuard("PrivateKey = \(privateKey) # laptop key\n")
         #expect(mask.displayText == "PrivateKey = ‹secret 1› # laptop key\n")
@@ -518,5 +536,27 @@ struct SecretMaskPropertyTests {
 
     private static func number(of text: String, _ range: Range<String.Index>) -> Int {
         Int(text[range].dropFirst("‹secret ".count).dropLast())!
+    }
+}
+
+struct SecretMaskCostTests {
+    /// A hostile profile is accepted by the daemon with any body in an allowed block: many BEGIN
+    /// lines and no END line must not be searched to the end of the text once for each.
+    @Test func manyBeginLinesWithoutAnEndAreScannedOnce() {
+        let lines = String(repeating: "-----BEGIN PRIVATE KEY-----\n", count: 30_000)
+        let text = "client\n<ca>\n" + lines + "</ca>\n"
+        let start = ContinuousClock.now
+        let mask = openVPN(text)
+        let elapsed = ContinuousClock.now - start
+        #expect(mask.displayText == text, "no key was found: nothing is hidden")
+        #expect(elapsed < .seconds(3), "took \(elapsed)")
+    }
+
+    @Test func aKeyAfterManyUnfinishedOnesOfAnotherLabelIsStillHidden() throws {
+        let unfinished = String(repeating: "-----BEGIN RSA PRIVATE KEY-----\n", count: 50)
+        let text = "<ca>\n" + unfinished + "-----BEGIN PRIVATE KEY-----\nSECRETBODY\n-----END PRIVATE KEY-----\n</ca>\n"
+        let mask = openVPN(text)
+        #expect(!mask.displayText.contains("SECRETBODY"))
+        #expect(try restored(mask, mask.displayText) == text)
     }
 }

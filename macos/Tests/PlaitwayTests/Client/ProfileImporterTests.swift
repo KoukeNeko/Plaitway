@@ -28,6 +28,20 @@ struct ProfileImporterTests {
         return result
     }
 
+    /// A profile is untrusted: the same file named on every line of 1 MiB would be read and copied
+    /// for each, and the size was only checked when the result was done.
+    @Test func stopsInliningAsSoonAsTheResultIsTooLarge() throws {
+        let large = "-----BEGIN CERTIFICATE-----\n" + String(repeating: "A", count: 200_000) + "\n-----END CERTIFICATE-----\n"
+        let profile = "client\n" + String(repeating: "ca big.pem\n", count: 100_000)
+        try withDirectory(["big.pem": large]) { directory in
+            let start = ContinuousClock.now
+            #expect(throws: ProfileImporter.Failure.self) {
+                _ = try ProfileImporter.inlineReferencedFiles(in: profile, relativeTo: directory)
+            }
+            #expect(ContinuousClock.now - start < .seconds(5))
+        }
+    }
+
     @Test func inlinesCaCertAndKeyFiles() throws {
         let result = try inline(
             "client\nremote vpn.example.net 1194\nca ca.crt\ncert client.crt\nkey keys/client.key\nverb 3\n",

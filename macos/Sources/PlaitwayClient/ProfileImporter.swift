@@ -69,36 +69,44 @@ public enum ProfileImporter {
         var hasKeyDirection = lines.contains { tokens(of: $0[...]).first?.lowercased() == "key-direction" }
 
         var output: [String] = []
+        // The profile is untrusted and may name the same 256 KiB file on every line of 1 MiB: the
+        // size of the result is counted as it grows, not when it is done.
+        var size = 0
+        func emit(_ text: String, path: String) throws {
+            size += text.utf8.count + 1
+            if size > maxProfileSize { throw Failure.tooLarge(path: path) }
+            output.append(text)
+        }
         var credentials: Credentials?
         var openBlock: String?
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if let tag = openBlock {
                 if trimmed.lowercased() == "</\(tag)>" { openBlock = nil }
-                output.append(line)
+                try emit(line, path: directory.path)
                 continue
             }
             if let tag = blockTag(opening: trimmed) {
                 openBlock = tag
-                output.append(line)
+                try emit(line, path: directory.path)
                 continue
             }
             if let path = credentialsFile(in: trimmed) {
                 credentials = try readCredentials(path: path, directory: directory)
-                output.append("auth-user-pass")
+                try emit("auth-user-pass", path: directory.path)
                 continue
             }
             guard let reference = fileReference(in: trimmed) else {
-                output.append(line)
+                try emit(line, path: directory.path)
                 continue
             }
 
             let content = try readKeyMaterial(directive: reference.directive, path: reference.path, directory: directory)
-            output.append("<\(reference.directive)>")
-            output.append(content)
-            output.append("</\(reference.directive)>")
+            try emit("<\(reference.directive)>", path: reference.path)
+            try emit(content, path: reference.path)
+            try emit("</\(reference.directive)>", path: reference.path)
             if let direction = reference.keyDirection, !hasKeyDirection {
-                output.append("key-direction \(direction)")
+                try emit("key-direction \(direction)", path: directory.path)
                 hasKeyDirection = true
             }
         }
