@@ -4,6 +4,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -228,6 +229,33 @@ func TestUpdateContentWithReconnectLeavesADisabledProfileAlone(t *testing.T) {
 	}
 	if resp.Profile.DesiredEnabled || resp.Profile.State != pb.ProfileState_PROFILE_STATE_DISCONNECTED {
 		t.Fatalf("the profile was started: %v", resp.Profile)
+	}
+}
+
+// The restart is one step: a disconnect that is asked for while it runs either comes first, and the
+// profile stays off, or comes after, and ends the restarted engine. Whichever way the two calls
+// interleave, a profile that was switched off by the last call to return is off.
+func TestADisconnectDuringAReconnectingUpdateIsNotUndone(t *testing.T) {
+	stub := &stubBackend{kind: tunnel.KindOpenVPN}
+	e := newEnv(t, withBackends(stub.backend()))
+	p := e.importProfile("office", ovpnProfile)
+	for round := 0; round < 40; round++ {
+		e.setEnabled(p.Id, true)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			e.m.UpdateContent(&pb.UpdateProfileContentRequest{Id: p.Id, Content: []byte(ovpnEdited), Reconnect: true})
+		}()
+		go func() {
+			defer wg.Done()
+			e.m.SetEnabled(p.Id, false)
+		}()
+		wg.Wait()
+		got := e.get(p.Id)
+		if got.DesiredEnabled || got.State != pb.ProfileState_PROFILE_STATE_DISCONNECTED {
+			t.Fatalf("round %d: the disconnect was undone: desired=%v state=%v", round, got.DesiredEnabled, got.State)
+		}
 	}
 }
 

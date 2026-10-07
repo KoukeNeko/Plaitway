@@ -15,7 +15,11 @@ import (
 // what the user sees. A start that takes longer goes on in the background and
 // the profile stays CONNECTING until it ends.
 func (m *Manager) enable(e *entry) error {
-	op, err := m.begin(e)
+	return m.awaitStart(m.begin(e))
+}
+
+// awaitStart waits for the start that begin returned, as enable describes.
+func (m *Manager) awaitStart(op *startOp, err error) error {
 	if op == nil {
 		return err
 	}
@@ -35,7 +39,11 @@ func (m *Manager) enable(e *entry) error {
 func (m *Manager) begin(e *entry) (*startOp, error) {
 	e.op.Lock()
 	defer e.op.Unlock()
+	return m.beginLocked(e)
+}
 
+// beginLocked is begin for a caller that holds e.op.
+func (m *Manager) beginLocked(e *entry) (*startOp, error) {
 	m.mu.Lock()
 	if m.closing {
 		m.mu.Unlock()
@@ -155,6 +163,27 @@ func (m *Manager) startEngine(ctx context.Context, cancel context.CancelFunc, e 
 		return nil, err
 	}
 	return r, nil
+}
+
+// restart stops the engine of a profile that is switched on and starts it again
+// with the text now stored, and does nothing for one that is not. It is one step
+// under e.op: a disconnect that arrives meanwhile (the user's, or the on-demand
+// controller's after a network change) either comes first, and the profile
+// stays off, or comes after, and ends the restarted engine. Two separate steps
+// let it fall in between and be undone by the start.
+func (m *Manager) restart(e *entry) error {
+	e.op.Lock()
+	m.mu.Lock()
+	switched := e.desired
+	m.mu.Unlock()
+	if !switched {
+		e.op.Unlock()
+		return nil
+	}
+	m.disable(context.Background(), e)
+	op, err := m.beginLocked(e)
+	e.op.Unlock()
+	return m.awaitStart(op, err)
 }
 
 // disable cancels the start of the profile's engine, or stops the engine, and

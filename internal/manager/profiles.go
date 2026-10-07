@@ -92,15 +92,11 @@ func (m *Manager) UpdateContent(req *pb.UpdateProfileContentRequest) (*pb.Import
 		return nil, err
 	}
 	m.refreshLocked(e)
-	restart := req.Reconnect && e.desired
 	m.mu.Unlock()
-	m.log.Info("profile text updated", "profile", e.id, "warnings", len(res.Warnings), "restart", restart)
+	m.log.Info("profile text updated", "profile", e.id, "warnings", len(res.Warnings), "reconnect", req.Reconnect)
 
-	if restart {
-		e.op.Lock()
-		m.disable(context.Background(), e)
-		e.op.Unlock()
-		if err := m.enable(e); err != nil {
+	if req.Reconnect {
+		if err := m.restart(e); err != nil {
 			return nil, err
 		}
 	}
