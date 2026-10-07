@@ -837,3 +837,60 @@ func TestAFullTunnelWithoutThePrivateRangesHoldsTheDefault(t *testing.T) {
 		t.Errorf("only %d of the routes of the tunnel are installed", installed)
 	}
 }
+
+// The pieces of a full tunnel that leaves the private ranges out are longer than the halves of
+// the default route, so a tunnel that stands by must not install them: they would take the
+// internet away from the holder.
+func TestAFullTunnelWithoutThePrivateRangesStandsByWhenItIsNotTheHolder(t *testing.T) {
+	routes := allExcept(netip.MustParsePrefix("0.0.0.0/0"), privateV4)
+	names := make([]string, len(routes))
+	for i, p := range routes {
+		names[i] = p.String()
+	}
+	wg := func(priority int) tunnel.Intent {
+		return up("wg", priority, "utun10", tunnel.RoleFull, append(slices.Clone(names), "10.6.0.1/32")...)
+	}
+	ovpn := func(priority int) tunnel.Intent {
+		return up("ovpn", priority, "utun11", tunnel.RoleFull, "0.0.0.0/0", "172.16.0.0/12")
+	}
+	split := up("split", 3, "utun12", tunnel.RoleSplit, "192.168.9.0/24")
+
+	installed := func(d Desired) map[tunnel.OwnerID]int {
+		count := make(map[tunnel.OwnerID]int)
+		for _, r := range d.Routes {
+			if r.Install {
+				count[r.Owner]++
+			}
+		}
+		return count
+	}
+
+	t.Run("a higher priority full tunnel holds the default", func(t *testing.T) {
+		got := installed(Compute([]tunnel.Intent{ovpn(1), wg(2), split}, homeNet()))
+		if got["wg"] != 0 {
+			t.Errorf("the standby tunnel installed %d routes", got["wg"])
+		}
+		// Its two halves and its own 172.16.0.0/12; the split tunnel keeps its prefix.
+		if got["ovpn"] != 3 || got["split"] != 1 {
+			t.Errorf("installed = %v, want ovpn 3 and split 1", got)
+		}
+	})
+	t.Run("and the other way round", func(t *testing.T) {
+		d := Compute([]tunnel.Intent{wg(1), ovpn(2), split}, homeNet())
+		got := installed(d)
+		if got["wg"] < 20 || got["split"] != 1 {
+			t.Errorf("installed = %v, want the wg pieces and the split prefix", got)
+		}
+		// Only its own 172.16.0.0/12 is left of the lower tunnel, unless wg holds that too.
+		for _, r := range d.Routes {
+			if r.Owner == "ovpn" && r.Kind == tunnel.RouteDefaultHalf && r.Install {
+				t.Errorf("a default half of the lower priority tunnel is installed: %v", r)
+			}
+		}
+	})
+	t.Run("without another tunnel it is the holder", func(t *testing.T) {
+		if got := installed(Compute([]tunnel.Intent{wg(1)}, homeNet()))["wg"]; got < 20 {
+			t.Errorf("the only full tunnel installed %d routes", got)
+		}
+	})
+}

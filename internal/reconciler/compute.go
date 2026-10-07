@@ -255,6 +255,11 @@ func coversAllBut(prefixes []netip.Prefix, universe [2]netip.Addr, allowed []net
 	return end.less(cursor) || within(span{cursor, end})
 }
 
+// hasDefault reports whether routes include a default route or one of its halves.
+func hasDefault(routes []netip.Prefix) bool {
+	return slices.ContainsFunc(routes, func(p netip.Prefix) bool { return p.IsValid() && isDefault(p.Masked()) })
+}
+
 // defaultHolder is the best RoleFull tunnel that sends the internet through
 // itself; live is already in precedence order.
 func defaultHolder(live []tunnel.Intent) tunnel.OwnerID {
@@ -303,13 +308,18 @@ func routePlans(live []tunnel.Intent, holder tunnel.OwnerID, ns osnet.NetState) 
 		if !carriesRoutes(in.State) {
 			continue
 		}
+		// A full tunnel that is not the holder stands by as a whole. With the private
+		// ranges left out it has no default route to stand by with: its prefixes are the
+		// default, in pieces, and are longer than the holder's halves, so installed they
+		// would take everything over.
+		standby := in.Role == tunnel.RoleFull && in.Owner != holder && redirectsAll(in.Routes) && !hasDefault(in.Routes)
 		for _, p := range expandRoutes(in.Routes) {
 			plan := RoutePlan{
 				Route: osnet.Route{Dst: p, Iface: in.Iface, Static: true},
 				Owner: in.Owner,
 				Kind:  tunnel.RouteTunnel,
 			}
-			if isDefault(p) {
+			if isDefault(p) || standby {
 				plan.Kind = tunnel.RouteDefaultHalf
 				if in.Role != tunnel.RoleFull {
 					continue
