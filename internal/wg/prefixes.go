@@ -17,6 +17,24 @@ var privateRanges = []netip.Prefix{
 	netip.MustParsePrefix("fe80::/10"),
 }
 
+// withoutPrivate is prefixes less the private ranges, except that the profile's
+// DNS servers stay in. A nameserver in a private range is the rule (the
+// 10.x.x.1 of the tunnel itself), and without a route to it DNS would not go
+// through the tunnel at all. A server is only kept when the prefixes included
+// it: the peer accepts nothing else.
+func (p *profile) withoutPrivate(prefixes []netip.Prefix) []netip.Prefix {
+	kept := subtractPrefixes(prefixes, privateRanges)
+	for _, server := range p.dnsServers {
+		host := netip.PrefixFrom(server.WithZone(""), server.BitLen())
+		inPrivate := slices.ContainsFunc(privateRanges, func(r netip.Prefix) bool { return prefixContains(r, host) })
+		wanted := slices.ContainsFunc(prefixes, func(a netip.Prefix) bool { return prefixContains(a.Masked(), host) })
+		if inPrivate && wanted {
+			kept = append(kept, host)
+		}
+	}
+	return mergePrefixes(kept)
+}
+
 // subtractPrefixes returns the addresses of from that are not in excluded as
 // the fewest prefixes: sorted by address with IPv4 first, none overlapping and
 // no two that are the two halves of a larger one. Neither argument is changed.

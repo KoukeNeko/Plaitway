@@ -92,6 +92,25 @@ AllowedIPs = 10.6.0.0/24
 				"public_key=" + hexKey(3) + "\npersistent_keepalive_interval=0\nreplace_allowed_ips=true\nallowed_ip=203.0.113.0/24\n" +
 				"public_key=" + hexKey(1) + "\npersistent_keepalive_interval=0\nreplace_allowed_ips=true\n",
 		},
+		{
+			// The device has to accept what the routes send: the tunnel's nameserver is in a private range.
+			name: "excluding private ranges keeps a DNS server the peer is allowed",
+			profile: fill(`[Interface]
+PrivateKey = KEYA
+DNS = 10.6.0.1
+[Peer]
+PublicKey = KEYB
+AllowedIPs = 0.0.0.0/0
+[Peer]
+PublicKey = KEYC
+AllowedIPs = 203.0.113.0/24
+`),
+			excludePrivate: true,
+			endpoints:      []netip.AddrPort{{}, {}},
+			want: "private_key=" + hexKey(1) + "\nreplace_peers=true\n" +
+				"public_key=" + hexKey(2) + "\npersistent_keepalive_interval=0\nreplace_allowed_ips=true\n" + allowedIPLines(mergePrefixes(slices.Concat(publicV4, pfx("10.6.0.1/32")))) +
+				"public_key=" + hexKey(3) + "\npersistent_keepalive_interval=0\nreplace_allowed_ips=true\nallowed_ip=203.0.113.0/24\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

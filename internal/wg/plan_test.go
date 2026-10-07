@@ -161,12 +161,46 @@ func TestPlan(t *testing.T) {
 			wantRole:   tunnel.RoleSplit,
 		},
 		{
-			name:           "excluding private ranges turns a default route into everything else",
+			// The tunnel's own nameserver is in a private range, and DNS has to reach it through the tunnel.
+			name:           "excluding private ranges turns a default route into everything else, and keeps the DNS server",
 			profile:        head + "DNS = 10.6.0.1\n" + peer + "0.0.0.0/0, ::/0\n",
+			excludePrivate: true,
+			wantRoutes:     mergePrefixes(slices.Concat(publicV4, publicV6, pfx("10.6.0.1/32"))),
+			wantRole:       tunnel.RoleFull,
+			wantDNS:        []tunnel.DNSIntent{{Servers: addrs("10.6.0.1"), MatchDomains: []string{"."}}},
+		},
+		{
+			name:           "a DNS server that is not private needs nothing kept",
+			profile:        head + "DNS = 1.1.1.1\n" + peer + "0.0.0.0/0, ::/0\n",
 			excludePrivate: true,
 			wantRoutes:     slices.Concat(publicV4, publicV6),
 			wantRole:       tunnel.RoleFull,
-			wantDNS:        []tunnel.DNSIntent{{Servers: addrs("10.6.0.1"), MatchDomains: []string{"."}}},
+			wantDNS:        []tunnel.DNSIntent{{Servers: addrs("1.1.1.1"), MatchDomains: []string{"."}}},
+		},
+		{
+			name:           "an IPv6 DNS server in a private range is kept too",
+			profile:        head + "DNS = fd00::1\n" + peer + "0.0.0.0/0, ::/0\n",
+			excludePrivate: true,
+			wantRoutes:     mergePrefixes(slices.Concat(publicV4, publicV6, pfx("fd00::1/128"))),
+			wantRole:       tunnel.RoleFull,
+			wantDNS:        []tunnel.DNSIntent{{Servers: addrs("fd00::1"), MatchDomains: []string{"."}}},
+		},
+		{
+			// The peer accepts nothing outside AllowedIPs, so a server they leave out is not asked for.
+			name:           "a private DNS server that AllowedIPs leave out is not added",
+			profile:        head + "DNS = 10.6.0.1, corp.example\n" + peer + "203.0.113.0/24\n",
+			excludePrivate: true,
+			wantRoutes:     pfx("203.0.113.0/24"),
+			wantRole:       tunnel.RoleSplit,
+			wantDNS:        []tunnel.DNSIntent{{Servers: addrs("10.6.0.1"), MatchDomains: []string{"corp.example"}}},
+		},
+		{
+			name:           "a private DNS server inside AllowedIPs is the one route left",
+			profile:        head + "DNS = 10.6.0.1, corp.example\n" + peer + "10.6.0.0/24\n",
+			excludePrivate: true,
+			wantRoutes:     pfx("10.6.0.1/32"),
+			wantRole:       tunnel.RoleSplit,
+			wantDNS:        []tunnel.DNSIntent{{Servers: addrs("10.6.0.1"), MatchDomains: []string{"corp.example"}}},
 		},
 		{
 			name:           "excluding private ranges leaves a split tunnel its public prefixes",

@@ -60,7 +60,7 @@ func (p *profile) plan(mode tunnel.Mode) plan {
 	// default route is now a list of prefixes. And Split mode has already
 	// dropped the default routes, so they do not come back as prefixes.
 	if p.excludePrivate && len(pl.routes) > 0 {
-		pl.routes = subtractPrefixes(pl.routes, privateRanges)
+		pl.routes = p.withoutPrivate(pl.routes)
 		if len(pl.routes) == 0 {
 			pl.warnings = append(pl.warnings, "No route left after excluding private ranges")
 		}
