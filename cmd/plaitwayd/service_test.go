@@ -1,5 +1,3 @@
-//go:build unix
-
 package main
 
 import (
@@ -624,14 +622,12 @@ func TestShutdownEndsWatchesStopsEnginesAndReturnsCleanly(t *testing.T) {
 	if took := time.Since(started); took > 3*time.Second {
 		t.Fatalf("shutdown took %v", took)
 	}
-	if _, err := os.Stat(h.socket); !os.IsNotExist(err) {
-		t.Fatalf("the socket file was left behind: %v", err)
-	}
+	socketGone(t, h.socket)
 }
 
 // What an unauthorized caller asks for must not happen, whichever call it is.
 func TestDeniedCallsHaveNoSideEffects(t *testing.T) {
-	skipIfRoot(t)
+	skipIfEveryoneIsAuthorized(t)
 	stateDir := t.TempDir()
 
 	setup := startDaemon(t, stateDir, everyone())
@@ -643,9 +639,9 @@ func TestDeniedCallsHaveNoSideEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for name, pol := range map[string]*policy{"stranger": stranger(), "console user": consoleUserOnly()} {
+	for name, who := range map[string]caller{"stranger": stranger(), "console user": consoleUserOnly()} {
 		t.Run(name, func(t *testing.T) {
-			h := startDaemon(t, stateDir, pol)
+			h := startDaemon(t, stateDir, who)
 			ctx := context.Background()
 			newName := "hacked"
 			modifying := map[string]func() error{

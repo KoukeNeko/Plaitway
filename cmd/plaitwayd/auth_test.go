@@ -20,14 +20,26 @@ import (
 )
 
 const (
-	adminGID     = 80
-	consoleOwner = 501
+	adminGID       = 80
+	consoleOwner   = 501
+	consoleSession = 1
 )
 
 func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func testPolicy() *policy {
-	return &policy{adminGID: adminGID, consoleUID: func() (uint32, error) { return consoleOwner, nil }}
+	return &policy{
+		adminGID:       adminGID,
+		consoleUID:     func() (uint32, error) { return consoleOwner, nil },
+		consoleSession: func() (uint32, error) { return consoleSession, nil },
+	}
+}
+
+func windowsIdentity(session uint32, administrator bool) peercred.AuthInfo {
+	return peercred.AuthInfo{
+		Info:  peercred.Info{PID: 4242, Windows: &peercred.WindowsIdentity{SID: "S-1-5-21-1-2-3-1001", Administrator: administrator, SessionID: session}},
+		Known: true,
+	}
 }
 
 func identity(uid uint32, groups ...uint32) peercred.AuthInfo {
@@ -94,6 +106,48 @@ func TestPolicyDecisions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPolicyDecisionsForWindowsCallers(t *testing.T) {
+	tests := []struct {
+		name    string
+		who     peercred.AuthInfo
+		connect bool
+		modify  bool
+	}{
+		{"administrator", windowsIdentity(2, true), true, true},
+		{"administrator at the console", windowsIdentity(consoleSession, true), true, true},
+		{"user at the console", windowsIdentity(consoleSession, false), true, false},
+		{"user in another session", windowsIdentity(2, false), false, false},
+		// A Windows identity has no uid, which reads as 0; that must not be root.
+		{"user in the services session", windowsIdentity(0, false), false, false},
+	}
+	p := testPolicy()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, method := range connectMethods {
+				if allowed := p.check(tt.who, method) == nil; allowed != tt.connect {
+					t.Errorf("%s allowed = %v, want %v", method, allowed, tt.connect)
+				}
+			}
+			for _, method := range modifyMethods {
+				if allowed := p.check(tt.who, method) == nil; allowed != tt.modify {
+					t.Errorf("%s allowed = %v, want %v", method, allowed, tt.modify)
+				}
+			}
+		})
+	}
+}
+
+func TestPolicyFailsClosedWhenNoSessionIsAtTheConsole(t *testing.T) {
+	p := testPolicy()
+	p.consoleSession = func() (uint32, error) { return 0, errors.New("no session is attached to the console") }
+	if err := p.check(windowsIdentity(consoleSession, false), pb.DaemonService_ListProfiles_FullMethodName); err == nil {
+		t.Fatal("a non-administrator was allowed although no session is at the console")
+	}
+	if err := p.check(windowsIdentity(consoleSession, true), pb.DaemonService_ListProfiles_FullMethodName); err != nil {
+		t.Fatalf("administrator denied: %v", err)
 	}
 }
 
@@ -258,15 +312,6 @@ func TestConsoleUserCachesFailuresToo(t *testing.T) {
 	}
 	if reads != 1 {
 		t.Fatalf("%d reads, want 1", reads)
-	}
-}
-
-func TestRealConsoleOwnerIsReadable(t *testing.T) {
-	if _, err := fileOwner(consoleDevice); err != nil {
-		t.Skipf("no console device here: %v", err)
-	}
-	if _, err := newConsoleUser().uid(); err != nil {
-		t.Fatal(err)
 	}
 }
 

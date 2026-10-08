@@ -1,23 +1,22 @@
-//go:build unix
-
 package main
 
 import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
+	"net"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/KoukeNeko/Plaitway/internal/gen/plaitway/v1"
 	"github.com/KoukeNeko/Plaitway/internal/manager/fake"
+	"github.com/KoukeNeko/Plaitway/internal/peercred"
 	"github.com/KoukeNeko/Plaitway/internal/transport"
 )
 
@@ -30,34 +29,59 @@ const (
 	wgProfile   = "[Interface]\nPrivateKey = k\nAddress = 10.6.0.2/32\nDNS = 10.6.0.1\n[Peer]\nEndpoint = 203.0.113.5:51820\nAllowedIPs = 0.0.0.0/0\n"
 )
 
-// nobody is a group id that no test process belongs to.
-const nobody = 4_000_000_000
-
-// everyone is the policy under which the test process may do everything: its
-// own primary group counts as the administrator group.
-func everyone() *policy {
-	return &policy{adminGID: uint32(os.Getgid()), consoleUID: func() (uint32, error) { return uint32(os.Getuid()), nil }}
+// caller is who the test process is to the daemon under test: one of the three
+// roles of the authorization matrix (everyone, consoleUserOnly, stranger),
+// which each OS builds in its own way in harness_unix_test.go and
+// harness_windows_test.go.
+type caller struct {
+	pol *policy
+	// rewrite changes the Windows identity the real handshake read, before the
+	// interceptor sees it. It is nil where the policy alone makes the role.
+	rewrite func(*peercred.WindowsIdentity)
 }
 
-// consoleUserOnly lets the test process read and connect but not modify.
-func consoleUserOnly() *policy {
-	return &policy{adminGID: nobody, consoleUID: func() (uint32, error) { return uint32(os.Getuid()), nil }}
+// roleCredentials are the real peer credentials, handshake included, that then
+// hand the interceptor the identity a test role asks for. On Windows the
+// identity is the token of whoever runs the tests (an elevated administrator, a
+// filtered one or a plain user), so a policy parameter cannot make the test
+// process a stranger; the SID, the session and the pid stay the real ones.
+type roleCredentials struct {
+	credentials.TransportCredentials
+	rewrite func(*peercred.WindowsIdentity)
 }
 
-// stranger lets the test process do nothing.
-func stranger() *policy {
-	return &policy{adminGID: nobody, consoleUID: func() (uint32, error) { return uint32(os.Getuid()) + 1, nil }}
-}
-
-func skipIfRoot(t *testing.T) {
-	t.Helper()
-	if os.Getuid() == 0 {
-		t.Skip("root is always authorized, there is nobody to deny")
+func (c roleCredentials) ServerHandshake(conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	conn, info, err := c.TransportCredentials.ServerHandshake(conn)
+	if err != nil {
+		return conn, info, err
 	}
+	if ai, ok := info.(peercred.AuthInfo); ok && ai.Windows != nil {
+		identity := *ai.Windows
+		c.rewrite(&identity)
+		ai.Windows = &identity
+		return conn, ai, nil
+	}
+	return conn, info, nil
+}
+
+// Clone must keep the rewrite: the embedded Clone would hand back the plain
+// credentials.
+func (c roleCredentials) Clone() credentials.TransportCredentials {
+	return roleCredentials{TransportCredentials: c.TransportCredentials.Clone(), rewrite: c.rewrite}
+}
+
+// credentials are the real ones unless the role rewrites the identity.
+func (c caller) credentials() credentials.TransportCredentials {
+	peerCredentials := peercred.NewServerCredentials()
+	if c.rewrite == nil {
+		return peerCredentials
+	}
+	return roleCredentials{TransportCredentials: peerCredentials, rewrite: c.rewrite}
 }
 
 // harness runs the real daemon wiring (peer credentials, interceptors, store,
-// manager, fake backend) on a Unix socket and gives tests a generated client.
+// manager, fake backend) on a Unix socket, or a named pipe on Windows, and gives
+// tests a generated client.
 type harness struct {
 	t        *testing.T
 	stateDir string
@@ -74,28 +98,22 @@ type harness struct {
 
 // startDaemon starts a daemon on stateDir, which may hold what an earlier
 // daemon left.
-func startDaemon(t *testing.T, stateDir string, pol *policy) *harness {
+func startDaemon(t *testing.T, stateDir string, who caller) *harness {
 	t.Helper()
-	return startLoggingDaemon(t, stateDir, pol, io.Discard, slog.LevelInfo)
+	return startLoggingDaemon(t, stateDir, who, io.Discard, slog.LevelInfo)
 }
 
 // startLoggingDaemon is startDaemon with the daemon's log going to logOut at level.
-func startLoggingDaemon(t *testing.T, stateDir string, pol *policy, logOut io.Writer, level slog.Level) *harness {
+func startLoggingDaemon(t *testing.T, stateDir string, who caller, logOut io.Writer, level slog.Level) *harness {
 	t.Helper()
-	// t.TempDir() is too long for sun_path on macOS.
-	dir, err := os.MkdirTemp("", "pw")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "d.sock")
+	socket := newSocketPath(t)
 
 	lis, err := transport.Listen(socket, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	log, daemonLog := newLogger(logOut, level)
-	d, err := newDaemon(log, daemonLog, config{socket: socket, stateDir: stateDir, fake: &fastFake}, pol)
+	d, err := newDaemonWithCredentials(log, daemonLog, config{socket: socket, stateDir: stateDir, fake: &fastFake}, who.pol, who.credentials())
 	if err != nil {
 		lis.Close()
 		t.Fatal(err)

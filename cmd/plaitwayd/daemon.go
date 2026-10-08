@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	pb "github.com/KoukeNeko/Plaitway/internal/gen/plaitway/v1"
 	"github.com/KoukeNeko/Plaitway/internal/manager"
@@ -51,6 +52,15 @@ type daemon struct {
 // newDaemon opens the state directory and builds the server. It does not
 // listen and starts no engine.
 func newDaemon(log *slog.Logger, daemonLog *manager.LogBuffer, cfg config, pol *policy) (*daemon, error) {
+	return newDaemonWithCredentials(log, daemonLog, cfg, pol, peercred.NewServerCredentials())
+}
+
+// newDaemonWithCredentials exists for the tests only, which have to give the
+// test process the identity of each role in the authorization matrix: on
+// Windows the identity is the real token of whoever runs the tests. The
+// parameter is not exported and no flag or variable reaches it, so the daemon
+// that main starts always uses the real peer credentials.
+func newDaemonWithCredentials(log *slog.Logger, daemonLog *manager.LogBuffer, cfg config, pol *policy, creds credentials.TransportCredentials) (*daemon, error) {
 	backends, rec, netMonitor, err := selectEngines(log, cfg)
 	if err != nil {
 		return nil, err
@@ -65,13 +75,13 @@ func newDaemon(log *slog.Logger, daemonLog *manager.LogBuffer, cfg config, pol *
 		Version:    version,
 		// The fake engines need no privileges, so the fake daemon does not
 		// claim to lack them.
-		Privileged: cfg.fake != nil || os.Geteuid() == 0,
+		Privileged: cfg.fake != nil || isPrivileged(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start profile manager: %w", err)
 	}
 	svc := newService(log, mgr)
-	return &daemon{log: log, mgr: mgr, svc: svc, srv: newServer(log, svc, pol)}, nil
+	return &daemon{log: log, mgr: mgr, svc: svc, srv: newServer(log, svc, pol, creds)}, nil
 }
 
 func selectEngines(log *slog.Logger, cfg config) ([]tunnel.Backend, tunnel.Reconciler, osnet.NetMonitor, error) {
@@ -95,9 +105,9 @@ func selectEngines(log *slog.Logger, cfg config) ([]tunnel.Backend, tunnel.Recon
 
 // newServer wires the peer-identity credentials and the per-call authorization
 // into a gRPC server; main and the tests build the daemon the same way.
-func newServer(log *slog.Logger, svc *service, pol *policy) *grpc.Server {
+func newServer(log *slog.Logger, svc *service, pol *policy, creds credentials.TransportCredentials) *grpc.Server {
 	srv := grpc.NewServer(
-		grpc.Creds(peercred.NewServerCredentials()),
+		grpc.Creds(creds),
 		grpc.UnaryInterceptor(pol.unaryInterceptor(log)),
 		grpc.StreamInterceptor(pol.streamInterceptor(log)),
 	)

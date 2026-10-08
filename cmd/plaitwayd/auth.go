@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
@@ -58,16 +59,19 @@ var methodLevels = map[string]accessLevel{
 	pb.DaemonService_GetProfileContent_FullMethodName: levelModify,
 }
 
-// policy decides per call from the peer's uid and groups, which the kernel
-// reports for the process that connected.
+// policy decides per call from the peer's identity, which the OS reports for the
+// process that connected: uid and groups on Unix, the token on Windows.
 type policy struct {
 	adminGID uint32
 	// consoleUID returns the user at the console.
 	consoleUID func() (uint32, error)
+	// consoleSession returns the logon session at the console, which is what
+	// stands for "the user at the console" on Windows.
+	consoleSession func() (uint32, error)
 }
 
 func newPolicy() *policy {
-	return &policy{adminGID: adminGroupGID, consoleUID: newConsoleUser().uid}
+	return &policy{adminGID: adminGroupGID, consoleUID: newConsoleUser().uid, consoleSession: activeConsoleSession}
 }
 
 // check fails closed: an identity the OS could not tell is refused.
@@ -79,20 +83,54 @@ func (p *policy) check(ai peercred.AuthInfo, fullMethod string) error {
 	if !ai.Known {
 		return status.Error(codes.PermissionDenied, "peer identity unavailable")
 	}
-	if ai.UID == 0 || slices.Contains(ai.Groups, p.adminGID) {
+	if p.isAdministrator(ai) {
 		return nil
 	}
+	caller := describeCaller(ai)
 	if level == levelModify {
-		return status.Errorf(codes.PermissionDenied, "uid %d is not an administrator, which %s requires", ai.UID, fullMethod)
+		return status.Errorf(codes.PermissionDenied, "%s is not an administrator, which %s requires", caller, fullMethod)
 	}
-	console, err := p.consoleUID()
+	atConsole, err := p.isConsoleUser(ai)
 	if err != nil {
-		return status.Errorf(codes.PermissionDenied, "uid %d is not an administrator and the console user is unknown: %v", ai.UID, err)
+		return status.Errorf(codes.PermissionDenied, "%s is not an administrator and the console user is unknown: %v", caller, err)
 	}
-	if ai.UID != console {
-		return status.Errorf(codes.PermissionDenied, "uid %d is neither the console user nor an administrator", ai.UID)
+	if !atConsole {
+		return status.Errorf(codes.PermissionDenied, "%s is neither the console user nor an administrator", caller)
 	}
 	return nil
+}
+
+// isAdministrator looks at the Windows identity first: its UID is 0, which
+// would be root anywhere else.
+func (p *policy) isAdministrator(ai peercred.AuthInfo) bool {
+	if windows := ai.Windows; windows != nil {
+		return windows.Administrator
+	}
+	return ai.UID == 0 || slices.Contains(ai.Groups, p.adminGID)
+}
+
+func (p *policy) isConsoleUser(ai peercred.AuthInfo) (bool, error) {
+	if windows := ai.Windows; windows != nil {
+		session, err := p.consoleSession()
+		return err == nil && windows.SessionID == session, err
+	}
+	console, err := p.consoleUID()
+	return err == nil && ai.UID == console, err
+}
+
+func describeCaller(ai peercred.AuthInfo) string {
+	if ai.Windows != nil {
+		return "sid " + ai.Windows.SID
+	}
+	return fmt.Sprintf("uid %d", ai.UID)
+}
+
+// callerAttr is the key and value that name the caller in a log line.
+func callerAttr(ai peercred.AuthInfo) []any {
+	if ai.Windows != nil {
+		return []any{"sid", ai.Windows.SID}
+	}
+	return []any{"uid", ai.UID}
 }
 
 // authorize is the only place where the identity in a request's context is
@@ -150,7 +188,8 @@ var readOnlyMethods = map[string]bool{
 // itself: for the others it may quote the caller's input.
 func logCall(log *slog.Logger, method string, ai peercred.AuthInfo, started time.Time, err error) {
 	code := status.Code(err)
-	attrs := []any{"method", method, "uid", ai.UID, "pid", ai.PID, "code", code.String(), "dur", time.Since(started).Round(time.Millisecond)}
+	attrs := append([]any{"method", method}, callerAttr(ai)...)
+	attrs = append(attrs, "pid", ai.PID, "code", code.String(), "dur", time.Since(started).Round(time.Millisecond))
 	switch code {
 	case codes.OK, codes.Canceled:
 		if readOnlyMethods[method] {
