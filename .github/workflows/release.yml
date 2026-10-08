@@ -26,9 +26,16 @@ jobs:
       - name: Check the version
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::the tag $GITHUB_REF_NAME does not match VERSION $version" >&2
-            exit 1
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::the tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+              exit 1
+            fi
+            # Before the long build, not after it.
+            if [ ! -f "releases/$version.md" ]; then
+              echo "::error::releases/$version.md is missing: write what changed in $version before tagging" >&2
+              exit 1
+            fi
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
       # The Xcode the app is released with, not whichever one the image happens to default to.
@@ -139,19 +146,13 @@ jobs:
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS
       - name: Release notes
-        run: |
-          {
-            cat packaging/release-notes.md
-            printf '\n## Checksums (SHA-256)\n\n```\n'
-            cat dist/SHA256SUMS
-            printf '```\n'
-          } > "$RUNNER_TEMP/notes.md"
+        run: scripts/render-release-notes.sh "$GITHUB_REF_NAME" dist/SHA256SUMS > "$RUNNER_TEMP/notes.md"
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "Plaitway ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
+            --title "Plaitway ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md"
 
   packages:
     needs: publish

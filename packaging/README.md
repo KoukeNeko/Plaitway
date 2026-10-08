@@ -191,7 +191,9 @@ Mac, or a script install next to an app registration, compete for one launchd la
 
 ## Releasing
 
-`.github/workflows/release.yml` makes a release. Set `VERSION`, commit and push it, then push a tag that matches it:
+`.github/workflows/release.yml` makes a release. Write what changed in `releases/X.Y.Z.md` (the text of the release page,
+before the install text and the checksums that `scripts/render-release-notes.sh` adds), set `VERSION`, commit and push
+both, then push a tag that matches it:
 
 ```bash
 git tag -s v0.3.0 -m "Plaitway 0.3.0"
@@ -200,7 +202,7 @@ git push origin v0.3.0
 
 The workflow runs the tests, builds and signs the app (`make app`), notarizes and staples it and the dmg
 (`notarize.sh`), checks the bundle (`make verify`), creates the GitHub release with the zip, the dmg and
-`SHA256SUMS`, and then `packages.yml` updates `Casks/plaitway.rb` in `KoukeNeko/homebrew-tap` from the release's
+`SHA256SUMS` and the notes, and then `packages.yml` updates `Casks/plaitway.rb` in `KoukeNeko/homebrew-tap` from the release's
 checksums. Run by hand (Actions › Release › Run workflow) it builds and signs but publishes nothing and keeps the
 files as an artifact. Actions › Publish packages redoes the cask of a release that is already published.
 

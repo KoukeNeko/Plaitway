@@ -266,4 +266,17 @@ expect "the error names what is missing" grep -q PLAITWAY_NOTARY_ISSUER <<<"$OUT
 notary PLAITWAY_NOTARY_KEY="$TMP/missing.p8" PLAITWAY_NOTARY_KEY_ID=KEYID PLAITWAY_NOTARY_ISSUER=ISSUER
 expect "an API key that is not a file is an error" test "$STATUS" -ne 0
 
+# scripts/render-release-notes.sh puts what changed, the install text and the checksums in one text.
+printf 'abc123  Plaitway-0.3.0.zip\n' >"$TMP/SHA256SUMS"
+notes() { OUTPUT="$("$PACKAGING_DIR/../scripts/render-release-notes.sh" "$@" 2>&1)"; STATUS=$?; }
+notes v0.3.0 "$TMP/SHA256SUMS"
+expect "release notes start with what changed in the release" test "$STATUS" -eq 0 -a "$(head -n 1 <<<"$OUTPUT")" = "$(head -n 1 "$PACKAGING_DIR/../releases/0.3.0.md")"
+expect "release notes hold the install text" grep -q '^## Install' <<<"$OUTPUT"
+expect "release notes end with the checksums" grep -q 'abc123  Plaitway-0.3.0.zip' <<<"$OUTPUT"
+notes 0.3.0 "$TMP/SHA256SUMS"
+expect "the version may be given without the v" test "$STATUS" -eq 0
+notes v9.9.9 "$TMP/SHA256SUMS"
+expect "a release without notes is an error" test "$STATUS" -ne 0
+expect "the error names the file to write" grep -q 'releases/9.9.9.md' <<<"$OUTPUT"
+
 [ "$FAILURES" -eq 0 ]

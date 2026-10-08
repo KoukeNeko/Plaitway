@@ -1,5 +1,3 @@
-Several VPNs at once from one menu bar item: OpenVPN and WireGuard profiles side by side, with one component owning the routes and DNS.
-
 ## Install
 
 **macOS 15 or later, Apple silicon.** Signed with a Developer ID and notarized by Apple.
