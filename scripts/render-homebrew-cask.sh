@@ -27,7 +27,7 @@ cask "plaitway" do
   end
 
   depends_on arch: :arm64
-  depends_on macos: ">= :sequoia"
+  depends_on macos: :sequoia
 
   app "Plaitway.app"
   binary "#{appdir}/Plaitway.app/Contents/Resources/bin/plaitway"
