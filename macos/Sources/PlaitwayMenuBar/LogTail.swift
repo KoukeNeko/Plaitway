@@ -27,6 +27,12 @@ final class LogTail {
     /// Lines kept; the daemon keeps 1000 itself, so this only bounds a long session.
     static let capacity = 2000
     private static let retryInterval: Duration = .seconds(1)
+    /// Lines that arrive within this of each other are shown together. The buffered tail comes as
+    /// one burst, and a page that is drawn again for each line of it takes seconds to settle.
+    private static let batchInterval: Duration = .milliseconds(50)
+
+    @ObservationIgnored private var pending: [LogLine] = []
+    @ObservationIgnored private var flush: Task<Void, Never>?
 
     var plainText: String {
         entries.map(\.plainText).joined(separator: "\n")
@@ -41,13 +47,29 @@ final class LogTail {
             replacesEntries = true
             do {
                 for try await line in store.logs(profileID: profileID) {
-                    append(line)
+                    enqueue(line)
                 }
             } catch {
                 if DaemonFailure(error) == .notFound { return }
             }
             try? await Task.sleep(for: Self.retryInterval)
         }
+    }
+
+    func enqueue(_ line: LogLine) {
+        pending.append(line)
+        guard flush == nil else { return }
+        flush = Task { [weak self] in
+            try? await Task.sleep(for: Self.batchInterval)
+            self?.flushPending()
+        }
+    }
+
+    private func flushPending() {
+        flush = nil
+        let lines = pending
+        pending = []
+        for line in lines { append(line) }
     }
 
     func append(_ line: LogLine) {

@@ -493,6 +493,18 @@ struct AppModelTests {
         #expect(Set(tail.entries.map(\.id)).count == tail.entries.count, "line ids stay unique")
     }
 
+    @Test func showsLinesThatComeTogetherInOneUpdate() async throws {
+        let tail = LogTail()
+        for number in 0..<100 {
+            var line = LogLine()
+            line.text = "line \(number)"
+            tail.enqueue(line)
+        }
+        #expect(tail.entries.isEmpty, "the page is not drawn again for each line")
+        try await waitUntil("the lines to be shown") { tail.entries.count == 100 }
+        #expect(tail.entries.first?.text == "line 0")
+    }
+
     @Test func readsDiagnosticsAndRefreshesAfterACommand() async throws {
         try await withDaemon { _, store in
             let (model, _) = makeModel(store)

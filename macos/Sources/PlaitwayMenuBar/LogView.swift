@@ -35,6 +35,8 @@ struct LogView: View {
     @State private var query = ""
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var isAtEnd = true
+    /// The tail has had the moment it needs to bring the lines that are already there.
+    @State private var isWaiting = true
     @FocusState private var isSearching: Bool
 
     var body: some View {
@@ -84,12 +86,12 @@ struct LogView: View {
             }
             Group {
                 if lines.isEmpty {
-                    if query.isEmpty {
+                    if !query.isEmpty {
+                        ContentUnavailableView.search(text: query)
+                    } else if !isWaiting {
                         ContentUnavailableView {
                             Label { Text("No Log Lines", bundle: .module) } icon: { Image(systemName: "text.alignleft") }
                         }
-                    } else {
-                        ContentUnavailableView.search(text: query)
                     }
                 } else {
                     ScrollView {
@@ -115,6 +117,11 @@ struct LogView: View {
         }
         .onChange(of: model.searchRequest) { isSearching = true }
         .task(id: profileID) { await tail.run(store: model.store, profileID: profileID) }
+        .task(id: profileID) {
+            isWaiting = true
+            try? await Task.sleep(for: .milliseconds(300))
+            isWaiting = false
+        }
     }
 
     private var visibleLines: [LogTail.Entry] {
