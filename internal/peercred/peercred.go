@@ -26,6 +26,21 @@ type Info struct {
 	// truncated), only GID on Linux (SO_PEERCRED has no supplementary groups).
 	Groups []uint32
 	PID    int32
+	// Windows replaces UID, GID and Groups there (a SID is not a number), and is
+	// nil everywhere else. Policy code must look at it first: UID is 0 on Windows,
+	// which on a Unix system would mean root.
+	Windows *WindowsIdentity
+}
+
+// WindowsIdentity is the caller's token, read once when the pipe was accepted.
+type WindowsIdentity struct {
+	// SID is the user, in the S-1-5-21-... string form.
+	SID string
+	// Administrator is true when the token has the Administrators group, enabled
+	// (elevated) or deny-only (an administrator's filtered token).
+	Administrator bool
+	// SessionID is the logon session the process runs in.
+	SessionID uint32
 }
 
 // ErrUnsupported is returned by platforms without a peer-credential lookup.

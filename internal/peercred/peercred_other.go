@@ -1,9 +1,7 @@
-//go:build !darwin && !linux
+//go:build !darwin && !linux && !windows
 
 package peercred
 
 import "net"
 
-// Windows named pipes expose the client through GetNamedPipeClientProcessId and
-// ImpersonateNamedPipeClient instead; not implemented yet.
 func lookup(net.Conn) (Info, error) { return Info{}, ErrUnsupported }

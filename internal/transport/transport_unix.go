@@ -1,7 +1,5 @@
 //go:build unix
 
-// Package transport hides the per-OS local IPC mechanism (Unix domain socket
-// here, named pipe on Windows) behind four functions.
 package transport
 
 import (
