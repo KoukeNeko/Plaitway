@@ -24,10 +24,13 @@ type Config struct {
 	// Log receives the engines' diagnostics; nil discards them.
 	Log *slog.Logger
 	// TunFactory creates the tunnel device with the given MTU. The default
-	// creates a utun device, which needs root.
+	// creates the platform's device, which needs root or, on Windows, an
+	// elevated process: a utun on macOS, a wintun adapter named after the
+	// profile on Windows.
 	TunFactory func(mtu int) (tun.Device, error)
 	// Interfaces applies addresses and MTU to the new tunnel interface. The
-	// default runs /sbin/ifconfig, which needs root.
+	// default runs /sbin/ifconfig on macOS and calls the IP Helper API on
+	// Windows, which both need privilege.
 	Interfaces Interfaces
 
 	// Seams for tests in this package.
@@ -39,17 +42,18 @@ type Config struct {
 	// The pause after a failed lookup starts at retryMin, doubles and stops at
 	// retryMax.
 	retryMin, retryMax time.Duration
+	// adapterPrefix starts the name of the Windows adapters; the tests that
+	// create real ones use a scratch prefix so that they never touch an adapter
+	// of the daemon.
+	adapterPrefix string
 }
 
 func (c Config) withDefaults() Config {
 	if c.Log == nil {
 		c.Log = slog.New(slog.DiscardHandler)
 	}
-	if c.TunFactory == nil {
-		c.TunFactory = func(mtu int) (tun.Device, error) { return tun.CreateTUN("utun", mtu) }
-	}
-	if c.Interfaces == nil {
-		c.Interfaces = ifconfig{}
+	if c.adapterPrefix == "" {
+		c.adapterPrefix = defaultAdapterPrefix
 	}
 	if c.lookup == nil {
 		c.lookup = func(ctx context.Context, host string) ([]netip.Addr, error) {
@@ -84,9 +88,26 @@ func Backend(cfg Config) tunnel.Backend {
 	}
 }
 
-// probe: wireguard-go is linked into the daemon, so it is always available.
+// probe: wireguard-go is linked into the daemon, so it is available unless
+// the platform lacks something it needs (on Windows, a trusted wintun.dll).
 func probe() tunnel.EngineInfo {
-	return tunnel.EngineInfo{Available: true, Version: moduleVersion()}
+	// The version comes second: it includes what the check just loaded.
+	err := checkPlatform()
+	info := tunnel.EngineInfo{Version: engineVersion()}
+	if err != nil {
+		info.Detail = err.Error()
+		return info
+	}
+	info.Available = true
+	return info
+}
+
+func engineVersion() string {
+	version := moduleVersion()
+	if extra := platformVersion(); extra != "" {
+		return version + " (" + extra + ")"
+	}
+	return version
 }
 
 func moduleVersion() string {

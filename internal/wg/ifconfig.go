@@ -1,3 +1,5 @@
+//go:build !windows
+
 package wg
 
 import (
@@ -8,13 +10,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-// Interfaces applies the profile's addresses and MTU to a tunnel interface the
-// daemon has just created. The interface goes away when its device is closed,
-// so there is nothing to undo.
-type Interfaces interface {
-	Configure(ctx context.Context, name string, addrs []netip.Prefix, mtu int) error
-}
 
 // ifconfig is the default Interfaces: /sbin/ifconfig, which needs root.
 type ifconfig struct{}

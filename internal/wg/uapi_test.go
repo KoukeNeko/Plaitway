@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/tuntest"
 )
@@ -197,7 +196,9 @@ PersistentKeepalive = 25
 		t.Fatal(err)
 	}
 	silent := &device.Logger{Verbosef: device.DiscardLogf, Errorf: device.DiscardLogf}
-	dev := device.NewDevice(tuntest.NewChannelTUN().TUN(), conn.NewDefaultBind(), silent)
+	// newBind, not wireguard-go's default: on Windows the suite swaps in a bind
+	// that listens on loopback only, and this device does come up.
+	dev := device.NewDevice(tuntest.NewChannelTUN().TUN(), newBind(), silent)
 	defer dev.Close()
 	if err := dev.IpcSet(p.uapiConfig([]netip.AddrPort{netip.MustParseAddrPort("127.0.0.1:51820")})); err != nil {
 		t.Fatalf("IpcSet: %v", err)

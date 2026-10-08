@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -317,10 +318,25 @@ func TestRebindShakesHandsAgain(t *testing.T) {
 	sendPacket(t, server.rec.tun, client.rec.tun, ping(clientTunnel, serverTunnel))
 }
 
+// testListenHost is where a test binds a UDP port it wants the device to find
+// taken: where the device itself listens. On Windows that is loopback only (see
+// loopbackbind_windows_test.go); a socket on every address makes the firewall
+// ask the person at the keyboard.
+func testListenHost() string {
+	if runtime.GOOS == "windows" {
+		return "127.0.0.1"
+	}
+	return "0.0.0.0"
+}
+
 // otherLocalIPv4 is an address of this host besides 127.0.0.1 that the server
-// socket, bound to every address, answers on.
+// socket, bound to every address, answers on. On Windows the test sockets
+// listen on 127.0.0.2 as well, which keeps the test on loopback.
 func otherLocalIPv4(t *testing.T) netip.Addr {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		return netip.MustParseAddr("127.0.0.2")
+	}
 	ifaceAddrs, err := net.InterfaceAddrs()
 	if err != nil {
 		t.Skipf("cannot list the host's addresses: %v", err)
@@ -688,7 +704,7 @@ func requireTunClosed(t *testing.T, rec *recorder) {
 // the OS for it by binding the port a second time.
 func portTakenMessage(t *testing.T, port int) string {
 	t.Helper()
-	second, err := net.ListenPacket("udp4", fmt.Sprintf("0.0.0.0:%d", port))
+	second, err := net.ListenPacket("udp4", fmt.Sprintf("%s:%d", testListenHost(), port))
 	if err == nil {
 		second.Close()
 		t.Fatalf("UDP port %d can be bound twice", port)
@@ -704,7 +720,7 @@ func portTakenMessage(t *testing.T, port int) string {
 // reports what goes wrong afterwards in its status, and these failures do not
 // pass by themselves.
 func TestStartFailures(t *testing.T) {
-	busy, err := net.ListenPacket("udp4", "0.0.0.0:0")
+	busy, err := net.ListenPacket("udp4", testListenHost()+":0")
 	if err != nil {
 		t.Fatal(err)
 	}

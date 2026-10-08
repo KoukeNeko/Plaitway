@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
+	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
@@ -159,9 +159,26 @@ func (e *engine) run(ctx context.Context) {
 	e.monitor(ctx)
 }
 
+// createTun makes the tunnel device: the configured factory, else the
+// platform's own.
+func (e *engine) createTun(mtu int) (tun.Device, error) {
+	if e.cfg.TunFactory != nil {
+		return e.cfg.TunFactory(mtu)
+	}
+	return createPlatformTun(e.spec.Owner, e.cfg.adapterPrefix, mtu, e.log)
+}
+
+// interfaces is the configured Interfaces, else the platform's own for dev.
+func (e *engine) interfaces(dev tun.Device) Interfaces {
+	if e.cfg.Interfaces != nil {
+		return e.cfg.Interfaces
+	}
+	return platformInterfaces(dev)
+}
+
 func (e *engine) bringUp(ctx context.Context) error {
 	mtu := cmp.Or(e.prof.mtu, device.DefaultMTU)
-	tunDev, err := e.cfg.TunFactory(mtu)
+	tunDev, err := e.createTun(mtu)
 	if err != nil {
 		return fmt.Errorf("create tunnel device: %w", err)
 	}
@@ -171,10 +188,10 @@ func (e *engine) bringUp(ctx context.Context) error {
 		return fmt.Errorf("read tunnel device name: %w", err)
 	}
 	// From here on the device owns tunDev: closing the device closes it.
-	e.dev = device.NewDevice(tunDev, conn.NewStdNetBind(), e.deviceLogger())
+	e.dev = device.NewDevice(tunDev, newBind(), e.deviceLogger())
 	e.feed.update(func(s *tunnel.Status) { s.Iface = e.iface })
 
-	if err := e.cfg.Interfaces.Configure(ctx, e.iface, e.prof.addresses, mtu); err != nil {
+	if err := e.interfaces(tunDev).Configure(ctx, e.iface, e.prof.addresses, mtu); err != nil {
 		return fmt.Errorf("configure %s: %w", e.iface, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -256,6 +273,8 @@ func (e *engine) release() {
 	}
 	if e.dev != nil {
 		e.dev.Close()
+		// Stop promises that the interface is gone.
+		awaitInterfaceRemoval(e.iface, e.log)
 	}
 }
 
