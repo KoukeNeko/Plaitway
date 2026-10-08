@@ -66,7 +66,7 @@ internal sealed class AppHost : IDialogHost
         ICredentialStore credentials = isOverridden ? new InMemoryCredentialStore() : new WindowsCredentialStore();
         IElevatedLauncher launcher = isOverridden ? new DisabledElevatedLauncher() : new ShellElevatedLauncher();
         var store = new ProfileStore(api, credentials, scheduler, logs.CreateLogger<ProfileStore>());
-        var locator = new HelperLocator(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), File.Exists);
+        var locator = new HelperLocator(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), File.Exists, new WindowsHelperTrust());
         var installer = new HelperInstaller(new ScmHelperService(), launcher, locator);
         var startup = new RunKeyStartup(Environment.ProcessPath ?? string.Empty, isAvailable: !DaemonLocation.OverrideEnabled);
         _model = new AppModel(store, installer, startup, _text, new AppEnvironment(AppVersion(), isOverridden), TimeProvider.System, logs.CreateLogger<AppModel>());
