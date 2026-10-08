@@ -239,7 +239,13 @@ func TestABurstOfChangesIsJudgedByWhereItEnded(t *testing.T) {
 	moveTo(mon, networkOf(osnet.LinkOther))
 	e.waitState(p.Id, pb.ProfileState_PROFILE_STATE_DISCONNECTED)
 	want := []pb.ProfileState{pb.ProfileState_PROFILE_STATE_CONNECTED, pb.ProfileState_PROFILE_STATE_DISCONNECTING, pb.ProfileState_PROFILE_STATE_DISCONNECTED}
-	if got := w.states(p.Id); !slices.Equal(got, want) {
+	// waitState reads the manager; the recorder is fed through the event stream, a goroutine later.
+	var got []pb.ProfileState
+	eventually(t, "the watcher to see the disconnect", func() bool {
+		got = w.states(p.Id)
+		return slices.Contains(got, pb.ProfileState_PROFILE_STATE_DISCONNECTED)
+	})
+	if !slices.Equal(got, want) {
 		t.Fatalf("states = %v, want %v", got, want)
 	}
 }
