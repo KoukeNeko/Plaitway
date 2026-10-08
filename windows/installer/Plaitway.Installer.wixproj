@@ -6,8 +6,13 @@
 
       InstallerPlatform   x64 (default) or arm64; the payload staged for it has to match
       ProductVersion      the VERSION file, major.minor.patch
-      ProductCode         derived from the upgrade code, the version and the platform by the build script
+      ProductCode         derived from the upgrade code, the version, the platform, the language and the payload
+                          by the build script, so that a build of the same version with other files is an upgrade
+      UpgradeCode         the identity of the product across versions; it never changes
       PayloadDir          the staged files: plaitwayd.exe, plaitway.exe, wintun.dll, app\, licenses\
+      LicenseFile         the licence of Plaitway as RTF, for the setup dialog
+      Cultures            the languages built; the build script builds one per call, because each has its own
+                          ProductCode
   -->
   <PropertyGroup>
     <OutputType>Package</OutputType>
@@ -16,11 +21,18 @@
     <OutputName>Plaitway</OutputName>
     <Cultures>en-US;zh-TW</Cultures>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- ICE03: the language lists in the version resources of Microsoft's libraries hold identifiers that ICE03 does not know; the
+         language only matters to the installer's choice between two files of one version.
+         ICE43, ICE57: the shortcut in the Start menu of all users belongs to a component whose key is the app's file, which is right for a
+         per-machine product; the checks assume a per-user shortcut.
+         ICE61: a build of the same version with other files replaces the installed one (AllowSameVersionUpgrades), for tests and respins. -->
+    <SuppressIces>ICE03;ICE43;ICE57;ICE61</SuppressIces>
+    <UpgradeCode>BDA29F25-493D-4DF8-8B16-5A612BC4E954</UpgradeCode>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
     <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildProjectDirectory)\payload</PayloadDir>
     <IconFile Condition="'$(IconFile)' == ''">$(MSBuildProjectDirectory)\..\Sources\Plaitway.App\Assets\Plaitway.ico</IconFile>
     <LicenseFile Condition="'$(LicenseFile)' == ''">$(PayloadDir)\License.rtf</LicenseFile>
-    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);ProductCode=$(ProductCode);PayloadDir=$(PayloadDir);IconFile=$(IconFile);LicenseFile=$(LicenseFile)</DefineConstants>
+    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);ProductCode=$(ProductCode);UpgradeCode=$(UpgradeCode);PayloadDir=$(PayloadDir);IconFile=$(IconFile);LicenseFile=$(LicenseFile)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

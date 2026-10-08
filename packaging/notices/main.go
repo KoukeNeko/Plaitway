@@ -11,6 +11,9 @@
 //
 // With -platform linux it lists the Go modules linked into the Linux build and
 // nothing else: the Linux package bundles no OpenVPN and has no Swift code.
+// With -windows it writes the notices of the Windows installer instead, from
+// the Go modules, the NuGet packages of the app and the .NET runtime of its
+// publish folder (windows.go).
 package main
 
 import (
@@ -60,8 +63,14 @@ func main() {
 		"where the written source offer says to ask (default: $PLAITWAY_SOURCE_CONTACT, else the https URL of the go.mod module)")
 	platform := flag.String("platform", "macos", "macos, or linux for the Go modules of the Linux build only")
 	outPath := flag.String("o", "", "output file (default: stdout)")
+	windowsMode := flag.Bool("windows", false, "write the notices of the Windows installer instead (see windows.go)")
+	windows := windowsFlags()
 	flag.Parse()
 
+	if *windowsMode {
+		runWindows(*root, *outPath, *windows)
+		return
+	}
 	if *checkouts == "" {
 		*checkouts = filepath.Join(*root, "macos", ".build", "checkouts")
 	}
@@ -78,11 +87,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, "notices:", err)
 		os.Exit(1)
 	}
-	if *outPath == "" {
+	emit(*outPath, doc)
+}
+
+// emit writes the finished document to the file, or to stdout without one.
+func emit(outPath, doc string) {
+	if outPath == "" {
 		fmt.Print(doc)
 		return
 	}
-	if err := os.WriteFile(*outPath, []byte(doc), 0o644); err != nil {
+	if err := os.WriteFile(outPath, []byte(doc), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "notices:", err)
 		os.Exit(1)
 	}
@@ -269,10 +283,18 @@ func tarballFile(tarball, name string) (string, error) {
 // client for goos and goarch, plus the Go standard library, which is linked
 // into every Go binary. The architecture does not change the set.
 func goComponents(root, goos, goarch string) ([]component, error) {
+	return goComponentsFor(root, goTarget{goos, goarch, "1"})
+}
+
+// goTarget is the platform whose build of the daemon and the client is listed;
+// the modules differ by platform.
+type goTarget struct{ goos, goarch, cgo string }
+
+func goComponentsFor(root string, target goTarget) ([]component, error) {
 	const format = `{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Dir}}{{end}}{{end}}`
 	cmd := exec.Command("go", "list", "-deps", "-f", format, "./cmd/plaitwayd", "./cmd/plaitway")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=1")
+	cmd.Env = append(os.Environ(), "GOOS="+target.goos, "GOARCH="+target.goarch, "CGO_ENABLED="+target.cgo)
 	cmd.Stderr = os.Stderr
 	listing, err := cmd.Output()
 	if err != nil {
@@ -468,16 +490,27 @@ the distribution, whose license and source come from that package.
 		b.WriteString("\n## Swift packages\n\n")
 		writeTable(&b, swiftPkgs)
 	}
-	b.WriteString(`
+	b.WriteString(trademarksSection(""))
+	writeTexts(&b, append(append(append([]component{}, bundled...), goMods...), swiftPkgs...))
+	return b.String()
+}
+
+// trademarksSection is the notice about the names of other projects; extra is
+// further sentences of a platform, or nothing.
+func trademarksSection(extra string) string {
+	return `
 ## Trademarks
 
 OpenVPN is a registered trademark of OpenVPN Inc. WireGuard is a registered
 trademark of Jason A. Donenfeld. Plaitway is not affiliated with or endorsed
 by either.
-`)
+` + extra
+}
 
+// writeTexts writes each distinct license or notice text once, with the
+// components it applies to.
+func writeTexts(b *strings.Builder, all []component) {
 	b.WriteString("\n## License and notice texts\n")
-	all := append(append(append([]component{}, bundled...), goMods...), swiftPkgs...)
 	type group struct {
 		document
 		users []string
@@ -498,12 +531,11 @@ by either.
 	}
 	sort.SliceStable(order, func(i, j int) bool { return order[i].kind < order[j].kind })
 	for _, g := range order {
-		fmt.Fprintf(&b, "\n### %s\n\nApplies to: %s\n\n", g.kind, strings.Join(g.users, ", "))
+		fmt.Fprintf(b, "\n### %s\n\nApplies to: %s\n\n", g.kind, strings.Join(g.users, ", "))
 		for _, line := range strings.Split(g.body, "\n") {
 			b.WriteString("    " + line + "\n")
 		}
 	}
-	return b.String()
 }
 
 // writeSourceOffer writes the GPLv2 source offer for the bundled programs: the

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="en-US" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+  <!-- Wording follows the app and the macOS catalog: Helper, Uninstall. Errors say what happened and what to do. -->
+  <String Id="Language" Value="1033" />
+  <String Id="ProductComments" Value="VPN manager for OpenVPN and WireGuard profiles" />
+  <String Id="FeatureTitle" Value="Plaitway" />
+  <String Id="DowngradeBlocked" Value="A newer version of Plaitway is installed. Uninstall it, then run this setup again." />
+  <String Id="WindowsTooOld" Value="Plaitway needs 64-bit Windows 10 version 1809 or later." />
+  <String Id="InstallFolderFixed" Value="Plaitway installs only to its folder in Program Files, because the Helper service must run from a folder that only administrators can change. Run the setup again without INSTALLFOLDER." />
+  <String Id="ProgressStopHelper" Value="Stopping the Plaitway Helper service" />
+  <String Id="ProgressInstallHelper" Value="Registering the Plaitway Helper service" />
+  <String Id="ProgressUninstallHelper" Value="Removing the Plaitway Helper service" />
+</WixLocalization>

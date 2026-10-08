@@ -1,7 +1,192 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="Probe" Manufacturer="x" Version="1.0.0" UpgradeCode="11111111-2222-3333-4444-555555555555">
-    <Feature Id="Main"><ComponentGroupRef Id="G" /></Feature>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!--
+    The product: files in %ProgramFiles%\Plaitway, a Start menu shortcut, and the Plaitway Helper service.
+    The service is not described here. The installer runs the daemon's own `install`, `uninstall` and `stop`
+    (cmd/plaitwayd) from the installed executable, so that what a service is stays in one place; the contract
+    is packaging\windows\service\README.md. The MSI has no ServiceInstall rows on purpose.
+
+    Everything the installer does to the service, in script order (deferred actions, run as SYSTEM):
+
+      HelperRestore    rollback   restores the service of the previous version        (repair, upgrade)
+      HelperStop       deferred   stop the running service before its files change    (repair, upgrade)
+      InstallFiles
+      HelperUndo       rollback   uninstall the service just registered               (first install)
+      HelperInstall    deferred   install -start, or install -update -start           (all but removal)
+
+      HelperUndoRemove rollback   register the service again if the files cannot go   (removal)
+      HelperUninstall  deferred   uninstall [-purge]                                  (removal, not an upgrade)
+      RemoveFiles
+
+    A rollback action undoes the one after it, so HelperRestore runs after the files are back and HelperUndo
+    before they are gone. The old product's removal during an upgrade (RemoveExistingProducts, scheduled after
+    InstallExecute) skips HelperUninstall: UPGRADINGPRODUCTCODE is set, and the new product has registered the
+    service already.
+  -->
+
+  <?define ProductName = "Plaitway" ?>
+  <?define Manufacturer = "KoukeNeko" ?>
+  <?define HomePage = "https://github.com/KoukeNeko/Plaitway" ?>
+  <?define ServiceRegistryKey = "SYSTEM\CurrentControlSet\Services\PlaitwayHelper" ?>
+  <?define BinaryAction = "Wix4UtilCA_$(sys.BUILDARCHSHORT)" ?>
+  <?define Quote = "&quot;" ?>
+
+  <?if "$(ProductCode)" = ""?>
+    <?define EffectiveProductCode = "*" ?>
+  <?else?>
+    <?define EffectiveProductCode = "$(ProductCode)" ?>
+  <?endif?>
+
+  <Package Name="$(ProductName)" Manufacturer="$(Manufacturer)" Version="$(ProductVersion)"
+           ProductCode="$(EffectiveProductCode)" UpgradeCode="$(UpgradeCode)"
+           Language="!(loc.Language)" Codepage="65001" Scope="perMachine" Compressed="yes">
+
+    <!-- The settings of an upgrade are the product's decisions, see packaging\windows\README.md. -->
+    <MajorUpgrade Schedule="afterInstallExecute" AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="!(loc.DowngradeBlocked)" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="PlaitwayIcon" SourceFile="$(IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="PlaitwayIcon" />
+    <Property Id="ARPCOMMENTS" Value="!(loc.ProductComments)" />
+    <Property Id="ARPHELPLINK" Value="$(HomePage)" />
+    <Property Id="ARPURLINFOABOUT" Value="$(HomePage)" />
+
+    <!-- The two ways to leave the default of an uninstall, on the command line only; the Add or remove programs
+         page runs the removal without asking anything. -->
+    <Property Id="PLAITWAY_PURGE_DATA" Secure="yes" />
+    <Property Id="PLAITWAY_FORCE_UNINSTALL" Secure="yes" />
+
+    <!-- Read before anything changes. HELPER_SERVICE_IMAGEPATH is set when the service is registered, whoever
+         registered it; HELPER_EXE_PRESENT when the executable that the service is installed from is still there,
+         so that a repair of a product whose files were deleted does not try to run what is gone. -->
+    <Property Id="HELPER_SERVICE_IMAGEPATH" Secure="yes">
+      <RegistrySearch Id="HelperServiceImagePath" Root="HKLM" Key="$(ServiceRegistryKey)" Name="ImagePath" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="HELPER_EXE_PRESENT" Secure="yes">
+      <DirectorySearch Id="InstalledFolder" Path="[ProgramFiles64Folder]$(ProductName)" Depth="0">
+        <FileSearch Id="InstalledHelperExe" Name="plaitwayd.exe" />
+      </DirectorySearch>
+    </Property>
+
+    <Launch Condition="Installed OR (VersionNT64 AND WindowsBuild &gt;= 17763)" Message="!(loc.WindowsTooOld)" />
+
+    <!-- The folder is fixed: `plaitwayd install` refuses an executable that a standard user could replace, and
+         the installer has no dialog that changes it, so only the command line could. -->
+    <SetProperty Id="EXPECTED_INSTALLFOLDER" Action="SetExpectedInstallFolder" Value="[ProgramFiles64Folder]$(ProductName)\" Sequence="execute" After="CostFinalize" Condition="NOT Installed" />
+    <CustomAction Id="RefuseOtherInstallFolder" Error="!(loc.InstallFolderFixed)" />
+
+    <!-- One action for all four ways of running the daemon's command: the message of its stderr goes to the
+         verbose log (`msiexec /l*v`), and a non-zero exit code fails the action. The Ignore variants are for
+         undoing, which must not fail, and for an uninstall that the person has asked to force. -->
+    <CustomAction Id="HelperStop" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="HelperRestore" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="HelperUndo" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="HelperInstall" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="HelperUndoRemove" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="HelperUninstall" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="HelperUninstallForced" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- The command lines. Each begins with the quoted program, which WixQuietExec demands. The arguments that
+         depend on the machine are properties, set before the data of the actions that use them. -->
+    <Property Id="HELPER_INSTALL_ARGS" Value="install -start" />
+    <Property Id="HELPER_UNINSTALL_ARGS" Value="uninstall" />
+    <SetProperty Id="HELPER_INSTALL_ARGS" Action="ChooseHelperInstallArgs" Value="install -update -start"
+                 Sequence="execute" Before="SetHelperInstallData" Condition="HELPER_SERVICE_IMAGEPATH" />
+    <SetProperty Id="HELPER_UNINSTALL_ARGS" Action="ChooseHelperUninstallArgs" Value="uninstall -purge"
+                 Sequence="execute" Before="SetHelperUninstallData" Condition="PLAITWAY_PURGE_DATA" />
+
+    <SetProperty Id="HelperStop" Action="SetHelperStopData" Value="$(Quote)[#PlaitwaydExe]$(Quote) stop"
+                 Sequence="execute" Before="SetHelperRestoreData" />
+    <SetProperty Id="HelperRestore" Action="SetHelperRestoreData" Value="$(Quote)[#PlaitwaydExe]$(Quote) install -update -start"
+                 Sequence="execute" Before="HelperRestore" />
+    <SetProperty Id="HelperUndo" Action="SetHelperUndoData" Value="$(Quote)[#PlaitwaydExe]$(Quote) uninstall"
+                 Sequence="execute" Before="HelperUndo" />
+    <SetProperty Id="HelperInstall" Action="SetHelperInstallData" Value="$(Quote)[#PlaitwaydExe]$(Quote) [HELPER_INSTALL_ARGS]"
+                 Sequence="execute" Before="HelperInstall" />
+    <SetProperty Id="HelperUndoRemove" Action="SetHelperUndoRemoveData" Value="$(Quote)[#PlaitwaydExe]$(Quote) install -start"
+                 Sequence="execute" Before="HelperUndoRemove" />
+    <SetProperty Id="HelperUninstall" Action="SetHelperUninstallData" Value="$(Quote)[#PlaitwaydExe]$(Quote) [HELPER_UNINSTALL_ARGS]"
+                 Sequence="execute" Before="SetHelperUninstallForcedData" />
+    <SetProperty Id="HelperUninstallForced" Action="SetHelperUninstallForcedData" Value="$(Quote)[#PlaitwaydExe]$(Quote) [HELPER_UNINSTALL_ARGS]"
+                 Sequence="execute" Before="SetHelperUndoRemoveData" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RefuseOtherInstallFolder" After="SetExpectedInstallFolder" Condition="NOT Installed AND INSTALLFOLDER ~&lt;&gt; EXPECTED_INSTALLFOLDER" />
+
+      <Custom Action="HelperRestore" Before="HelperStop" Condition="NOT REMOVE AND HELPER_SERVICE_IMAGEPATH AND HELPER_EXE_PRESENT" />
+      <Custom Action="HelperStop" Before="RemoveFiles" Condition="NOT REMOVE AND HELPER_SERVICE_IMAGEPATH AND HELPER_EXE_PRESENT" />
+      <Custom Action="HelperUndo" After="InstallFiles" Condition="NOT REMOVE AND NOT HELPER_SERVICE_IMAGEPATH" />
+      <Custom Action="HelperInstall" After="HelperUndo" Condition="NOT REMOVE" />
+
+      <Custom Action="HelperUndoRemove" Before="HelperUninstall" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND HELPER_EXE_PRESENT" />
+      <Custom Action="HelperUninstall" Before="HelperUninstallForced" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND HELPER_EXE_PRESENT AND NOT PLAITWAY_FORCE_UNINSTALL" />
+      <Custom Action="HelperUninstallForced" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND HELPER_EXE_PRESENT AND PLAITWAY_FORCE_UNINSTALL" />
+    </InstallExecuteSequence>
+    <UI>
+      <ProgressText Action="HelperStop" Message="!(loc.ProgressStopHelper)" />
+      <ProgressText Action="HelperInstall" Message="!(loc.ProgressInstallHelper)" />
+      <ProgressText Action="HelperUninstall" Message="!(loc.ProgressUninstallHelper)" />
+      <ProgressText Action="HelperUninstallForced" Message="!(loc.ProgressUninstallHelper)" />
+    </UI>
+
+    <!-- A setup with a licence page and an Install button; the folder cannot be changed. -->
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(LicenseFile)" />
+
+    <Feature Id="Plaitway" Title="!(loc.FeatureTitle)" Level="1" AllowAbsent="no" AllowAdvertise="no">
+      <ComponentGroupRef Id="CoreFiles" />
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="LicenseFiles" />
+    </Feature>
   </Package>
-  <Fragment><ComponentGroup Id="G" Directory="INSTALLFOLDER"><Component><File Source="Package.wxs" /></Component></ComponentGroup></Fragment>
-  <Fragment><StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="Probe" /></StandardDirectory></Fragment>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <!-- No LockPermissions: the folder inherits the access list of Program Files, which is what the daemon's
+           check of its own location accepts. -->
+      <Directory Id="INSTALLFOLDER" Name="$(ProductName)">
+        <Directory Id="APPFOLDER" Name="app" />
+        <Directory Id="LICENSESFOLDER" Name="licenses" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+  </Fragment>
+
+  <!-- plaitwayd.exe, plaitway.exe and wintun.dll sit together: the daemon loads wintun.dll from the folder of its
+       own executable, and the app finds the daemon one folder above its own. -->
+  <Fragment>
+    <ComponentGroup Id="CoreFiles" Directory="INSTALLFOLDER">
+      <Component>
+        <File Id="PlaitwaydExe" Source="$(PayloadDir)\plaitwayd.exe" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Id="PlaitwayCliExe" Source="$(PayloadDir)\plaitway.exe" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Id="WintunDll" Source="$(PayloadDir)\wintun.dll" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="APPFOLDER">
+      <Component>
+        <File Id="PlaitwayAppExe" Source="$(PayloadDir)\app\Plaitway.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="$(ProductName)" WorkingDirectory="APPFOLDER" Advertise="no" />
+        </File>
+      </Component>
+      <Files Include="$(PayloadDir)\app\**">
+        <Exclude Files="$(PayloadDir)\app\Plaitway.exe" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="LicenseFiles" Directory="LICENSESFOLDER">
+      <Files Include="$(PayloadDir)\licenses\**" />
+    </ComponentGroup>
+  </Fragment>
+
 </Wix>
