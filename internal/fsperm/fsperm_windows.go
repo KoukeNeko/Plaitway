@@ -22,13 +22,19 @@ const restrictedMessageSuffix = " was accessible to others, restricted to SYSTEM
 // checks it), and perm has no meaning here. Inside the data root even an
 // existing directory is checked, see DataRoot.
 func MkdirAll(dir string, _ os.FileMode) error {
-	if err := makeDirs(dir); err != nil {
-		return err
-	}
 	p, err := currentPrincipals()
 	if err != nil {
 		return err
 	}
+	// Before anything is created: a link planted at or below the data root would
+	// otherwise make this process create directories where its planter chose.
+	if _, err := checkDataRoot(dir, p); err != nil {
+		return err
+	}
+	if err := makeDirs(dir); err != nil {
+		return err
+	}
+	// Again, for what appeared while the directories were made.
 	_, err = checkDataRoot(dir, p)
 	return err
 }

@@ -748,6 +748,41 @@ func TestMkdirAllInsideTheDataRootRefusesAJunctionAsTheLogDirectory(t *testing.T
 	mustBeEmpty(t, outside)
 }
 
+// Found on a real elevated run: a junction at the data root made the daemon
+// create Logs in the target before it refused. Refusing has to come first, or a
+// standard user who plants the junction chooses where a privileged process makes
+// directories.
+func TestMkdirAllInsideTheDataRootCreatesNothingThroughAJunction(t *testing.T) {
+	tests := []struct {
+		name string
+		// plant makes the junction and returns the directory MkdirAll is asked for.
+		plant func(t *testing.T, root, outside string) string
+	}{
+		{"junction as the data root", func(t *testing.T, root, outside string) string {
+			fspermtest.MakeJunction(t, root, outside)
+			return filepath.Join(root, "Logs")
+		}},
+		{"junction below the data root", func(t *testing.T, root, outside string) string {
+			mustMkdir(t, root)
+			fspermtest.MakeJunction(t, filepath.Join(root, "profiles"), outside)
+			return filepath.Join(root, "profiles", "new")
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := useNewDataRoot(t)
+			outside := filepath.Join(t.TempDir(), "outside")
+			mustMkdir(t, outside)
+			dir := test.plant(t, root, outside)
+
+			if err := MkdirAll(dir, 0o755); !errors.Is(err, ErrReparsePoint) {
+				t.Fatalf("MkdirAll = %v, want ErrReparsePoint", err)
+			}
+			mustBeEmpty(t, outside)
+		})
+	}
+}
+
 func TestDataRootIsBelowProgramData(t *testing.T) {
 	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, windows.KF_FLAG_DEFAULT)
 	if err != nil {
