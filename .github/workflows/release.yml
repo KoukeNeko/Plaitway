@@ -77,15 +77,21 @@ jobs:
           # shellcheck disable=SC2046
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
 
-          # By hash: two certificates can share the Developer ID name (packaging/lib.sh).
+          # By hash: two certificates can share the Developer ID name. The one packaging/lib.sh signs
+          # with is preferred, so a release is signed as a build on the maintainer's Mac is.
           identities="$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ {print $2}')"
-          identity="$(head -n 1 <<<"$identities")"
-          if [ -z "$identity" ]; then
+          if [ -z "$identities" ]; then
             echo "::error::MACOS_CERTIFICATE_P12_BASE64 contains no Developer ID Application certificate" >&2
             exit 1
           fi
-          if [ "$(wc -l <<<"$identities" | tr -d ' ')" -gt 1 ]; then
-            echo "::warning::the certificate file holds more than one Developer ID Application identity; signing with $identity"
+          preferred="$(PLAITWAY_SIGN_IDENTITY='' bash -c 'source packaging/lib.sh; printf %s "$SIGN_IDENTITY"')"
+          if grep -qx "$preferred" <<<"$identities"; then
+            identity="$preferred"
+          else
+            identity="$(head -n 1 <<<"$identities")"
+            if [ "$(wc -l <<<"$identities" | tr -d ' ')" -gt 1 ]; then
+              echo "::warning::the certificate file has no identity $preferred, the one packaging/lib.sh signs with; signing with $identity"
+            fi
           fi
           {
             echo "PLAITWAY_SIGN_IDENTITY=$identity"
