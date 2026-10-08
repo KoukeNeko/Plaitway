@@ -1,5 +1,8 @@
 /bin/
 /macos/.build/
+/windows/**/bin/
+/windows/**/obj/
+/windows/artifacts/
 .DS_Store
 /build/
 /plaitwayd

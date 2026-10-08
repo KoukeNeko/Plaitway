@@ -1,0 +1,10 @@
+<Window x:Class="Plaitway.App.Windowing.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Window.SystemBackdrop>
+    <MicaBackdrop />
+  </Window.SystemBackdrop>
+
+  <!-- The content is the shell, put here when the window is made. -->
+  <Grid x:Name="Root" />
+</Window>

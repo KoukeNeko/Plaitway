@@ -1,0 +1,54 @@
+<UserControl x:Class="Plaitway.App.Views.ProfileView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Plaitway.App.Controls"
+             xmlns:local="using:Plaitway.App.Views"
+             IsTabStop="False">
+  <Grid RowSpacing="0">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- Which profile this is and how it stands. -->
+    <StackPanel Orientation="Horizontal" Spacing="12" Margin="24,16,24,0">
+      <controls:StatusGlyph Icon="{x:Bind ViewModel.Icon, Mode=OneWay}" Tone="{x:Bind ViewModel.Tone, Mode=OneWay}" GlyphSize="28" VerticalAlignment="Center" />
+      <StackPanel>
+        <TextBlock Text="{x:Bind ViewModel.Title, Mode=OneWay}" Style="{StaticResource PageTitleStyle}" TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{x:Bind ViewModel.Subtitle, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
+      </StackPanel>
+    </StackPanel>
+
+    <!-- The five pages of a profile. -->
+    <Pivot Grid.Row="1" SelectedIndex="{x:Bind ViewModel.SelectedTabIndex, Mode=TwoWay}" AutomationProperties.Name="{x:Bind ViewModel.Title, Mode=OneWay}">
+      <PivotItem Header="{x:Bind ViewModel.OverviewLabel}">
+        <local:OverviewView ViewModel="{x:Bind ViewModel.Overview}" />
+      </PivotItem>
+      <PivotItem Header="{x:Bind ViewModel.RoutesLabel}">
+        <local:RoutesView ViewModel="{x:Bind ViewModel.Routes}" />
+      </PivotItem>
+      <PivotItem Header="{x:Bind ViewModel.LogsLabel}">
+        <local:LogsView ViewModel="{x:Bind ViewModel.Logs}" />
+      </PivotItem>
+      <PivotItem Header="{x:Bind ViewModel.ConfigurationLabel}">
+        <local:ConfigurationView ViewModel="{x:Bind ViewModel.Configuration}" />
+      </PivotItem>
+      <PivotItem Header="{x:Bind ViewModel.SettingsLabel}">
+        <local:ProfileSettingsView ViewModel="{x:Bind ViewModel.Settings}" />
+      </PivotItem>
+    </Pivot>
+
+    <!-- What can be done with the profile as a whole, at the bottom of each of its pages. -->
+    <Border Grid.Row="2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0,1,0,0" Padding="24,12">
+      <StackPanel x:Name="ActionBar" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+        <Button x:Name="RetryButton" Content="{x:Bind ViewModel.Text.Retry}" Command="{x:Bind ViewModel.RetryCommand}"
+                Visibility="{x:Bind controls:Bind.Visible(ViewModel.ShowsRetry), Mode=OneWay}" />
+        <Button x:Name="ToggleButton" Content="{x:Bind ViewModel.ToggleLabel, Mode=OneWay}" Command="{x:Bind ViewModel.ToggleCommand}"
+                IsEnabled="{x:Bind ViewModel.CanToggle, Mode=OneWay}" MinWidth="120"
+                Style="{x:Bind local:ProfileView.ToggleStyle(ViewModel.ToggleIsProminent), Mode=OneWay}" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

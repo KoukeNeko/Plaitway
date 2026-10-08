@@ -1,0 +1,146 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Fallback: run plaitwayd.exe install -start as administrator" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "替代方式：以系統管理員身分執行 plaitwayd.exe install -start"
+          }
+        }
+      }
+    },
+    "Helper command failed with exit code %lld" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式指令失敗，結束代碼 %lld"
+          }
+        }
+      }
+    },
+    "Helper stopped" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式已停止"
+          }
+        }
+      }
+    },
+    "Running" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行中"
+          }
+        }
+      }
+    },
+    "Running, not answering." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行中，但沒有回應。"
+          }
+        }
+      }
+    },
+    "Start the helper again from this version." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請以這個版本重新啟動輔助程式。"
+          }
+        }
+      }
+    },
+    "Start Helper" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "啟動輔助程式"
+          }
+        }
+      }
+    },
+    "Starting" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "啟動中"
+          }
+        }
+      }
+    },
+    "Stopped" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已停止"
+          }
+        }
+      }
+    },
+    "Stopping" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止中"
+          }
+        }
+      }
+    },
+    "The helper file is missing from this copy of Plaitway. Install Plaitway again." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這份 Plaitway 缺少輔助程式檔案。請重新安裝 Plaitway。"
+          }
+        }
+      }
+    },
+    "The helper manages routes and DNS with administrator rights. Windows asks for confirmation once." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式以系統管理員權限管理路由與 DNS，Windows 會要求確認一次。"
+          }
+        }
+      }
+    },
+    "The helper's pipe belongs to an unexpected account. Plaitway does not use it." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式的管道屬於非預期的帳戶，Plaitway 不會使用它。"
+          }
+        }
+      }
+    },
+    "This account may not use the helper." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個帳戶無權使用輔助程式。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

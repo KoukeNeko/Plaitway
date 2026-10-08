@@ -1,0 +1,59 @@
+<Project>
+
+  <!--
+    Builds the strings of a project from the two catalogs, the macOS one (Localizable.xcstrings, the source of
+    every string both apps share) and the Windows one (Resources\Windows.xcstrings, for what exists only here).
+
+      UiText   a project that sets GenerateUiText=true gets UiText.g.cs, the class its code reads strings from
+      Resw     a project that sets GenerateResw=true gets Strings\<language>\Resources.resw as PRI resources,
+               which is what WinUI loads
+
+    The tool is Tools\Plaitway.Localization; it is built before the project that uses it.
+  -->
+
+  <PropertyGroup>
+    <WindowsRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..'))</WindowsRoot>
+    <MacOsCatalog>$([MSBuild]::NormalizePath('$(WindowsRoot)', '..', 'macos', 'Sources', 'PlaitwayMenuBar', 'Resources', 'Localizable.xcstrings'))</MacOsCatalog>
+    <WindowsCatalog>$([MSBuild]::NormalizePath('$(WindowsRoot)', 'Resources', 'Windows.xcstrings'))</WindowsCatalog>
+    <LocalizationOutput>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'localization'))</LocalizationOutput>
+    <UiTextFile>$(LocalizationOutput)UiText.g.cs</UiTextFile>
+    <ReswDirectory>$(LocalizationOutput)Strings\</ReswDirectory>
+    <!-- Without its trailing backslash, which would escape the closing quote of the argument. -->
+    <ReswArgument>$(ReswDirectory.TrimEnd('\'))</ReswArgument>
+    <UiTextNamespace Condition="'$(UiTextNamespace)' == ''">$(RootNamespace).Text</UiTextNamespace>
+    <LocalizationHost>$(DOTNET_HOST_PATH)</LocalizationHost>
+    <LocalizationHost Condition="'$(LocalizationHost)' == ''">dotnet</LocalizationHost>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)Plaitway.Localization\Plaitway.Localization.csproj"
+                      ReferenceOutputAssembly="false" OutputItemType="LocalizationTool" SkipGetTargetFrameworkProperties="true" />
+    <LocalizationCatalog Include="$(MacOsCatalog);$(WindowsCatalog)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(GenerateUiText)' == 'true'">
+    <Compile Include="$(UiTextFile)" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(GenerateResw)' == 'true'">
+    <PRIResource Include="$(ReswDirectory)en-US\Resources.resw" Link="Strings\en-US\Resources.resw" Visible="false" />
+    <PRIResource Include="$(ReswDirectory)zh-TW\Resources.resw" Link="Strings\zh-TW\Resources.resw" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="GenerateUiText"
+          Condition="'$(GenerateUiText)' == 'true'"
+          AfterTargets="ResolveProjectReferences"
+          Inputs="@(LocalizationCatalog);@(LocalizationTool)"
+          Outputs="$(UiTextFile)">
+    <Exec Command="&quot;$(LocalizationHost)&quot; &quot;@(LocalizationTool)&quot; uitext --out &quot;$(UiTextFile)&quot; --namespace $(UiTextNamespace) @(LocalizationCatalog->'&quot;%(FullPath)&quot;', ' ')" />
+  </Target>
+
+  <Target Name="GenerateResw"
+          Condition="'$(GenerateResw)' == 'true'"
+          AfterTargets="ResolveProjectReferences"
+          Inputs="@(LocalizationCatalog);@(LocalizationTool)"
+          Outputs="$(ReswDirectory)en-US\Resources.resw;$(ReswDirectory)zh-TW\Resources.resw">
+    <Exec Command="&quot;$(LocalizationHost)&quot; &quot;@(LocalizationTool)&quot; resw --out &quot;$(ReswArgument)&quot; @(LocalizationCatalog->'&quot;%(FullPath)&quot;', ' ')" />
+  </Target>
+
+</Project>

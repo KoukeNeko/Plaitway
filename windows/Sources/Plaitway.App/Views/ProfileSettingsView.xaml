@@ -1,0 +1,62 @@
+<UserControl x:Class="Plaitway.App.Views.ProfileSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Plaitway.App.Controls"
+             xmlns:vm="using:Plaitway.AppCore.ViewModels"
+             IsTabStop="False">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" IsTabStop="False">
+    <StackPanel Padding="{StaticResource PagePadding}" Spacing="{StaticResource SectionSpacing}" MaxWidth="{StaticResource PageMaxWidth}">
+
+      <!-- How the profile behaves. -->
+      <Border Style="{StaticResource CardStyle}">
+        <StackPanel Spacing="16">
+          <TextBox x:Name="NameBox" Header="{x:Bind ViewModel.Text.Name}" Text="{x:Bind ViewModel.Name, Mode=TwoWay}"
+                   GotFocus="OnNameGotFocus" LostFocus="OnNameLostFocus" KeyDown="OnNameKeyDown" />
+          <ToggleSwitch Header="{x:Bind ViewModel.Text.AutoConnect}" IsOn="{x:Bind ViewModel.AutoConnect, Mode=TwoWay}" />
+          <StackPanel Spacing="4">
+            <ComboBox Header="{x:Bind ViewModel.Text.TunnelMode}" ItemsSource="{x:Bind ViewModel.TunnelModes}" DisplayMemberPath="Label"
+                      SelectedItem="{x:Bind ViewModel.SelectedTunnelMode, Mode=OneWay}" SelectionChanged="OnTunnelModeChosen" MinWidth="220" />
+            <TextBlock Text="{x:Bind ViewModel.AppliesLaterHint, Mode=OneWay}" Style="{StaticResource CaptionSecondaryTextStyle}"
+                       Visibility="{x:Bind controls:Bind.VisibleIfText(ViewModel.AppliesLaterHint), Mode=OneWay}" />
+          </StackPanel>
+          <StackPanel Spacing="4" Visibility="{x:Bind controls:Bind.Visible(ViewModel.OffersExcludePrivateIps), Mode=OneWay}">
+            <ToggleSwitch Header="{x:Bind ViewModel.Text.ExcludePrivateIPs}" IsOn="{x:Bind ViewModel.ExcludePrivateIps, Mode=TwoWay}" />
+            <TextBlock Text="{x:Bind ViewModel.ExcludePrivateIpsHint, Mode=OneWay}" Style="{StaticResource CaptionSecondaryTextStyle}" />
+          </StackPanel>
+          <StackPanel Spacing="4">
+            <TextBlock Text="{x:Bind ViewModel.Text.Priority}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock x:Name="PositionText" Text="{x:Bind ViewModel.Position, Mode=OneWay}" VerticalAlignment="Center" MinWidth="24" />
+              <Button Command="{x:Bind ViewModel.MoveUpCommand}" IsEnabled="{x:Bind ViewModel.CanMoveUp, Mode=OneWay}"
+                      AutomationProperties.Name="{x:Bind ViewModel.Text.MoveUp}" ToolTipService.ToolTip="{x:Bind ViewModel.Text.MoveUp}">
+                <FontIcon Glyph="&#xE70E;" FontFamily="{ThemeResource SymbolThemeFontFamily}" FontSize="14" />
+              </Button>
+              <Button Command="{x:Bind ViewModel.MoveDownCommand}" IsEnabled="{x:Bind ViewModel.CanMoveDown, Mode=OneWay}"
+                      AutomationProperties.Name="{x:Bind ViewModel.Text.MoveDown}" ToolTipService.ToolTip="{x:Bind ViewModel.Text.MoveDown}">
+                <FontIcon Glyph="&#xE70D;" FontFamily="{ThemeResource SymbolThemeFontFamily}" FontSize="14" />
+              </Button>
+            </StackPanel>
+            <TextBlock Text="{x:Bind ViewModel.Text.AHigherPriorityWinsOverlappingRoutesAndDNSDomains}" Style="{StaticResource CaptionSecondaryTextStyle}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- When it connects by itself. -->
+      <Border Style="{StaticResource CardStyle}">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{x:Bind ViewModel.Text.OnDemand}" Style="{StaticResource SectionHeaderStyle}" />
+          <ToggleSwitch Header="{x:Bind ViewModel.Text.Ethernet}" IsOn="{x:Bind ViewModel.OnDemandEthernet, Mode=TwoWay}" />
+          <ToggleSwitch Header="{x:Bind ViewModel.Text.WiFi}" IsOn="{x:Bind ViewModel.OnDemandWifi, Mode=TwoWay}" />
+          <TextBlock Text="{x:Bind ViewModel.Text.ConnectsOnTheCheckedNetworksAndDisconnectsOnAnyOther}" Style="{StaticResource CaptionSecondaryTextStyle}" />
+        </StackPanel>
+      </Border>
+
+      <!-- What cannot be taken back. -->
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Content="{x:Bind ViewModel.Text.RemoveSavedCredentials}" Command="{x:Bind ViewModel.ForgetCredentialsCommand}"
+                Visibility="{x:Bind controls:Bind.Visible(ViewModel.HasSavedCredentials), Mode=OneWay}" />
+        <Button Content="{x:Bind ViewModel.Text.DeleteProfileEllipsis}" Command="{x:Bind ViewModel.RequestDeletionCommand}" />
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,0 +1,21 @@
+<UserControl x:Class="Plaitway.App.Controls.DetailRows"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Plaitway.AppCore.ViewModels"
+             IsTabStop="False">
+  <!-- A label and a value on one line; a value that is long wraps under its label. -->
+  <ItemsControl ItemsSource="{x:Bind Rows, Mode=OneWay}">
+    <ItemsControl.ItemTemplate>
+      <DataTemplate x:DataType="vm:DetailRow">
+        <Grid ColumnSpacing="16" Padding="0,6">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" MinWidth="140" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="{x:Bind Label}" Style="{StaticResource SecondaryTextStyle}" />
+          <TextBlock Grid.Column="1" Text="{x:Bind Value}" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
+        </Grid>
+      </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>

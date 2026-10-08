@@ -1,0 +1,114 @@
+<UserControl x:Class="Plaitway.App.Views.OverviewView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Plaitway.App.Controls"
+             IsTabStop="False">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" IsTabStop="False">
+    <StackPanel Padding="{StaticResource PagePadding}" Spacing="{StaticResource SectionSpacing}" MaxWidth="{StaticResource PageMaxWidth}">
+
+      <!-- The state, why it is so, and for how long. -->
+      <Border Style="{StaticResource CardStyle}">
+        <Grid ColumnSpacing="16">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <controls:StatusGlyph Icon="{x:Bind ViewModel.Icon, Mode=OneWay}" Tone="{x:Bind ViewModel.Tone, Mode=OneWay}" GlyphSize="32" VerticalAlignment="Top" />
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock x:Name="StateText" Text="{x:Bind ViewModel.StateLabel, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" />
+            <TextBlock Text="{x:Bind ViewModel.Cause, Mode=OneWay}"
+                       Visibility="{x:Bind controls:Bind.VisibleIfText(ViewModel.Cause), Mode=OneWay}"
+                       Style="{StaticResource SecondaryTextStyle}"
+                       IsTextSelectionEnabled="True" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" HorizontalAlignment="Right"
+                      Visibility="{x:Bind controls:Bind.Visible(ViewModel.ShowsUptime), Mode=OneWay}">
+            <TextBlock Text="{x:Bind ViewModel.UptimeText, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Right"
+                       ToolTipService.ToolTip="{x:Bind ViewModel.ConnectedSinceText, Mode=OneWay}" />
+            <TextBlock Text="{x:Bind ViewModel.Text.Uptime}" Style="{StaticResource CaptionSecondaryTextStyle}" HorizontalAlignment="Right" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- What needs the user's attention. -->
+      <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind controls:Bind.Visible(ViewModel.NeedsAttention), Mode=OneWay}">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{x:Bind ViewModel.Text.Attention}" Style="{StaticResource SectionHeaderStyle}" />
+          <Grid ColumnSpacing="12" Visibility="{x:Bind controls:Bind.Visible(ViewModel.HasLostRoutes), Mode=OneWay}">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <controls:StatusGlyph Icon="RouteBlocked" Tone="Caution" />
+            <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.Text.RoutesNotInEffect}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="2" x:Name="LostRoutesCount" Text="{x:Bind ViewModel.LostRoutes, Mode=OneWay}" VerticalAlignment="Center" />
+            <HyperlinkButton Grid.Column="3" Content="{x:Bind ViewModel.Text.Show}" Command="{x:Bind ViewModel.ShowRoutesCommand}" />
+          </Grid>
+          <ItemsControl ItemsSource="{x:Bind ViewModel.Warnings, Mode=OneWay}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <Grid ColumnSpacing="12" Padding="0,2">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <controls:StatusGlyph Icon="RouteBlocked" Tone="Caution" VerticalAlignment="Top" />
+                  <TextBlock Grid.Column="1" Text="{x:Bind}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- How much moves through the tunnel. -->
+      <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind controls:Bind.Visible(ViewModel.ShowsTraffic), Mode=OneWay}">
+        <StackPanel Spacing="12">
+          <Grid ColumnSpacing="32">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+              <TextBlock Text="{x:Bind ViewModel.Text.Received}" Style="{StaticResource CaptionSecondaryTextStyle}" />
+              <TextBlock x:Name="ReceivedRate" Text="{x:Bind ViewModel.ReceivedRate, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" />
+              <TextBlock Text="{x:Bind ViewModel.ReceivedTotal, Mode=OneWay}" Style="{StaticResource CaptionSecondaryTextStyle}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+              <TextBlock Text="{x:Bind ViewModel.Text.Sent}" Style="{StaticResource CaptionSecondaryTextStyle}" />
+              <TextBlock x:Name="SentRate" Text="{x:Bind ViewModel.SentRate, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" />
+              <TextBlock Text="{x:Bind ViewModel.SentTotal, Mode=OneWay}" Style="{StaticResource CaptionSecondaryTextStyle}" />
+            </StackPanel>
+          </Grid>
+          <controls:TrafficSparkline Height="56" Chart="{x:Bind ViewModel.Chart, Mode=OneWay}" />
+        </StackPanel>
+      </Border>
+
+      <!-- What the profile connects to. -->
+      <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind controls:Bind.Visible(ViewModel.HasDetails), Mode=OneWay}">
+        <StackPanel>
+          <controls:DetailRows Rows="{x:Bind ViewModel.Details, Mode=OneWay}" />
+          <Grid ColumnSpacing="16" Padding="0,6" Visibility="{x:Bind controls:Bind.Visible(ViewModel.HasPublicKey), Mode=OneWay}">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" MinWidth="140" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{x:Bind ViewModel.Text.PublicKey}" Style="{StaticResource SecondaryTextStyle}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.PublicKey, Mode=OneWay}" IsTextSelectionEnabled="True"
+                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Command="{x:Bind ViewModel.CopyPublicKeyCommand}"
+                    AutomationProperties.Name="{x:Bind ViewModel.Text.Copy}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.Text.Copy}">
+              <FontIcon Glyph="&#xE8C8;" FontFamily="{ThemeResource SymbolThemeFontFamily}" FontSize="14" />
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

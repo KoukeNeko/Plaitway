@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Plaitway.Localization</RootNamespace>
+    <AssemblyName>Plaitway.Localization</AssemblyName>
+    <!-- A build tool: it runs on the machine that builds, whatever the app targets. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Plaitway.AppCore.Tests" />
+  </ItemGroup>
+
+</Project>

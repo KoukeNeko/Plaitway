@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>Plaitway.App</RootNamespace>
+    <AssemblyName>Plaitway</AssemblyName>
+    <!-- The version of a development build is the one the daemon of a development build reports; a release sets both. -->
+    <Version>0.0.0-dev</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ApplicationIcon>Assets\Plaitway.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+    <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <UseWinUI>true</UseWinUI>
+    <!-- Unpackaged: no MSIX, no identity, started like any exe. Framework-dependent by default; publish with
+         -p:WindowsAppSDKSelfContained=true -p:SelfContained=true for a copy that carries its own runtime. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <SelfContained>false</SelfContained>
+    <!-- The strings of the XAML and of the code come from the catalogs (Tools\Localization.targets). -->
+    <GenerateResw>true</GenerateResw>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK.Base" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Plaitway.Client\Plaitway.Client.csproj" />
+    <ProjectReference Include="..\Plaitway.AppCore\Plaitway.AppCore.csproj" />
+  </ItemGroup>
+
+  <!-- The window's icon and the notification-area icons; scripts\generate-icons.ps1 makes them from Docs\app-icon.png. -->
+  <ItemGroup>
+    <Content Include="Assets\**\*.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="..\..\Tools\Localization.targets" />
+
+  <!-- Workaround: dotnet publish of an unpackaged WinUI app leaves the .pri files out of the output, and with
+       them the compiled XAML and the strings, so that the published app dies at its first resource lookup.
+       They are in the build output; this adds them to what is published. -->
+  <Target Name="CopyPriFilesToPublishDirectory" AfterTargets="Publish">
+    <ItemGroup>
+      <PriFile Include="$(OutDir)*.pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PriFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
