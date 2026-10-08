@@ -121,7 +121,7 @@ func (r *Reconciler) resetLocked() passResult {
 // change or a wake may have disturbed them.
 func (r *Reconciler) reconcileLocked(intents []tunnel.Intent, forceDNS bool) passResult {
 	var res passResult
-	r.desired = Compute(intents, r.netState)
+	r.desired = computeFor(r.keying, intents, r.netState)
 	wantDNS := r.dnsWanted()
 	dnsChanged := r.removeDNS(wantDNS, &res)
 
@@ -143,7 +143,7 @@ func (r *Reconciler) reconcileLocked(intents []tunnel.Intent, forceDNS bool) pas
 
 	r.stale = nil
 	if table != nil {
-		r.stale = findStale(table, r.netState, r.endpointsLocked(), r.isOwned)
+		r.stale = findStale(r.keying, table, r.netState, r.endpointsLocked(), r.isOwned)
 	}
 	r.buildReports(routeOut, dnsOut)
 	for _, err := range res.errs {
@@ -152,47 +152,31 @@ func (r *Reconciler) reconcileLocked(intents []tunnel.Intent, forceDNS bool) pas
 	return res
 }
 
-// dumpTable reads the unscoped routes, by destination. Scoped routes are a
-// separate key space that Plaitway never writes.
-func (r *Reconciler) dumpTable() (map[netip.Prefix]osnet.Route, error) {
+// dumpTable reads the unscoped routes by their key. Scoped routes are a separate
+// key space that Plaitway never writes.
+func (r *Reconciler) dumpTable() (map[routeKey]osnet.Route, error) {
 	routes, err := r.routes.Dump()
 	if err != nil {
 		return nil, fmt.Errorf("reading the routing table: %w", err)
 	}
-	table := make(map[netip.Prefix]osnet.Route, len(routes))
+	table := make(map[routeKey]osnet.Route, len(routes))
 	for _, rt := range routes {
 		if !rt.Scoped {
-			table[rt.Dst.Masked()] = rt
+			table[r.keying.key(rt)] = rt
 		}
 	}
 	return table, nil
 }
 
-// sameRoute compares what decides where traffic goes. The interface of a
-// gateway route is the kernel's choice: it follows the gateway, and when two
-// interfaces are on the gateway's network (Wi-Fi and Ethernet to the same
-// router) it need not be the one the route was added for, so it is not
-// compared. A route without a gateway is bound to its interface, which is
-// compared when both sides name one.
-func sameRoute(a, b osnet.Route) bool {
-	if a.Dst.Masked() != b.Dst.Masked() || a.Blackhole != b.Blackhole ||
-		a.Gateway.WithZone("") != b.Gateway.WithZone("") {
-		return false
-	}
-	if a.Gateway.IsValid() {
-		return true
-	}
-	return a.Iface == "" || b.Iface == "" || a.Iface == b.Iface
-}
-
 // syncRoutes applies the route plans to the table. It returns the outcome per
-// planned route and the table as it is afterwards.
-func (r *Reconciler) syncRoutes(table map[netip.Prefix]osnet.Route, res *passResult) (map[netip.Prefix]outcome, map[netip.Prefix]osnet.Route) {
-	want := make(map[netip.Prefix]RoutePlan)
+// planned destination (at most one plan per destination is installed) and the
+// table as it is afterwards.
+func (r *Reconciler) syncRoutes(table map[routeKey]osnet.Route, res *passResult) (map[netip.Prefix]outcome, map[routeKey]osnet.Route) {
+	want := make(map[routeKey]RoutePlan)
 	var plans []RoutePlan // in apply order
 	for _, p := range r.desired.Routes {
 		if p.Install {
-			want[p.Route.Dst] = p
+			want[r.keying.key(p.Route)] = p
 			plans = append(plans, p)
 		}
 	}
@@ -200,63 +184,58 @@ func (r *Reconciler) syncRoutes(table map[netip.Prefix]osnet.Route, res *passRes
 
 	// A route stays ours only while the table still shows what we installed.
 	// Anything else was replaced or removed by someone, and is not ours to
-	// delete.
+	// delete. A route that vanished with its interface is the same as a removed
+	// one: gone, and nobody's doing.
 	for _, key := range sortedKeys(r.owned) {
 		actual, ok := table[key]
 		switch {
 		case !ok:
 			r.release(key, "gone from the routing table")
-		case !sameRoute(actual, r.owned[key].route):
+		case !r.keying.same(actual, r.owned[key].route):
 			r.log.Warn("a route we installed was changed by another program, leaving it", "route", key, "now", describe(actual))
 			r.release(key, "changed by another program")
 		}
 	}
 
 	// Remove what is no longer wanted, or has to be replaced, last applied first.
-	var doomed []netip.Prefix
-	for key, rec := range r.owned {
-		if p, ok := want[key]; !ok || !sameRoute(p.Route, rec.route) {
-			doomed = append(doomed, key)
-		}
-	}
-	slices.SortFunc(doomed, func(a, b netip.Prefix) int {
-		return cmp.Or(cmp.Compare(kindRank(r.owned[b].kind), kindRank(r.owned[a].kind)), comparePrefix(b, a))
-	})
-	for _, key := range doomed {
-		rec := r.owned[key]
-		if err := r.routes.Delete(rec.route); err != nil && !errors.Is(err, osnet.ErrNotFound) {
-			res.fail(fmt.Errorf("deleting route %s: %w", key, err))
-			continue
-		}
-		delete(table, key)
-		r.release(key, "")
-	}
+	// Where the table can hold the old and the new route side by side, the old one
+	// goes after the new one is in: removing it first would let the traffic of a
+	// full tunnel out for as long as the add takes.
+	doomed := r.doomedRoutes(want)
+	replaced, removedNow := r.splitReplaced(doomed, want)
+	r.deleteOwned(removedNow, table, res)
 
-	var added []netip.Prefix
+	var added []routeKey
 	for _, p := range plans {
-		key := p.Route.Dst
+		key := r.keying.key(p.Route)
 		if rec, ok := r.owned[key]; ok {
-			if !sameRoute(rec.route, p.Route) {
-				out[key] = outcome{tunnel.RouteFailed, "the old route could not be removed"}
+			if !r.keying.same(rec.route, p.Route) {
+				out[p.Route.Dst] = outcome{tunnel.RouteFailed, "the old route could not be removed"}
 				continue
 			}
 			rec.owner, rec.kind = p.Owner, p.Kind
 			r.owned[key] = rec
-			out[key] = installed
+			out[p.Route.Dst] = installed
+			continue
+		}
+		if why := r.keying.unplaceable(p.Route); why != "" {
+			// Nothing to retry: the interface appearing is a change of the network,
+			// which brings the next pass.
+			out[p.Route.Dst] = outcome{tunnel.RoutePending, why}
 			continue
 		}
 		if actual, ok := table[key]; ok {
 			// Somebody else's route. Identical is as good as ours, though we
 			// leave it alone when we are done; different is a conflict.
-			if sameRoute(actual, p.Route) {
-				out[key] = installed
+			if r.keying.same(actual, p.Route) {
+				out[p.Route.Dst] = installed
 			} else {
-				out[key] = outcome{tunnel.RouteFailed, "held by another program via " + via(actual)}
+				out[p.Route.Dst] = outcome{tunnel.RouteFailed, "held by another program via " + via(actual)}
 			}
 			continue
 		}
 		o, ok := r.addRoute(p, res)
-		out[key] = o
+		out[p.Route.Dst] = o
 		if ok {
 			added = append(added, key)
 		}
@@ -265,7 +244,65 @@ func (r *Reconciler) syncRoutes(table map[netip.Prefix]osnet.Route, res *passRes
 	if len(added) > 0 {
 		table = r.verifyAdded(table, added, out, res)
 	}
+	r.deleteOwned(replaced, table, res)
+	r.markOverridden(table, out)
 	return out, table
+}
+
+// doomedRoutes are the routes we own that are not wanted any more, or not as
+// they are, last applied first.
+func (r *Reconciler) doomedRoutes(want map[routeKey]RoutePlan) []routeKey {
+	var doomed []routeKey
+	for key, rec := range r.owned {
+		if p, ok := want[key]; !ok || !r.keying.same(p.Route, rec.route) {
+			doomed = append(doomed, key)
+		}
+	}
+	slices.SortFunc(doomed, func(a, b routeKey) int {
+		return cmp.Or(cmp.Compare(kindRank(r.owned[b].kind), kindRank(r.owned[a].kind)), compareKeys(b, a))
+	})
+	return doomed
+}
+
+// splitReplaced separates the doomed tunnel routes whose destination is wanted
+// by a route with another key (the same prefix through another next hop, after
+// the tunnel announced another gateway) from the others. Only a table keyed by
+// interface and next hop can hold both at once; on macOS one prefix has one
+// route, so the old one has to go first. A bypass route is not kept: it carries
+// no traffic of the user's, and the old one is stale, which is why it is
+// replaced.
+func (r *Reconciler) splitReplaced(doomed []routeKey, want map[routeKey]RoutePlan) (replaced, removedNow []routeKey) {
+	if !r.keying.byInterface() {
+		return nil, doomed
+	}
+	wanted := make(map[netip.Prefix]bool, len(want))
+	for key := range want {
+		wanted[key.dst] = true
+	}
+	for _, key := range doomed {
+		// A route that is wanted as it is but is not the same (it needs replacing in
+		// place) has to be deleted before it can be added again.
+		if _, sameKey := want[key]; wanted[key.dst] && !sameKey && r.owned[key].kind != tunnel.RouteBypass {
+			replaced = append(replaced, key)
+		} else {
+			removedNow = append(removedNow, key)
+		}
+	}
+	return replaced, removedNow
+}
+
+// deleteOwned deletes routes we own from the table, in the order given. A route
+// that cannot be deleted stays ours, and the pass reports the failure.
+func (r *Reconciler) deleteOwned(keys []routeKey, table map[routeKey]osnet.Route, res *passResult) {
+	for _, key := range keys {
+		rec := r.owned[key]
+		if err := r.routes.Delete(rec.route); err != nil && !errors.Is(err, osnet.ErrNotFound) {
+			res.fail(fmt.Errorf("deleting route %s: %w", key, err))
+			continue
+		}
+		delete(table, key)
+		r.release(key, "")
+	}
 }
 
 // addRoute journals and adds one route. ok reports that the route is in the
@@ -273,7 +310,8 @@ func (r *Reconciler) syncRoutes(table map[netip.Prefix]osnet.Route, res *passRes
 // back.
 func (r *Reconciler) addRoute(p RoutePlan, res *passResult) (o outcome, ok bool) {
 	rt := p.Route
-	journaled := rt.Gateway.IsValid()
+	key := r.keying.key(rt)
+	journaled := r.keying.journaled(rt)
 	if journaled {
 		if err := r.journalRoute(statePending, p.Owner, rt, ""); err != nil {
 			res.fail(err)
@@ -288,7 +326,7 @@ func (r *Reconciler) addRoute(p RoutePlan, res *passResult) (o outcome, ok bool)
 	err := r.routes.Add(rt)
 	switch {
 	case err == nil:
-		r.owned[rt.Dst] = ownedRoute{route: rt, owner: p.Owner, kind: p.Kind, journaled: journaled}
+		r.owned[key] = ownedRoute{route: rt, owner: p.Owner, kind: p.Kind, journaled: journaled}
 		return installed, true
 	case errors.Is(err, osnet.ErrExists):
 		// Someone added it between our read and our write. Read it back.
@@ -298,13 +336,13 @@ func (r *Reconciler) addRoute(p RoutePlan, res *passResult) (o outcome, ok bool)
 			abandon("could not read back")
 			return outcome{tunnel.RouteFailed, derr.Error()}, false
 		}
-		cur, found := table[rt.Dst]
+		cur, found := table[key]
 		switch {
 		case !found:
 			res.retry = true
 			abandon("vanished again")
 			return outcome{tunnel.RoutePending, "route appeared and vanished"}, false
-		case sameRoute(cur, rt):
+		case r.keying.same(cur, rt):
 			abandon("already present, not ours")
 			return installed, false
 		default:
@@ -325,7 +363,7 @@ func (r *Reconciler) addRoute(p RoutePlan, res *passResult) (o outcome, ok bool)
 // verifyAdded reads the table back after adding routes: it records what the
 // kernel made of them (the fingerprint of the journal) and catches routes that
 // did not stay.
-func (r *Reconciler) verifyAdded(table map[netip.Prefix]osnet.Route, added []netip.Prefix, out map[netip.Prefix]outcome, res *passResult) map[netip.Prefix]osnet.Route {
+func (r *Reconciler) verifyAdded(table map[routeKey]osnet.Route, added []routeKey, out map[netip.Prefix]outcome, res *passResult) map[routeKey]osnet.Route {
 	after, err := r.dumpTable()
 	if err != nil {
 		res.fail(err)
@@ -334,9 +372,9 @@ func (r *Reconciler) verifyAdded(table map[netip.Prefix]osnet.Route, added []net
 	for _, key := range added {
 		rec := r.owned[key]
 		actual, ok := after[key]
-		if !ok || !sameRoute(actual, rec.route) {
+		if !ok || !r.keying.same(actual, rec.route) {
 			res.fail(fmt.Errorf("route %s is not in the routing table after adding it", key))
-			out[key] = outcome{tunnel.RouteFailed, "not in the routing table after adding"}
+			out[key.dst] = outcome{tunnel.RouteFailed, "not in the routing table after adding"}
 			r.release(key, "not in the routing table after adding")
 			continue
 		}
@@ -351,7 +389,7 @@ func (r *Reconciler) verifyAdded(table map[netip.Prefix]osnet.Route, added []net
 
 // release stops owning a route without touching the table, and journals it
 // as removed.
-func (r *Reconciler) release(key netip.Prefix, note string) {
+func (r *Reconciler) release(key routeKey, note string) {
 	rec, ok := r.owned[key]
 	if !ok {
 		return
@@ -363,12 +401,10 @@ func (r *Reconciler) release(key netip.Prefix, note string) {
 }
 
 func (r *Reconciler) journalRoute(state string, owner tunnel.OwnerID, rt osnet.Route, note string) error {
-	rec := record{
-		Owner: owner, Kind: kindRoute, Key: rt.Dst.Masked().String(), State: state,
-		Gateway: addrString(rt.Gateway), Iface: rt.Iface, Note: note,
-	}
+	rec := record{Owner: owner, Kind: kindRoute, Key: rt.Dst.Masked().String(), State: state, Note: note}
+	r.keying.stamp(&rec, rt)
 	if state == stateApplied {
-		rec.Fingerprint = fingerprint(rt)
+		rec.Fingerprint = r.keying.fingerprint(rt)
 	}
 	if err := r.journal.append(rec); err != nil {
 		return fmt.Errorf("journaling route %s: %w", rt.Dst, err)
@@ -382,12 +418,6 @@ func (r *Reconciler) journalRouteBestEffort(state string, owner tunnel.OwnerID, 
 	if err := r.journalRoute(state, owner, rt, note); err != nil {
 		r.log.Warn("journal write failed", "err", err)
 	}
-}
-
-// fingerprint identifies a route as installed: where it goes and the kernel's
-// flags. A route someone else replaced has a different one.
-func fingerprint(rt osnet.Route) string {
-	return fmt.Sprintf("%s|%s|%#x", addrString(rt.Gateway), rt.Iface, rt.Flags)
 }
 
 // addrString is how the journal writes a gateway. The zone of a link-local
@@ -408,14 +438,30 @@ func via(rt osnet.Route) string {
 	return rt.Iface
 }
 
-func describe(rt osnet.Route) string { return rt.Dst.String() + " via " + via(rt) }
+// reportedVia is where a planned route is said to go. A tunnel route is the
+// tunnel's, whatever next hop Windows gives it to reach the adapter, so it names
+// the interface; a bypass route names the router it goes through.
+func reportedVia(p RoutePlan) string {
+	if p.Kind != tunnel.RouteBypass {
+		return p.Route.Iface
+	}
+	return via(p.Route)
+}
 
-func sortedKeys[V any](m map[netip.Prefix]V) []netip.Prefix {
-	keys := make([]netip.Prefix, 0, len(m))
+func describe(rt osnet.Route) string {
+	text := rt.Dst.String() + " via " + via(rt)
+	if rt.IfIndex != 0 {
+		text += fmt.Sprintf(" (interface %d)", rt.IfIndex)
+	}
+	return text
+}
+
+func sortedKeys[V any](m map[routeKey]V) []routeKey {
+	keys := make([]routeKey, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, comparePrefix)
+	slices.SortFunc(keys, compareKeys)
 	return keys
 }
 
@@ -568,7 +614,7 @@ func (r *Reconciler) buildReports(routeOut map[netip.Prefix]outcome, dnsOut map[
 	r.routeReports = r.routeReports[:0:0]
 	for _, p := range r.desired.Routes {
 		rep := tunnel.RouteReport{
-			Prefix: p.Route.Dst, Owner: p.Owner, Kind: p.Kind, Via: via(p.Route),
+			Prefix: p.Route.Dst, Owner: p.Owner, Kind: p.Kind, Via: reportedVia(p),
 			State: p.State, Detail: p.Detail, ShadowedBy: p.ShadowedBy,
 		}
 		if o, ok := routeOut[p.Route.Dst]; ok && p.Install {
@@ -614,28 +660,32 @@ func (r *Reconciler) recover() error {
 
 // recoverRoute deletes a route a previous run journaled, unless somebody else
 // changed it since: then it is theirs now.
-func (r *Reconciler) recoverRoute(rec record, table map[netip.Prefix]osnet.Route) {
-	dst, err := netip.ParsePrefix(rec.Key)
+func (r *Reconciler) recoverRoute(rec record, table map[routeKey]osnet.Route) {
+	key, err := r.keying.recordKey(rec)
 	if err != nil {
 		r.log.Warn("journal names an unreadable route", "key", rec.Key, "err", err)
-		r.journalKeyBestEffort(rec, stateRemoved, "unreadable key")
+		note := "unreadable key"
+		if errors.Is(err, errOtherTable) {
+			note = "written for another kind of routing table, left in place"
+		}
+		r.journalKeyBestEffort(rec, stateRemoved, note)
 		return
 	}
-	actual, ok := table[dst]
+	actual, ok := table[key]
 	switch {
 	case !ok:
 		r.journalKeyBestEffort(rec, stateRemoved, "already gone")
-	case !recognizes(rec, actual):
+	case !r.keying.recognizes(rec, actual):
 		r.log.Warn("a route of an earlier run was changed by another program, leaving it", "route", describe(actual))
 		r.journalKeyBestEffort(rec, stateRemoved, "changed by another program, left in place")
 	default:
 		if err := r.routes.Delete(actual); err != nil && !errors.Is(err, osnet.ErrNotFound) {
 			// Keep it as ours: the next pass removes it when it is not wanted.
 			r.log.Error("removing a route of an earlier run failed", "route", describe(actual), "err", err)
-			r.owned[dst] = ownedRoute{route: actual, owner: rec.Owner, kind: tunnel.RouteBypass, journaled: true}
+			r.owned[key] = ownedRoute{route: actual, owner: rec.Owner, kind: tunnel.RouteBypass, journaled: true}
 			return
 		}
-		delete(table, dst)
+		delete(table, key)
 		r.log.Info("removed a route of an earlier run", "route", describe(actual))
 		r.journalKeyBestEffort(rec, stateRemoved, "removed after restart")
 	}
@@ -654,16 +704,6 @@ func (r *Reconciler) journalKeyBestEffort(rec record, state, note string) {
 	if err := r.journal.append(rec); err != nil {
 		r.log.Warn("journal write failed", "err", err)
 	}
-}
-
-// recognizes reports whether a route in the table is the one the journal
-// recorded. A record that was never confirmed has no fingerprint, only the
-// gateway and interface it asked for.
-func recognizes(rec record, actual osnet.Route) bool {
-	if rec.Fingerprint != "" {
-		return fingerprint(actual) == rec.Fingerprint
-	}
-	return addrString(actual.Gateway) == rec.Gateway && (rec.Iface == "" || actual.Iface == rec.Iface)
 }
 
 // netChanged reports whether anything Compute looks at differs; the epoch is

@@ -45,10 +45,24 @@ type record struct {
 	// Gateway and Iface are what the route was asked to use. They are enough to
 	// recognize it again while Fingerprint, which includes the kernel's flags,
 	// is not known yet.
-	Gateway     string `json:"gateway,omitempty"`
-	Iface       string `json:"iface,omitempty"`
+	Gateway string `json:"gateway,omitempty"`
+	Iface   string `json:"iface,omitempty"`
+	// IfIndex is the interface index of a route that a table keyed by interface
+	// holds (Windows). Together with Key and Gateway it is the route's identity,
+	// since one prefix can have several routes there. Records written for the
+	// macOS table have none, which is how a Windows start tells them apart.
+	IfIndex     uint32 `json:"ifindex,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Note        string `json:"note,omitempty"`
+}
+
+// id is what makes two records about the same thing: the latest of them says
+// whether it is still installed.
+func (r record) id() string {
+	if r.IfIndex == 0 {
+		return liveKey(r.Kind, r.Key)
+	}
+	return fmt.Sprintf("%s if%d via %s", liveKey(r.Kind, r.Key), r.IfIndex, r.Gateway)
 }
 
 func (r record) view() tunnel.JournalRecord {
@@ -108,7 +122,7 @@ func openJournal(path string, now func() time.Time, log *slog.Logger) (*journal,
 }
 
 func (j *journal) track(rec record) {
-	key := liveKey(rec.Kind, rec.Key)
+	key := rec.id()
 	if rec.State == stateRemoved {
 		delete(j.live, key)
 		return

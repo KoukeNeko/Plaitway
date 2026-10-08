@@ -44,7 +44,11 @@ func within(t *testing.T, what string, f func()) {
 // its own lock held. While a call into the system is slow, the Reconciler may
 // not hold anything that Report, Changed or SetRebind need.
 func TestReportDoesNotWaitForASlowAdapter(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testReportDoesNotWaitForASlowAdapter)
+}
+
+func testReportDoesNotWaitForASlowAdapter(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	slow := &slowDNS{DNSConfigurator: e.host.DNS, entered: make(chan struct{}), release: make(chan struct{})}
 	e.r.dns = slow
@@ -82,7 +86,11 @@ func TestReportDoesNotWaitForASlowAdapter(t *testing.T) {
 // Report hands out a snapshot that many callers share the source of: changing
 // what one of them got must not show in what the next one gets.
 func TestReportCannotBeChangedByItsCaller(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testReportCannotBeChangedByItsCaller)
+}
+
+func testReportCannotBeChangedByItsCaller(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(wgIntent())
 	e.announce(asusIntent())

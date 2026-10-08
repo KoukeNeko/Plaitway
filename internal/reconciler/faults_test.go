@@ -22,7 +22,11 @@ func splitIntent() tunnel.Intent {
 // ErrUnreachable is not a failure: the route waits, and any later event tries
 // again, even one that changed nothing.
 func TestUnreachableWaitsForTheNextEvent(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testUnreachableWaitsForTheNextEvent)
+}
+
+func testUnreachableWaitsForTheNextEvent(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun11", "10.8.0.6/24")
 	e.host.Routes.InjectFault(fake.Fault{Op: fake.OpAdd, Dst: pfx("192.168.1.0/24"), Err: osnet.ErrUnreachable})
 
@@ -40,8 +44,10 @@ func TestUnreachableWaitsForTheNextEvent(t *testing.T) {
 }
 
 // Nobody has to send an event for work that is only waiting.
-func TestPendingWorkIsRetriedByTimer(t *testing.T) {
-	e := newEnv(t, func(c *Config) { c.RetryDelay = 20 * time.Millisecond })
+func TestPendingWorkIsRetriedByTimer(t *testing.T) { eachKeying(t, testPendingWorkIsRetriedByTimer) }
+
+func testPendingWorkIsRetriedByTimer(t *testing.T, k keyingCase) {
+	e := newEnv(t, k, func(c *Config) { c.RetryDelay = 20 * time.Millisecond })
 	e.addTunnel("utun11", "10.8.0.6/24")
 	e.run()
 	e.host.Routes.InjectFault(fake.Fault{Op: fake.OpAdd, Dst: pfx("192.168.1.0/24"), Err: osnet.ErrUnreachable, Times: 2})
@@ -55,7 +61,11 @@ func TestPendingWorkIsRetriedByTimer(t *testing.T) {
 
 // ESRCH is success: the route is gone, which is what was wanted.
 func TestDeletingAMissingRouteIsSuccess(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testDeletingAMissingRouteIsSuccess)
+}
+
+func testDeletingAMissingRouteIsSuccess(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun11", "10.8.0.6/24")
 	e.announce(splitIntent())
 	// The route disappears between our read of the table and our delete.
@@ -66,14 +76,18 @@ func TestDeletingAMissingRouteIsSuccess(t *testing.T) {
 	if e.r.dirty || e.r.failStreak != 0 {
 		t.Errorf("ESRCH counted as a failure: dirty %v, streak %d", e.r.dirty, e.r.failStreak)
 	}
-	if e.r.isOwned(pfx("192.168.1.0/24")) {
+	if e.owns("192.168.1.0/24") {
 		t.Error("the route is still considered ours")
 	}
 }
 
 // A route someone else removed is not deleted again, and ours comes back.
 func TestRouteRemovedByAnotherProgramIsNotAnError(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRouteRemovedByAnotherProgramIsNotAnError)
+}
+
+func testRouteRemovedByAnotherProgramIsNotAnError(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun11", "10.8.0.6/24")
 	e.announce(splitIntent())
 	e.host.Routes.Remove(pfx("192.168.1.0/24"))
@@ -92,9 +106,13 @@ func TestRouteRemovedByAnotherProgramIsNotAnError(t *testing.T) {
 // The route table already holds the very route we want: that is as good as
 // installing it, but it is not ours to remove.
 func TestIdenticalForeignRouteIsAcceptedAndKept(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testIdenticalForeignRouteIsAcceptedAndKept)
+}
+
+func testIdenticalForeignRouteIsAcceptedAndKept(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun10", "10.6.0.2/24")
-	e.host.Routes.Inject(wgBypass)
+	e.host.Inject(wgBypass)
 
 	e.announce(wgIntent())
 
@@ -116,13 +134,29 @@ func TestIdenticalForeignRouteIsAcceptedAndKept(t *testing.T) {
 // A different route on the same key is a conflict that is recorded and left
 // alone; when it goes away ours follows.
 func TestDifferentForeignRouteIsAConflict(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testDifferentForeignRouteIsAConflict)
+}
+
+func testDifferentForeignRouteIsAConflict(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun10", "10.6.0.2/24")
 	foreign := osnet.Route{Dst: wgBypass.Dst, Gateway: ip("192.168.51.254"), Iface: "en0", Static: true}
-	e.host.Routes.Inject(foreign)
+	e.host.Inject(foreign)
 
 	e.announce(wgIntent())
 
+	if k.windows() {
+		// Another next hop is another key: the foreign route is a neighbour that
+		// we neither replace nor remove. Its metric is lower than the bypass
+		// route's, so it is the one in use, and the report says so.
+		want := fmt.Sprintf("overridden by 203.0.113.10/32 via 192.168.51.254 (interface %d): effective metric 25, ours 26", e.host.ifIndex("en0"))
+		if rr := e.routeReport("203.0.113.10/32", "wg"); rr.State != tunnel.RouteFailed || rr.Detail != want {
+			t.Errorf("report: %+v, want %q", rr, want)
+		}
+		e.r.Withdraw("wg")
+		e.checkTable("203.0.113.10/32 via 192.168.51.254 dev en0")
+		return
+	}
 	if rr := e.routeReport("203.0.113.10/32", "wg"); rr.State != tunnel.RouteFailed || rr.Detail != "held by another program via 192.168.51.254" {
 		t.Errorf("report: %+v", rr)
 	}
@@ -160,30 +194,38 @@ func (r racyTable) Add(rt osnet.Route) error {
 	return r.RouteTable.Add(rt)
 }
 
-func TestExistsAfterTheReadIsReadBack(t *testing.T) {
+func TestExistsAfterTheReadIsReadBack(t *testing.T) { eachKeying(t, testExistsAfterTheReadIsReadBack) }
+
+func testExistsAfterTheReadIsReadBack(t *testing.T, k keyingCase) {
 	tests := []struct {
 		name      string
 		rival     osnet.Route
 		wantState tunnel.RouteState
 		wantDet   string
 		wantNote  string
+		// onlyMacOS: where a route is keyed by its next hop, a rival with another
+		// one is not the route we add, and EEXIST cannot be its answer.
+		onlyMacOS bool
 	}{
-		{"identical", wgBypass, tunnel.RouteInstalled, "", "already present, not ours"},
+		{"identical", wgBypass, tunnel.RouteInstalled, "", "already present, not ours", false},
 		{"different", osnet.Route{Dst: wgBypass.Dst, Gateway: ip("192.168.51.254"), Iface: "en0", Static: true},
-			tunnel.RouteFailed, "held by another program via 192.168.51.254", "held by another program"},
+			tunnel.RouteFailed, "held by another program via 192.168.51.254", "held by another program", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := newEnv(t)
+			if tt.onlyMacOS && k.windows() {
+				t.Skip("a route through another next hop has another key")
+			}
+			e := newEnv(t, k)
 			e.addTunnel("utun10", "10.6.0.2/24")
-			e.r.routes = racyTable{e.host.Routes, tt.rival}
+			e.r.routes = racyTable{e.host.Routes, e.host.index(tt.rival)}
 
 			e.announce(wgIntent())
 
 			if rr := e.routeReport("203.0.113.10/32", "wg"); rr.State != tt.wantState || rr.Detail != tt.wantDet {
 				t.Errorf("report: %+v", rr)
 			}
-			if e.r.isOwned(wgBypass.Dst) {
+			if e.owns("203.0.113.10/32") {
 				t.Error("a route we did not add is considered ours")
 			}
 			var notes []string
@@ -195,16 +237,20 @@ func TestExistsAfterTheReadIsReadBack(t *testing.T) {
 			if !slices.Equal(notes, []string{tt.wantNote}) {
 				t.Errorf("the pending record must be closed: %v", notes)
 			}
-			if left := e.unresolved(); len(left) != 1 || left[0].Kind != kindResolver {
-				t.Errorf("only the resolver entry may be unresolved: %+v", left)
+			for _, rec := range e.unresolved() {
+				if rec.Key == "203.0.113.10/32" {
+					t.Errorf("the route is not ours, the journal must not list it: %+v", rec)
+				}
 			}
 		})
 	}
 }
 
 // EEXIST on a route that is gone again by the time we read: try again later.
-func TestExistsThatVanishedIsRetried(t *testing.T) {
-	e := newEnv(t)
+func TestExistsThatVanishedIsRetried(t *testing.T) { eachKeying(t, testExistsThatVanishedIsRetried) }
+
+func testExistsThatVanishedIsRetried(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun10", "10.6.0.2/24")
 	e.host.Routes.InjectFault(fake.Fault{Op: fake.OpAdd, Dst: wgBypass.Dst, Err: osnet.ErrExists})
 
@@ -222,8 +268,10 @@ func TestExistsThatVanishedIsRetried(t *testing.T) {
 	}
 }
 
-func TestOtherAddErrorsAreFailures(t *testing.T) {
-	e := newEnv(t)
+func TestOtherAddErrorsAreFailures(t *testing.T) { eachKeying(t, testOtherAddErrorsAreFailures) }
+
+func testOtherAddErrorsAreFailures(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun10", "10.6.0.2/24")
 	e.host.Routes.InjectFault(fake.Fault{Op: fake.OpAdd, Dst: wgBypass.Dst, Err: errBoom})
 
@@ -246,7 +294,11 @@ func TestOtherAddErrorsAreFailures(t *testing.T) {
 }
 
 func TestUnreadableRoutingTableDoesNotStopDNS(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testUnreadableRoutingTableDoesNotStopDNS)
+}
+
+func testUnreadableRoutingTableDoesNotStopDNS(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.host.Routes.InjectFault(fake.Fault{Op: fake.OpDump, Err: errBoom})
 
@@ -263,8 +315,10 @@ func TestUnreadableRoutingTableDoesNotStopDNS(t *testing.T) {
 	e.checkTable("0.0.0.0/1 dev utun10", "128.0.0.0/1 dev utun10", "203.0.113.10/32 via 192.168.51.1 dev en0", "::/1 dev utun10", "8000::/1 dev utun10")
 }
 
-func TestDNSFailureDoesNotStopRoutes(t *testing.T) {
-	e := newEnv(t)
+func TestDNSFailureDoesNotStopRoutes(t *testing.T) { eachKeying(t, testDNSFailureDoesNotStopRoutes) }
+
+func testDNSFailureDoesNotStopRoutes(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.host.DNS.Fail("apply", errBoom, 1)
 
@@ -286,8 +340,10 @@ func TestDNSFailureDoesNotStopRoutes(t *testing.T) {
 	}
 }
 
-func TestDNSRemovalFailureIsRetried(t *testing.T) {
-	e := newEnv(t)
+func TestDNSRemovalFailureIsRetried(t *testing.T) { eachKeying(t, testDNSRemovalFailureIsRetried) }
+
+func testDNSRemovalFailureIsRetried(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(asusIntent())
 	e.host.DNS.Fail("remove", errBoom, 1)
@@ -306,14 +362,24 @@ func TestDNSRemovalFailureIsRetried(t *testing.T) {
 // Write-ahead: what the journal cannot record is not applied, because a crash
 // would leave it behind for good.
 func TestNothingIsAppliedThatCannotBeJournaled(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testNothingIsAppliedThatCannotBeJournaled)
+}
+
+func testNothingIsAppliedThatCannotBeJournaled(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.r.journal.file.Close() // the disk went away
 
 	e.announce(wgIntent())
 
-	// Interface-bound routes vanish with the interface and need no journal.
-	e.checkTable("0.0.0.0/1 dev utun10", "128.0.0.0/1 dev utun10", "::/1 dev utun10", "8000::/1 dev utun10")
+	if k.windows() {
+		// A tunnel adapter that was not closed keeps its routes, so every route is
+		// journaled first.
+		e.checkTable()
+	} else {
+		// Interface-bound routes vanish with the interface and need no journal.
+		e.checkTable("0.0.0.0/1 dev utun10", "128.0.0.0/1 dev utun10", "::/1 dev utun10", "8000::/1 dev utun10")
+	}
 	if rr := e.routeReport("203.0.113.10/32", "wg"); rr.State != tunnel.RouteFailed {
 		t.Errorf("the bypass must not be added without a journal record: %+v", rr)
 	}
@@ -327,15 +393,27 @@ func TestNothingIsAppliedThatCannotBeJournaled(t *testing.T) {
 
 // A route of ours that another program replaced is theirs: never deleted, never
 // altered, not even by a withdraw.
-func TestReplacedRouteIsNeverTouched(t *testing.T) {
-	e := newEnv(t)
+func TestReplacedRouteIsNeverTouched(t *testing.T) { eachKeying(t, testReplacedRouteIsNeverTouched) }
+
+func testReplacedRouteIsNeverTouched(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun11", "10.8.0.6/24")
 	e.announce(splitIntent())
 	replacement := osnet.Route{Dst: pfx("192.168.1.0/24"), Iface: "en0", Static: true}
-	e.host.Routes.Inject(replacement)
+	e.host.Inject(replacement)
 
 	e.change(osnet.ChangeHeartbeat)
 
+	if k.windows() {
+		// A route to the same prefix through another interface has another key. It
+		// does not replace ours, it sits next to it.
+		if rr := e.routeReport("192.168.1.0/24", "asus"); rr.State != tunnel.RouteInstalled {
+			t.Errorf("report: %+v", rr)
+		}
+		e.r.Withdraw("asus")
+		e.checkTable("192.168.1.0/24 dev en0")
+		return
+	}
 	if rr := e.routeReport("192.168.1.0/24", "asus"); rr.State != tunnel.RouteFailed || rr.Detail != "held by another program via en0" {
 		t.Errorf("report: %+v", rr)
 	}
@@ -345,8 +423,10 @@ func TestReplacedRouteIsNeverTouched(t *testing.T) {
 	}
 }
 
-func TestSnapshotFailureIsSurvived(t *testing.T) {
-	e := newEnv(t, func(c *Config) { c.RetryDelay = 20 * time.Millisecond })
+func TestSnapshotFailureIsSurvived(t *testing.T) { eachKeying(t, testSnapshotFailureIsSurvived) }
+
+func testSnapshotFailureIsSurvived(t *testing.T, k keyingCase) {
+	e := newEnv(t, k, func(c *Config) { c.RetryDelay = 20 * time.Millisecond })
 	e.host.AddTunnel("utun11", pfx("10.8.0.6/24"))
 	e.run()
 	e.announce(endpoints(up("ovpn", 1, "utun11", tunnel.RoleFull, "0.0.0.0/0"), "198.51.100.88"))
@@ -399,7 +479,11 @@ func refusesUnusableServers(_ string, entries []osnet.DNSEntry) error {
 // known, so that withdrawing it removes them: a catch-all resolver that points
 // at a dead tunnel breaks every lookup on the machine.
 func TestFailedDNSApplyIsStillRemovedOnWithdraw(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testFailedDNSApplyIsStillRemovedOnWithdraw)
+}
+
+func testFailedDNSApplyIsStillRemovedOnWithdraw(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(asusIntent())
 	if owned, _ := e.host.DNS.Owned(); !slices.Equal(owned, []string{"asus"}) {
@@ -427,7 +511,11 @@ func TestFailedDNSApplyIsStillRemovedOnWithdraw(t *testing.T) {
 // 0/1, so Compute has to leave such an address out; if it passes it on, every
 // pass fails and the whole machine is rebuilt every few passes.
 func TestNameserverTheAdapterRefusesDoesNotRebuildEverything(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testNameserverTheAdapterRefusesDoesNotRebuildEverything)
+}
+
+func testNameserverTheAdapterRefusesDoesNotRebuildEverything(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	dns := &refusingDNS{DNSConfigurator: e.host.DNS, reject: refusesUnusableServers}
 	e.r.dns = dns
@@ -454,7 +542,11 @@ func TestNameserverTheAdapterRefusesDoesNotRebuildEverything(t *testing.T) {
 // every few passes because of it; something new going wrong still is answered
 // with a rebuild.
 func TestResetIsNotRepeatedForAFailureItDidNotCure(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testResetIsNotRepeatedForAFailureItDidNotCure)
+}
+
+func testResetIsNotRepeatedForAFailureItDidNotCure(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.r.dns = &refusingDNS{DNSConfigurator: e.host.DNS, reject: func(owner string, _ []osnet.DNSEntry) error {
 		if owner == "asus" {
@@ -494,7 +586,11 @@ func TestResetIsNotRepeatedForAFailureItDidNotCure(t *testing.T) {
 
 // Failed work is tried again with growing pauses, not every RetryDelay for ever.
 func TestRetryBacksOffWhileSomethingKeepsFailing(t *testing.T) {
-	e := newEnv(t, func(c *Config) { c.RetryDelay = 20 * time.Millisecond })
+	eachKeying(t, testRetryBacksOffWhileSomethingKeepsFailing)
+}
+
+func testRetryBacksOffWhileSomethingKeepsFailing(t *testing.T, k keyingCase) {
+	e := newEnv(t, k, func(c *Config) { c.RetryDelay = 20 * time.Millisecond })
 	e.bothTunnels()
 	dns := &refusingDNS{DNSConfigurator: e.host.DNS, reject: func(string, []osnet.DNSEntry) error { return errBoom }}
 	e.r.dns = dns

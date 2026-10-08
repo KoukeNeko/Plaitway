@@ -72,7 +72,9 @@ func checkLines(t *testing.T, what string, got, want []string) {
 	}
 }
 
-func TestComputeRoutes(t *testing.T) {
+func TestComputeRoutes(t *testing.T) { eachKeying(t, testComputeRoutes) }
+
+func testComputeRoutes(t *testing.T, k keyingCase) {
 	const wgEndpoint = "203.0.113.10"
 	wgFull := func() tunnel.Intent { return up("wg", 1, "utun10", tunnel.RoleFull, "0.0.0.0/0") }
 	asus := func() tunnel.Intent { return up("asus", 2, "utun11", tunnel.RoleSplit, "192.168.1.0/24") }
@@ -464,14 +466,16 @@ func TestComputeRoutes(t *testing.T) {
 			if tt.net != nil {
 				tt.net(&ns)
 			}
-			checkLines(t, "routes", renderRoutes(Compute(tt.intents, ns)), tt.want)
+			checkLines(t, "routes", renderRoutes(computeFor(k.keying, tt.intents, ns)), tt.want)
 		})
 	}
 }
 
 // Only a tunnel that carries routes contributes them: up, and reconnecting
 // because it keeps its interface and its routes while it reconnects.
-func TestComputeStates(t *testing.T) {
+func TestComputeStates(t *testing.T) { eachKeying(t, testComputeStates) }
+
+func testComputeStates(t *testing.T, k keyingCase) {
 	states := map[tunnel.State]bool{
 		tunnel.StateDisconnected:        false,
 		tunnel.StateConnecting:          false,
@@ -484,7 +488,7 @@ func TestComputeStates(t *testing.T) {
 	for s, carries := range states {
 		t.Run(fmt.Sprint(s), func(t *testing.T) {
 			in := nameserver(up("a", 1, "utun1", tunnel.RoleFull, "0.0.0.0/0", "10.0.0.0/8"), "10.0.0.53", ".")
-			d := Compute([]tunnel.Intent{state(in, s)}, homeNet())
+			d := computeFor(k.keying, []tunnel.Intent{state(in, s)}, homeNet())
 			if got := len(d.Routes) > 0; got != carries {
 				t.Errorf("routes in state %d: got %v, want %v: %v", s, renderRoutes(d), carries, d.Routes)
 			}
@@ -495,7 +499,9 @@ func TestComputeStates(t *testing.T) {
 	}
 }
 
-func TestComputeDNS(t *testing.T) {
+func TestComputeDNS(t *testing.T) { eachKeying(t, testComputeDNS) }
+
+func testComputeDNS(t *testing.T, k keyingCase) {
 	wgFull := func() tunnel.Intent {
 		return nameserver(up("wg", 1, "utun10", tunnel.RoleFull, "0.0.0.0/0"), "192.168.50.1", ".")
 	}
@@ -660,31 +666,35 @@ func TestComputeDNS(t *testing.T) {
 			if tt.net != nil {
 				tt.net(&ns)
 			}
-			checkLines(t, "dns", renderDNS(Compute(tt.intents, ns)), tt.want)
+			checkLines(t, "dns", renderDNS(computeFor(k.keying, tt.intents, ns)), tt.want)
 		})
 	}
 }
 
 // The no-route case needs its own check: the default route is what makes most
 // addresses reachable, and without any the lookup finds nothing.
-func TestComputeDNSNoRoute(t *testing.T) {
+func TestComputeDNSNoRoute(t *testing.T) { eachKeying(t, testComputeDNSNoRoute) }
+
+func testComputeDNSNoRoute(t *testing.T, k keyingCase) {
 	ns := homeNet()
 	ns.DefaultV4 = nil
 	in := nameserver(up("a", 1, "utun1", tunnel.RoleSplit, "10.0.0.0/8"), "172.16.0.53", "a.lan")
-	checkLines(t, "dns", renderDNS(Compute([]tunnel.Intent{in}, ns)),
+	checkLines(t, "dns", renderDNS(computeFor(k.keying, []tunnel.Intent{in}, ns)),
 		[]string{"a 172.16.0.53 [a.lan] blocked (no route to 172.16.0.53)"})
 }
 
-func TestComputeIsDeterministic(t *testing.T) {
+func TestComputeIsDeterministic(t *testing.T) { eachKeying(t, testComputeIsDeterministic) }
+
+func testComputeIsDeterministic(t *testing.T, k keyingCase) {
 	intents := []tunnel.Intent{
 		endpoints(nameserver(up("wg", 1, "utun10", tunnel.RoleFull, "0.0.0.0/0", "10.6.0.0/24"), "10.6.0.1", "."), "203.0.113.10"),
 		endpoints(nameserver(up("asus", 2, "utun11", tunnel.RoleSplit, "192.168.1.0/24", "10.6.0.0/24"), "192.168.1.1", "asus.lan"), "198.51.100.7"),
 		upSince(up("third", 2, "utun12", tunnel.RoleFull, "0.0.0.0/0", "10.6.0.0/24"), -time.Hour),
 		up("fourth", 2, "utun13", tunnel.RoleSplit, "10.6.0.0/24", "172.16.0.0/12"),
 	}
-	want := Compute(intents, homeNet())
+	want := computeFor(k.keying, intents, homeNet())
 	permute(intents, func(p []tunnel.Intent) {
-		if got := Compute(p, homeNet()); !reflect.DeepEqual(got, want) {
+		if got := computeFor(k.keying, p, homeNet()); !reflect.DeepEqual(got, want) {
 			t.Fatalf("order %v changes the result:\n got: %v\nwant: %v", owners(p), renderRoutes(got), renderRoutes(want))
 		}
 	})
@@ -715,7 +725,9 @@ func permute(in []tunnel.Intent, visit func([]tunnel.Intent)) {
 	rec(0)
 }
 
-func TestComputeDoesNotChangeItsInput(t *testing.T) {
+func TestComputeDoesNotChangeItsInput(t *testing.T) { eachKeying(t, testComputeDoesNotChangeItsInput) }
+
+func testComputeDoesNotChangeItsInput(t *testing.T, k keyingCase) {
 	intents := []tunnel.Intent{
 		endpoints(nameserver(up("wg", 1, "utun10", tunnel.RoleFull, "0.0.0.0/0", "10.6.0.1/8"), "10.6.0.1", "Corp."), "203.0.113.10"),
 		up("asus", 2, "utun11", tunnel.RoleSplit, "192.168.1.0/24"),
@@ -723,7 +735,7 @@ func TestComputeDoesNotChangeItsInput(t *testing.T) {
 	ns := homeNet()
 	wantIntents := cloneAll(intents)
 	wantNet := cloneNetState(ns)
-	Compute(intents, ns)
+	computeFor(k.keying, intents, ns)
 	if !reflect.DeepEqual(intents, wantIntents) || !reflect.DeepEqual(ns, wantNet) {
 		t.Error("Compute modified its arguments")
 	}
@@ -803,6 +815,10 @@ func TestRedirectsAll(t *testing.T) {
 // tunnel everything goes through: it gets the catch-all DNS, and a lower priority full tunnel
 // stands by.
 func TestAFullTunnelWithoutThePrivateRangesHoldsTheDefault(t *testing.T) {
+	eachKeying(t, testAFullTunnelWithoutThePrivateRangesHoldsTheDefault)
+}
+
+func testAFullTunnelWithoutThePrivateRangesHoldsTheDefault(t *testing.T, k keyingCase) {
 	routes := allExcept(netip.MustParsePrefix("0.0.0.0/0"), privateV4)
 	names := make([]string, len(routes))
 	for i, p := range routes {
@@ -811,7 +827,7 @@ func TestAFullTunnelWithoutThePrivateRangesHoldsTheDefault(t *testing.T) {
 	wg := nameserver(up("wg", 1, "utun10", tunnel.RoleFull, names...), "1.1.1.1", ".")
 	ovpn := nameserver(up("ovpn", 2, "utun11", tunnel.RoleFull, "0.0.0.0/0"), "9.9.9.9", ".")
 
-	d := Compute([]tunnel.Intent{wg, ovpn}, homeNet())
+	d := computeFor(k.keying, []tunnel.Intent{wg, ovpn}, homeNet())
 
 	states := make(map[tunnel.OwnerID]tunnel.RouteState)
 	for _, p := range d.DNS {
@@ -842,6 +858,10 @@ func TestAFullTunnelWithoutThePrivateRangesHoldsTheDefault(t *testing.T) {
 // the default route, so a tunnel that stands by must not install them: they would take the
 // internet away from the holder.
 func TestAFullTunnelWithoutThePrivateRangesStandsByWhenItIsNotTheHolder(t *testing.T) {
+	eachKeying(t, testAFullTunnelWithoutThePrivateRangesStandsByWhenItIsNotTheHolder)
+}
+
+func testAFullTunnelWithoutThePrivateRangesStandsByWhenItIsNotTheHolder(t *testing.T, k keyingCase) {
 	routes := allExcept(netip.MustParsePrefix("0.0.0.0/0"), privateV4)
 	names := make([]string, len(routes))
 	for i, p := range routes {
@@ -866,7 +886,7 @@ func TestAFullTunnelWithoutThePrivateRangesStandsByWhenItIsNotTheHolder(t *testi
 	}
 
 	t.Run("a higher priority full tunnel holds the default", func(t *testing.T) {
-		got := installed(Compute([]tunnel.Intent{ovpn(1), wg(2), split}, homeNet()))
+		got := installed(computeFor(k.keying, []tunnel.Intent{ovpn(1), wg(2), split}, homeNet()))
 		if got["wg"] != 0 {
 			t.Errorf("the standby tunnel installed %d routes", got["wg"])
 		}
@@ -876,7 +896,7 @@ func TestAFullTunnelWithoutThePrivateRangesStandsByWhenItIsNotTheHolder(t *testi
 		}
 	})
 	t.Run("and the other way round", func(t *testing.T) {
-		d := Compute([]tunnel.Intent{wg(1), ovpn(2), split}, homeNet())
+		d := computeFor(k.keying, []tunnel.Intent{wg(1), ovpn(2), split}, homeNet())
 		got := installed(d)
 		if got["wg"] < 20 || got["split"] != 1 {
 			t.Errorf("installed = %v, want the wg pieces and the split prefix", got)
@@ -889,7 +909,7 @@ func TestAFullTunnelWithoutThePrivateRangesStandsByWhenItIsNotTheHolder(t *testi
 		}
 	})
 	t.Run("without another tunnel it is the holder", func(t *testing.T) {
-		if got := installed(Compute([]tunnel.Intent{wg(1)}, homeNet()))["wg"]; got < 20 {
+		if got := installed(computeFor(k.keying, []tunnel.Intent{wg(1)}, homeNet()))["wg"]; got < 20 {
 			t.Errorf("the only full tunnel installed %d routes", got)
 		}
 	})

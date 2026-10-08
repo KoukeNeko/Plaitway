@@ -117,7 +117,17 @@ type Intent struct {
 	// Routes are the prefixes to send through Iface. A default route is
 	// written as 0.0.0.0/0 or ::/0 and the Reconciler splits it into halves.
 	Routes []netip.Prefix
-	DNS    []DNSIntent
+	// Gateway and GatewayV6 are the tunnel's own next hops, one for each address
+	// family, for the platforms and adapters that only carry traffic to them: the
+	// Windows TAP driver answers for those addresses and no others. Gateway is the
+	// IPv4 one (OpenVPN's route_vpn_gateway) and GatewayV6 the IPv6 one (the far
+	// end of the tunnel's IPv6 address); a route takes the one of its destination's
+	// family. Both zero means the routes are bound to the interface (WireGuard,
+	// macOS utun). A tunnel that names one family's next hop and not the other's
+	// is an adapter of the first kind, and carries nothing of the other family
+	// except the halves of a default route, which then lead nowhere on purpose.
+	Gateway, GatewayV6 netip.Addr
+	DNS                []DNSIntent
 }
 
 type CredentialKind uint8
@@ -251,6 +261,10 @@ type RouteReport struct {
 	State      RouteState
 	Detail     string  // why it is not installed; empty when installed
 	ShadowedBy OwnerID // set when State is RouteShadowed
+	// Overridden is set with State RouteFailed when the route is in the table but
+	// a route of another program carries the traffic instead; Detail names it.
+	// It is what tells that case from a route that could not be installed.
+	Overridden bool
 }
 
 type DNSReport struct {

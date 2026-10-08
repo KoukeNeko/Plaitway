@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,21 +40,150 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
+// keyingCase is one way of keying the routing table that a scenario runs under.
+// The scenarios are written once; where the platforms differ in what should
+// happen, the test branches on windows().
+type keyingCase struct {
+	name   string
+	keying RouteKeying
+}
+
+func (k keyingCase) windows() bool { return k.keying.byInterface() }
+
+var (
+	macosCase   = keyingCase{"macos", KeyByPrefix}
+	windowsCase = keyingCase{"windows", KeyByPrefixInterfaceNextHop}
+
+	keyingCases = []keyingCase{macosCase, windowsCase}
+)
+
+// eachKeying runs a scenario once per keying, as subtests.
+func eachKeying(t *testing.T, scenario func(*testing.T, keyingCase)) {
+	t.Helper()
+	for _, k := range keyingCases {
+		t.Run(k.name, func(t *testing.T) { scenario(t, k) })
+	}
+}
+
+// testHost is a fake.Host whose interfaces have indexes when the table is
+// keyed by them, as every Windows interface has, and whose routes are put in
+// the table the way that platform's tools do. On macOS it is the plain fake:
+// no interface has an index there and routes carry none.
+type testHost struct {
+	*fake.Host
+	windows   bool
+	lastIndex int
+}
+
+func newTestHost(k keyingCase) *testHost {
+	if k.windows() {
+		return &testHost{Host: fake.NewWindowsHost(), windows: true}
+	}
+	return &testHost{Host: fake.NewHost()}
+}
+
+// The interface metrics a Windows host has: automatic metrics of a wired
+// adapter, and the value the engines give the adapters of their tunnels.
+const (
+	physicalInterfaceMetric = 25
+	tunnelAdapterMetric     = 5
+)
+
+// interfaceMetric is the metric a new interface has; macOS has none.
+func (h *testHost) interfaceMetric(metric uint32) uint32 {
+	if !h.windows {
+		return 0
+	}
+	return metric
+}
+
+// nextIndex gives a new interface its index; an interface that is created again
+// gets another one, as on Windows.
+func (h *testHost) nextIndex() int {
+	if !h.windows {
+		return 0
+	}
+	h.lastIndex++
+	return h.lastIndex
+}
+
+var (
+	defaultV4Route = pfx("0.0.0.0/0")
+	defaultV6Route = pfx("::/0")
+)
+
+func (h *testHost) AddPhysical(name string, addr netip.Prefix, gateway netip.Addr) {
+	if !h.windows {
+		h.Host.AddPhysical(name, addr, gateway)
+		return
+	}
+	h.Routes.AddInterface(osnet.Interface{
+		Name: name, Index: h.nextIndex(), Up: true, Addrs: []netip.Prefix{addr}, Metric: physicalInterfaceMetric,
+	})
+	dst := defaultV4Route
+	if gateway.Is6() {
+		dst = defaultV6Route
+	}
+	if err := h.Routes.Add(osnet.Route{Dst: dst, Gateway: gateway, Iface: name, Static: true}); err != nil {
+		panic("test host: system default route: " + err.Error())
+	}
+	h.Sync()
+}
+
+func (h *testHost) AddTunnel(name string, addrs ...netip.Prefix) {
+	h.Routes.AddInterface(osnet.Interface{
+		Name: name, Index: h.nextIndex(), Up: true, Tunnel: true, Addrs: addrs, Metric: h.interfaceMetric(tunnelAdapterMetric),
+	})
+	h.Sync()
+}
+
+// AddInterface creates an interface without telling the Reconciler or syncing
+// the network state, which is the test's to do. It has the metric of a physical
+// one unless the test names another.
+func (h *testHost) AddInterface(ifc osnet.Interface) {
+	ifc.Index = h.nextIndex()
+	if ifc.Metric == 0 {
+		ifc.Metric = h.interfaceMetric(physicalInterfaceMetric)
+	}
+	h.Routes.AddInterface(ifc)
+}
+
+// index returns rt with the index of its interface, the way the system reports
+// the routes that other programs add.
+func (h *testHost) index(rt osnet.Route) osnet.Route {
+	if !h.windows || rt.IfIndex != 0 {
+		return rt
+	}
+	for _, ifc := range h.Routes.Interfaces() {
+		if ifc.Name == rt.Iface {
+			rt.IfIndex = uint32(ifc.Index)
+		}
+	}
+	return rt
+}
+
+// Inject puts a route in the table behind the Reconciler's back.
+func (h *testHost) Inject(rt osnet.Route) { h.Routes.Inject(h.index(rt)) }
+
+// ifIndex is the index of a live interface, zero when it has none.
+func (h *testHost) ifIndex(name string) uint32 { return h.index(osnet.Route{Iface: name}).IfIndex }
+
 // env is a fake machine with one physical interface, en0 on 192.168.51.0/24
 // behind the router 192.168.51.1, and a Reconciler on top of it.
 type env struct {
 	t       *testing.T
-	host    *fake.Host
+	k       keyingCase
+	host    *testHost
 	r       *Reconciler
 	journal string
 	logs    *syncBuffer
 }
 
-func newEnv(t *testing.T, opts ...func(*Config)) *env {
+func newEnv(t *testing.T, k keyingCase, opts ...func(*Config)) *env {
 	t.Helper()
-	host := fake.NewHost()
+	host := newTestHost(k)
 	host.AddPhysical("en0", pfx("192.168.51.185/24"), ip("192.168.51.1"))
-	e := &env{t: t, host: host, journal: filepath.Join(t.TempDir(), "state", "journal"), logs: &syncBuffer{}}
+	e := &env{t: t, k: k, host: host, journal: filepath.Join(t.TempDir(), "state", "journal"), logs: &syncBuffer{}}
 	t.Cleanup(func() {
 		if t.Failed() {
 			t.Logf("daemon log:\n%s", e.logs)
@@ -72,6 +202,7 @@ func (e *env) newReconciler(opts ...func(*Config)) *Reconciler {
 		DNS:         e.host.DNS,
 		Net:         e.host.Net,
 		JournalPath: e.journal,
+		Keying:      e.k.keying,
 		Log:         slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Now:         func() time.Time { return t0 },
 		WakeDelay:   time.Hour,
@@ -89,6 +220,34 @@ func (e *env) newReconciler(opts ...func(*Config)) *Reconciler {
 	// Windows refuses to delete the test's directory under an open file.
 	e.t.Cleanup(func() { r.journal.close() })
 	return r
+}
+
+// owns says whether the Reconciler considers a route to dst its own.
+func (e *env) owns(dst string) bool {
+	for key := range e.r.owned {
+		if key.dst == pfx(dst) {
+			return true
+		}
+	}
+	return false
+}
+
+// dstOf is the destination a route key of the stale list stands for.
+func dstOf(key string) string {
+	dst, _, _ := strings.Cut(key, "@")
+	return dst
+}
+
+// removeStale removes the stale route to dst, whatever its key looks like on
+// this platform. A destination that is not in the list is passed on as it is,
+// for the Reconciler to refuse.
+func (e *env) removeStale(dst string) error {
+	for _, s := range e.r.Report().Stale {
+		if dstOf(s.Key) == dst {
+			return e.r.RemoveStale(s.Key)
+		}
+	}
+	return e.r.RemoveStale(dst)
 }
 
 func (e *env) addTunnel(name, addr string) {
@@ -274,9 +433,9 @@ func (e *env) unresolved() []record {
 	live := make(map[string]record)
 	for _, rec := range e.journalFile() {
 		if rec.State == stateRemoved {
-			delete(live, liveKey(rec.Kind, rec.Key))
+			delete(live, rec.id())
 		} else {
-			live[liveKey(rec.Kind, rec.Key)] = rec
+			live[rec.id()] = rec
 		}
 	}
 	out := make([]record, 0, len(live))

@@ -93,13 +93,22 @@ func carriesEndpoints(s tunnel.State) bool {
 //     through the current default nexthop of the physical network.
 //   - DNS: one winner per domain; the catch-all only for the owner of the
 //     default routes; servers must be reached through the owner's interface.
+//
+// Compute plans for the macOS routing table; the Reconciler plans for the one in
+// its Config.
 func Compute(intents []tunnel.Intent, ns osnet.NetState) Desired {
+	return computeFor(KeyByPrefix, intents, ns)
+}
+
+// computeFor is Compute for a routing table keyed as keying says: only the
+// routes it plans differ, in the interface index and metric they carry.
+func computeFor(keying RouteKeying, intents []tunnel.Intent, ns osnet.NetState) Desired {
 	live := slices.Clone(intents)
 	slices.SortStableFunc(live, compareIntents)
 	holder := defaultHolder(live)
 
-	routes := routePlans(live, holder, ns)
-	bypass := bypassPlans(live, routes, ns)
+	routes := routePlans(keying, live, holder, ns)
+	bypass := bypassPlans(keying, live, routes, ns)
 	routes = append(routes, bypass...)
 	demoteEndpointRoutes(routes)
 	slices.SortStableFunc(routes, comparePlans)
@@ -301,7 +310,7 @@ func expandRoutes(routes []netip.Prefix) []netip.Prefix {
 	return out
 }
 
-func routePlans(live []tunnel.Intent, holder tunnel.OwnerID, ns osnet.NetState) []RoutePlan {
+func routePlans(keying RouteKeying, live []tunnel.Intent, holder tunnel.OwnerID, ns osnet.NetState) []RoutePlan {
 	winners := make(map[netip.Prefix]tunnel.OwnerID)
 	var plans []RoutePlan
 	for _, in := range live {
@@ -315,7 +324,7 @@ func routePlans(live []tunnel.Intent, holder tunnel.OwnerID, ns osnet.NetState) 
 		standby := in.Role == tunnel.RoleFull && in.Owner != holder && redirectsAll(in.Routes) && !hasDefault(in.Routes)
 		for _, p := range expandRoutes(in.Routes) {
 			plan := RoutePlan{
-				Route: osnet.Route{Dst: p, Iface: in.Iface, Static: true},
+				Route: keying.tunnelRoute(p, in, ns),
 				Owner: in.Owner,
 				Kind:  tunnel.RouteTunnel,
 			}
@@ -332,6 +341,8 @@ func routePlans(live []tunnel.Intent, holder tunnel.OwnerID, ns osnet.NetState) 
 				plan.State, plan.Detail = tunnel.RouteBlocked, "special address range"
 			case blocked:
 				plan.State, plan.Detail = tunnel.RouteBlocked, "local subnet "+sub.String()
+			case keying.needsNextHop(in, p):
+				plan.State, plan.Detail = tunnel.RouteBlocked, noNextHopDetail(p)
 			case winners[p] != "":
 				plan.State, plan.ShadowedBy = tunnel.RouteShadowed, winners[p]
 			default:
@@ -395,7 +406,7 @@ func routable(a netip.Addr) bool {
 	return a.IsValid() && a.IsGlobalUnicast()
 }
 
-func bypassPlans(live []tunnel.Intent, routes []RoutePlan, ns osnet.NetState) []RoutePlan {
+func bypassPlans(keying RouteKeying, live []tunnel.Intent, routes []RoutePlan, ns osnet.NetState) []RoutePlan {
 	var captors []netip.Prefix
 	for _, r := range routes {
 		if r.Install {
@@ -438,7 +449,7 @@ func bypassPlans(live []tunnel.Intent, routes []RoutePlan, ns osnet.NetState) []
 			if nh == nil {
 				plan.Detail = "no network"
 			} else {
-				plan.Route.Gateway, plan.Route.Iface, plan.Route.Static = nh.Gateway, nh.Iface, true
+				plan.Route = keying.bypassRoute(host, *nh, ns)
 				plan.Install = true
 			}
 			plans = append(plans, plan)

@@ -15,26 +15,29 @@ import (
 //   - the gateway is not on a subnet of the interface any more (not asked of a
 //     tunnel interface, see staleReason), or
 //   - the route is for a tunnel endpoint and its gateway is not the default
-//     route's nexthop. Only endpoints are held to this: a host route someone
-//     else added for another purpose may well use another router.
+//     route's nexthop, or, where a route is bound to its interface, it leaves
+//     through another interface than the default route. Only endpoints are held
+//     to this: a host route someone else added for another purpose may well use
+//     another router.
 //
 // owned says whether the journal records Plaitway as the installer; those are
 // repaired automatically, the rest are only reported.
-func findStale(table map[netip.Prefix]osnet.Route, ns osnet.NetState, endpoints map[netip.Prefix]bool, owned func(netip.Prefix) bool) []tunnel.StaleRoute {
+func findStale(keying RouteKeying, table map[routeKey]osnet.Route, ns osnet.NetState, endpoints map[netip.Prefix]bool, owned func(osnet.Route) bool) []tunnel.StaleRoute {
 	var stale []tunnel.StaleRoute
-	for dst, rt := range table {
+	for _, rt := range table {
+		dst := rt.Dst.Masked()
 		if !rt.Static || rt.Scoped || rt.Blackhole || !rt.Gateway.IsValid() || !dst.IsSingleIP() {
 			continue
 		}
-		if reason := staleReason(rt, ns, endpoints[dst]); reason != "" {
-			stale = append(stale, tunnel.StaleRoute{Key: dst.String(), Route: rt, Reason: reason, Owned: owned(dst)})
+		if reason := staleReason(keying, rt, ns, endpoints[dst]); reason != "" {
+			stale = append(stale, tunnel.StaleRoute{Key: keying.identity(rt), Route: rt, Reason: reason, Owned: owned(rt)})
 		}
 	}
 	slices.SortFunc(stale, func(a, b tunnel.StaleRoute) int { return cmp.Compare(a.Key, b.Key) })
 	return stale
 }
 
-func staleReason(rt osnet.Route, ns osnet.NetState, isEndpoint bool) string {
+func staleReason(keying RouteKeying, rt osnet.Route, ns osnet.NetState, isEndpoint bool) string {
 	if rt.Iface != "" {
 		ifc, ok := findInterface(ns, rt.Iface)
 		switch {
@@ -59,6 +62,11 @@ func staleReason(rt osnet.Route, ns osnet.NetState, isEndpoint bool) string {
 		}
 		if nh != nil && nh.Gateway.WithZone("") != rt.Gateway.WithZone("") {
 			return "gateway is not the default route's"
+		}
+		// Two interfaces can be on the router's network, the default route
+		// moving from one to the other without the gateway changing.
+		if nh != nil && keying.byInterface() && rt.Iface != "" && rt.Iface != nh.Iface {
+			return "interface is not the default route's"
 		}
 	}
 	return ""

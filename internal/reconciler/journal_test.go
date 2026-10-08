@@ -167,7 +167,11 @@ func TestJournalReleasesItsFileWhenClosed(t *testing.T) {
 // The same holds for a Reconciler that Run has ended: the daemon that starts
 // next has to be able to replace the file.
 func TestStoppedReconcilerReleasesItsJournal(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testStoppedReconcilerReleasesItsJournal)
+}
+
+func testStoppedReconcilerReleasesItsJournal(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	stop := e.run()
 	e.announce(wgIntent())

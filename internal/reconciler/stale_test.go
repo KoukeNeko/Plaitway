@@ -12,6 +12,12 @@ import (
 )
 
 func TestFindStale(t *testing.T) {
+	for _, k := range keyingCases {
+		t.Run(k.name, func(t *testing.T) { testFindStale(t, k.keying) })
+	}
+}
+
+func testFindStale(t *testing.T, keying RouteKeying) {
 	ns := osnet.NetState{
 		Interfaces: []osnet.Interface{
 			{Name: "en0", Up: true, Addrs: pfxs("192.168.51.185/24", "fd00::5/64")},
@@ -62,23 +68,24 @@ func TestFindStale(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			endpoints := map[netip.Prefix]bool{tt.route.Dst: tt.isEndpoint}
-			got := findStale(map[netip.Prefix]osnet.Route{tt.route.Dst: tt.route}, ns, endpoints, func(netip.Prefix) bool { return false })
+			table := map[routeKey]osnet.Route{keying.key(tt.route): tt.route}
+			got := findStale(keying, table, ns, endpoints, func(osnet.Route) bool { return false })
 			switch {
 			case tt.want == "" && len(got) != 0:
 				t.Errorf("reported as stale: %+v", got)
-			case tt.want != "" && (len(got) != 1 || got[0].Reason != tt.want || got[0].Key != tt.route.Dst.String()):
+			case tt.want != "" && (len(got) != 1 || got[0].Reason != tt.want || got[0].Key != keying.identity(tt.route)):
 				t.Errorf("got %+v, want reason %q", got, tt.want)
 			}
 		})
 	}
 
 	t.Run("owned routes are marked and the list is sorted", func(t *testing.T) {
-		table := map[netip.Prefix]osnet.Route{}
+		table := map[routeKey]osnet.Route{}
 		for _, r := range []osnet.Route{host("9.9.9.9/32", "10.99.0.1", "en0"), host("1.1.1.1/32", "10.99.0.1", "en0")} {
-			table[r.Dst] = r
+			table[keying.key(r)] = r
 		}
-		got := findStale(table, ns, nil, func(p netip.Prefix) bool { return p == pfx("1.1.1.1/32") })
-		if len(got) != 2 || got[0].Key != "1.1.1.1/32" || !got[0].Owned || got[1].Key != "9.9.9.9/32" || got[1].Owned {
+		got := findStale(keying, table, ns, nil, func(rt osnet.Route) bool { return rt.Dst == pfx("1.1.1.1/32") })
+		if len(got) != 2 || dstOf(got[0].Key) != "1.1.1.1/32" || !got[0].Owned || dstOf(got[1].Key) != "9.9.9.9/32" || got[1].Owned {
 			t.Errorf("got %+v", got)
 		}
 	})
@@ -97,7 +104,11 @@ func (l lyingTable) Add(rt osnet.Route) error {
 }
 
 func TestRouteThatDoesNotStayIsAFailure(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRouteThatDoesNotStayIsAFailure)
+}
+
+func testRouteThatDoesNotStayIsAFailure(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun10", "10.6.0.2/24")
 	e.r.routes = lyingTable{e.host.Routes}
 
@@ -106,7 +117,7 @@ func TestRouteThatDoesNotStayIsAFailure(t *testing.T) {
 	if rr := e.routeReport("203.0.113.10/32", "wg"); rr.State != tunnel.RouteFailed || rr.Detail != "not in the routing table after adding" {
 		t.Errorf("report: %+v", rr)
 	}
-	if e.r.isOwned(pfx("203.0.113.10/32")) {
+	if e.owns("203.0.113.10/32") {
 		t.Error("a route that is not there is considered ours")
 	}
 	// Pending, then the add; the read-back finds nothing, so it is never applied.
@@ -128,7 +139,11 @@ func (deadMonitor) Events(context.Context) <-chan osnet.Change {
 }
 
 func TestRunEndsWhenTheEventStreamDies(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRunEndsWhenTheEventStreamDies)
+}
+
+func testRunEndsWhenTheEventStreamDies(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(asusIntent())
 	e.r.monitor = deadMonitor{e.host.Net}
@@ -147,7 +162,11 @@ func TestRunEndsWhenTheEventStreamDies(t *testing.T) {
 // If the exit cannot remove everything, Run says so and the journal keeps what
 // is left for the next start.
 func TestRunReportsWhatItCouldNotRemove(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRunReportsWhatItCouldNotRemove)
+}
+
+func testRunReportsWhatItCouldNotRemove(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	stop := e.run()
 	e.announce(wgIntent())
@@ -169,7 +188,11 @@ func TestRunReportsWhatItCouldNotRemove(t *testing.T) {
 }
 
 func TestSweepSurvivesAResolverThatCannotBeListed(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testSweepSurvivesAResolverThatCannotBeListed)
+}
+
+func testSweepSurvivesAResolverThatCannotBeListed(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.host.DNS.Leave("ghost", osnet.DNSEntry{Servers: ips("10.0.0.53"), MatchDomains: []string{"corp.lan"}})
 	e.host.DNS.Fail("owned", errBoom, 1)
 

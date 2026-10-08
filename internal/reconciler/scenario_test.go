@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"fmt"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -14,7 +15,11 @@ import (
 // An Announce in StateConnecting has installed the bypass route it needs when
 // it returns, so the engine can start connecting right away.
 func TestAnnounceInstallsBypassBeforeReturning(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testAnnounceInstallsBypassBeforeReturning)
+}
+
+func testAnnounceInstallsBypassBeforeReturning(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun10", "10.6.0.2/24")
 	e.announce(up("wg", 1, "utun10", tunnel.RoleFull, "0.0.0.0/0"))
 	e.checkTable("0.0.0.0/1 dev utun10", "128.0.0.0/1 dev utun10")
@@ -36,8 +41,10 @@ func TestAnnounceInstallsBypassBeforeReturning(t *testing.T) {
 
 // The goal scenario of the whole product: the WireGuard full tunnel and the
 // OpenVPN split tunnel up together, each reachable.
-func TestFullAndSplitTunnelsTogether(t *testing.T) {
-	e := newEnv(t)
+func TestFullAndSplitTunnelsTogether(t *testing.T) { eachKeying(t, testFullAndSplitTunnelsTogether) }
+
+func testFullAndSplitTunnelsTogether(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(state(wgIntent(), tunnel.StateConnecting))
 	e.announce(state(asusIntent(), tunnel.StateConnecting))
@@ -99,8 +106,10 @@ func dnsOps(e *env) []string {
 	return out
 }
 
-func TestPrioritiesShadowAndPromote(t *testing.T) {
-	e := newEnv(t)
+func TestPrioritiesShadowAndPromote(t *testing.T) { eachKeying(t, testPrioritiesShadowAndPromote) }
+
+func testPrioritiesShadowAndPromote(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun1", "10.1.0.2/24")
 	e.addTunnel("utun2", "10.2.0.2/24")
 	low := up("low", 2, "utun1", tunnel.RoleSplit, "10.0.0.0/8", "172.16.0.0/12")
@@ -131,7 +140,11 @@ func TestPrioritiesShadowAndPromote(t *testing.T) {
 }
 
 func TestStandbyFullTunnelTakesOverTheDefaultRoute(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testStandbyFullTunnelTakesOverTheDefaultRoute)
+}
+
+func testStandbyFullTunnelTakesOverTheDefaultRoute(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun10", "10.6.0.2/24")
 	e.addTunnel("utun11", "10.8.0.6/24")
 	wg := up("wg", 1, "utun10", tunnel.RoleFull, "0.0.0.0/0")
@@ -154,8 +167,10 @@ func TestStandbyFullTunnelTakesOverTheDefaultRoute(t *testing.T) {
 // The remote site's router is 192.168.1.1, and so is the local one: the
 // tunnel's route would hijack the local network and its nameserver would be the
 // router next door.
-func TestLocalSubnetConflict(t *testing.T) {
-	e := newEnv(t)
+func TestLocalSubnetConflict(t *testing.T) { eachKeying(t, testLocalSubnetConflict) }
+
+func testLocalSubnetConflict(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.host.MoveNetwork("en0", pfx("192.168.1.50/24"), ip("192.168.1.1"))
 	e.addTunnel("utun11", "10.8.0.6/24")
 
@@ -188,7 +203,11 @@ func TestLocalSubnetConflict(t *testing.T) {
 }
 
 func TestReconnectingTunnelKeepsItsRoutes(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testReconnectingTunnelKeepsItsRoutes)
+}
+
+func testReconnectingTunnelKeepsItsRoutes(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(wgIntent())
 	before := e.opLines()
@@ -205,7 +224,11 @@ func TestReconnectingTunnelKeepsItsRoutes(t *testing.T) {
 }
 
 func TestTunnelInterfaceVanishesAndComesBack(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testTunnelInterfaceVanishesAndComesBack)
+}
+
+func testTunnelInterfaceVanishesAndComesBack(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun11", "10.8.0.6/24")
 	e.announce(asusIntent())
 	e.checkTable("192.168.1.0/24 dev utun11")
@@ -230,8 +253,10 @@ func TestTunnelInterfaceVanishesAndComesBack(t *testing.T) {
 
 // Applying the same intents twice changes nothing: not the table, not the DNS
 // entries, not the journal.
-func TestReapplyingChangesNothing(t *testing.T) {
-	e := newEnv(t)
+func TestReapplyingChangesNothing(t *testing.T) { eachKeying(t, testReapplyingChangesNothing) }
+
+func testReapplyingChangesNothing(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(wgIntent())
 	e.announce(asusIntent())
@@ -264,8 +289,10 @@ func TestReapplyingChangesNothing(t *testing.T) {
 
 // What was installed is removed in the reverse order: DNS, default halves,
 // tunnel routes, bypass routes; and built in the opposite order.
-func TestApplyAndTeardownOrder(t *testing.T) {
-	e := newEnv(t)
+func TestApplyAndTeardownOrder(t *testing.T) { eachKeying(t, testApplyAndTeardownOrder) }
+
+func testApplyAndTeardownOrder(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	// The DNS fake has its own log; mark the route log so both are in one sequence.
 	e.r.dns = markingDNS{e.host.DNS, e.host.Routes}
@@ -320,7 +347,11 @@ func (m markingDNS) Remove(owner string) error {
 // stale route, install the new one through the new best default, and only then
 // ask the engines to rebind.
 func TestStaleBypassIsRepairedBeforeRebind(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testStaleBypassIsRepairedBeforeRebind)
+}
+
+func testStaleBypassIsRepairedBeforeRebind(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.host.AddTunnel("utun11", pfx("10.8.0.6/24"))
 	var rebinds atomic.Int32
 	e.r.SetRebind(func() {
@@ -385,14 +416,18 @@ func TestStaleBypassIsRepairedBeforeRebind(t *testing.T) {
 // The same bug when the leftover /32 was not added by Plaitway: it is reported,
 // never deleted without the user's say-so, and installing ours waits for that.
 func TestForeignStaleRouteIsReportedNotRemoved(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testForeignStaleRouteIsReportedNotRemoved)
+}
+
+func testForeignStaleRouteIsReportedNotRemoved(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.host.AddTunnel("utun11", pfx("10.8.0.6/24"))
 	// What an earlier OpenVPN Connect left behind, then the network changed.
-	e.host.Routes.Inject(osnet.Route{Dst: pfx("198.51.100.88/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true})
+	e.host.Inject(osnet.Route{Dst: pfx("198.51.100.88/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true})
 	e.host.MoveNetwork("en0", pfx("10.20.30.7/24"), ip("10.20.30.1"))
 	e.change(osnet.ChangeRoute)
 	foreignOK := osnet.Route{Dst: pfx("8.8.4.4/32"), Gateway: ip("10.20.30.1"), Iface: "en0", Static: true}
-	e.host.Routes.Inject(foreignOK)
+	e.host.Inject(foreignOK)
 
 	ovpn := endpoints(up("ovpn", 1, "utun11", tunnel.RoleFull, "0.0.0.0/0"), "198.51.100.88")
 	e.announce(ovpn)
@@ -401,20 +436,29 @@ func TestForeignStaleRouteIsReportedNotRemoved(t *testing.T) {
 		t.Fatalf("a route we did not install was deleted: %v", ops)
 	}
 	stale := e.r.Report().Stale
-	if len(stale) != 1 || stale[0].Key != "198.51.100.88/32" || stale[0].Owned || stale[0].Reason != "gateway is not on the subnet of en0" {
+	if len(stale) != 1 || dstOf(stale[0].Key) != "198.51.100.88/32" || stale[0].Owned || stale[0].Reason != "gateway is not on the subnet of en0" {
 		t.Fatalf("stale: %+v", stale)
 	}
-	if rr := e.routeReport("198.51.100.88/32", "ovpn"); rr.State != tunnel.RouteFailed || rr.Detail != "held by another program via 192.168.51.1" {
+	rr := e.routeReport("198.51.100.88/32", "ovpn")
+	if k.windows() {
+		// The foreign route goes through another next hop: another key, and no
+		// conflict. Both routes are in the table until the user removes theirs, and
+		// the foreign one has the lower metric.
+		want := fmt.Sprintf("overridden by 198.51.100.88/32 via 192.168.51.1 (interface %d): effective metric 25, ours 26", e.host.ifIndex("en0"))
+		if rr.State != tunnel.RouteFailed || rr.Detail != want {
+			t.Errorf("the bypass is a route of its own next to the foreign one: %+v, want %q", rr, want)
+		}
+	} else if rr.State != tunnel.RouteFailed || rr.Detail != "held by another program via 192.168.51.1" {
 		t.Errorf("the bypass cannot be installed over the foreign route: %+v", rr)
 	}
 
-	if err := e.r.RemoveStale("8.8.4.4/32"); err == nil {
+	if err := e.removeStale("8.8.4.4/32"); err == nil {
 		t.Error("a route that is not stale must not be removed")
 	}
 	if _, ok := e.host.Routes.Get(foreignOK.Dst); !ok {
 		t.Error("the healthy foreign route was removed")
 	}
-	if err := e.r.RemoveStale("198.51.100.88/32"); err != nil {
+	if err := e.removeStale("198.51.100.88/32"); err != nil {
 		t.Fatal(err)
 	}
 	e.checkTable(
@@ -426,7 +470,7 @@ func TestForeignStaleRouteIsReportedNotRemoved(t *testing.T) {
 	if stale := e.r.Report().Stale; len(stale) != 0 {
 		t.Errorf("stale after removal: %+v", stale)
 	}
-	if err := e.r.RemoveStale("198.51.100.88/32"); err == nil {
+	if err := e.removeStale("198.51.100.88/32"); err == nil {
 		t.Error("removing it twice should say that it is not stale")
 	}
 }
@@ -434,21 +478,27 @@ func TestForeignStaleRouteIsReportedNotRemoved(t *testing.T) {
 // A foreign host route for a known endpoint whose gateway is still on the
 // subnet but is not the default route's nexthop is stale too.
 func TestForeignEndpointRouteThroughAnotherRouterIsStale(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testForeignEndpointRouteThroughAnotherRouterIsStale)
+}
+
+func testForeignEndpointRouteThroughAnotherRouterIsStale(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.host.AddTunnel("utun11", pfx("10.8.0.6/24"))
-	e.host.Routes.Inject(osnet.Route{Dst: pfx("198.51.100.88/32"), Gateway: ip("192.168.51.254"), Iface: "en0", Static: true})
-	e.host.Routes.Inject(osnet.Route{Dst: pfx("8.8.4.4/32"), Gateway: ip("192.168.51.254"), Iface: "en0", Static: true})
+	e.host.Inject(osnet.Route{Dst: pfx("198.51.100.88/32"), Gateway: ip("192.168.51.254"), Iface: "en0", Static: true})
+	e.host.Inject(osnet.Route{Dst: pfx("8.8.4.4/32"), Gateway: ip("192.168.51.254"), Iface: "en0", Static: true})
 
 	e.announce(endpoints(up("ovpn", 1, "utun11", tunnel.RoleFull, "0.0.0.0/0"), "198.51.100.88"))
 
 	stale := e.r.Report().Stale
-	if len(stale) != 1 || stale[0].Key != "198.51.100.88/32" || stale[0].Reason != "gateway is not the default route's" {
+	if len(stale) != 1 || dstOf(stale[0].Key) != "198.51.100.88/32" || stale[0].Reason != "gateway is not the default route's" {
 		t.Errorf("only the endpoint's route is held to the default nexthop: %+v", stale)
 	}
 }
 
-func TestRebindRules(t *testing.T) {
-	e := newEnv(t)
+func TestRebindRules(t *testing.T) { eachKeying(t, testRebindRules) }
+
+func testRebindRules(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	var rebinds atomic.Int32
 	e.r.SetRebind(func() { rebinds.Add(1) })
 	e.addTunnel("utun11", "10.8.0.6/24")
@@ -510,7 +560,11 @@ func TestRebindRules(t *testing.T) {
 // second interface that carries no default route, the link-local and privacy
 // addresses that come and go: none of it is the underlay.
 func TestRebindIgnoresWhatIsNotTheUnderlay(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRebindIgnoresWhatIsNotTheUnderlay)
+}
+
+func testRebindIgnoresWhatIsNotTheUnderlay(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	var rebinds atomic.Int32
 	e.r.SetRebind(func() { rebinds.Add(1) })
 	e.addTunnel("utun11", "10.8.0.6/24")
@@ -529,15 +583,15 @@ func TestRebindIgnoresWhatIsNotTheUnderlay(t *testing.T) {
 		do   func()
 	}{
 		{"AirDrop starts", func() {
-			e.host.Routes.AddInterface(osnet.Interface{Name: "awdl0", Up: true, Addrs: pfxs("fe80::a09b:b3ff:fe59:c744/64")})
+			e.host.AddInterface(osnet.Interface{Name: "awdl0", Up: true, Addrs: pfxs("fe80::a09b:b3ff:fe59:c744/64")})
 		}},
 		{"AirDrop stops", func() { e.host.Routes.SetUp("awdl0", false) }},
 		{"a virtual machine starts", func() {
-			e.host.Routes.AddInterface(osnet.Interface{Name: "bridge100", Up: true, Addrs: pfxs("192.168.139.3/23", "fe80::f84d:89ff:fe36:9b64/64")})
+			e.host.AddInterface(osnet.Interface{Name: "bridge100", Up: true, Addrs: pfxs("192.168.139.3/23", "fe80::f84d:89ff:fe36:9b64/64")})
 		}},
 		{"a virtual machine stops", func() { e.host.DestroyInterface("bridge100") }},
 		{"a second interface joins a network without taking the default route", func() {
-			e.host.Routes.AddInterface(osnet.Interface{Name: "en5", Up: true, Addrs: pfxs("10.77.0.2/24")})
+			e.host.AddInterface(osnet.Interface{Name: "en5", Up: true, Addrs: pfxs("10.77.0.2/24")})
 		}},
 		{"the privacy address of en0 rotates", func() {
 			e.host.Routes.SetAddrs("en0", pfxs("192.168.51.185/24", "fe80::aa:1d64:6acb:1ea/64", "2001:db8::5678/64"))
@@ -568,7 +622,11 @@ func TestRebindIgnoresWhatIsNotTheUnderlay(t *testing.T) {
 // tunnel's own subnet is reachable through it, and must not wait for the
 // heartbeat to be installed.
 func TestAnnounceSeesTheTunnelInterfaceItJustGotCreated(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testAnnounceSeesTheTunnelInterfaceItJustGotCreated)
+}
+
+func testAnnounceSeesTheTunnelInterfaceItJustGotCreated(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.host.AddTunnel("utun11", pfx("10.8.0.6/24")) // no change(): nobody says so
 
 	e.announce(nameserver(up("ovpn", 1, "utun11", tunnel.RoleSplit, "192.168.1.0/24"), "10.8.0.1", "corp.example"))
@@ -583,8 +641,10 @@ func TestAnnounceSeesTheTunnelInterfaceItJustGotCreated(t *testing.T) {
 
 // After a wake DHCP often finishes late and no event announces it; a second
 // pass a few seconds later finds the new network.
-func TestWakeSchedulesASecondPass(t *testing.T) {
-	e := newEnv(t, func(c *Config) { c.WakeDelay = 150 * time.Millisecond })
+func TestWakeSchedulesASecondPass(t *testing.T) { eachKeying(t, testWakeSchedulesASecondPass) }
+
+func testWakeSchedulesASecondPass(t *testing.T, k keyingCase) {
+	e := newEnv(t, k, func(c *Config) { c.WakeDelay = 150 * time.Millisecond })
 	var rebinds atomic.Int32
 	e.r.SetRebind(func() { rebinds.Add(1) })
 	e.host.AddTunnel("utun11", pfx("10.8.0.6/24"))
@@ -607,8 +667,10 @@ func TestWakeSchedulesASecondPass(t *testing.T) {
 
 // Route events that changed nothing the Reconciler looks at must be cheap, but a
 // heartbeat looks for drift: a route removed behind our back comes back.
-func TestHeartbeatRepairsDrift(t *testing.T) {
-	e := newEnv(t)
+func TestHeartbeatRepairsDrift(t *testing.T) { eachKeying(t, testHeartbeatRepairsDrift) }
+
+func testHeartbeatRepairsDrift(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.run()
 	e.announce(asusIntent())
@@ -616,6 +678,14 @@ func TestHeartbeatRepairsDrift(t *testing.T) {
 
 	e.host.Routes.Remove(pfx("192.168.1.0/24"))
 	e.host.Net.Emit(osnet.Change{Reason: osnet.ChangeRoute})
+	if k.windows() {
+		// The routes of other programs decide whether ours are in use, so every route
+		// event is looked at (markOverridden), and the repair comes with it.
+		e.eventually("the route event to repair the route", func() bool {
+			return slices.Equal(e.table(), []string{"192.168.1.0/24 dev utun11"})
+		})
+		return
+	}
 	time.Sleep(30 * time.Millisecond)
 	e.checkTable() // a route event alone does not re-read the table
 
@@ -625,11 +695,13 @@ func TestHeartbeatRepairsDrift(t *testing.T) {
 	})
 }
 
-func TestRunRemovesEverythingOnExit(t *testing.T) {
-	e := newEnv(t)
+func TestRunRemovesEverythingOnExit(t *testing.T) { eachKeying(t, testRunRemovesEverythingOnExit) }
+
+func testRunRemovesEverythingOnExit(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	foreign := osnet.Route{Dst: pfx("8.8.4.4/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true}
-	e.host.Routes.Inject(foreign)
+	e.host.Inject(foreign)
 	stop := e.run()
 	e.announce(wgIntent())
 	e.announce(asusIntent())
@@ -657,8 +729,10 @@ func TestRunRemovesEverythingOnExit(t *testing.T) {
 	}
 }
 
-func TestResyncRebuildsFromScratch(t *testing.T) {
-	e := newEnv(t)
+func TestResyncRebuildsFromScratch(t *testing.T) { eachKeying(t, testResyncRebuildsFromScratch) }
+
+func testResyncRebuildsFromScratch(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(wgIntent())
 	e.announce(asusIntent())
@@ -707,8 +781,10 @@ func TestResyncRebuildsFromScratch(t *testing.T) {
 
 // A pass that keeps failing is answered with a reset: everything is removed
 // and rebuilt, not just the part that failed.
-func TestNonConvergenceTriggersReset(t *testing.T) {
-	e := newEnv(t)
+func TestNonConvergenceTriggersReset(t *testing.T) { eachKeying(t, testNonConvergenceTriggersReset) }
+
+func testNonConvergenceTriggersReset(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun1", "10.1.0.2/24")
 	e.addTunnel("utun2", "10.2.0.2/24")
 	e.announce(up("a", 1, "utun1", tunnel.RoleSplit, "10.1.0.0/16"))
@@ -740,7 +816,11 @@ func TestNonConvergenceTriggersReset(t *testing.T) {
 
 // Waiting for the network is not a failure and must never trigger a reset.
 func TestUnreachableDoesNotTriggerReset(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testUnreachableDoesNotTriggerReset)
+}
+
+func testUnreachableDoesNotTriggerReset(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun1", "10.1.0.2/24")
 	e.addTunnel("utun2", "10.2.0.2/24")
 	e.announce(up("a", 1, "utun1", tunnel.RoleSplit, "10.1.0.0/16"))
@@ -758,8 +838,10 @@ func TestUnreachableDoesNotTriggerReset(t *testing.T) {
 	e.checkTable("10.1.0.0/16 dev utun1", "10.2.0.0/16 dev utun2")
 }
 
-func TestChangedIsCoalesced(t *testing.T) {
-	e := newEnv(t)
+func TestChangedIsCoalesced(t *testing.T) { eachKeying(t, testChangedIsCoalesced) }
+
+func testChangedIsCoalesced(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun1", "10.1.0.2/24")
 	drain := func() int {
 		n := 0
@@ -792,7 +874,11 @@ func TestChangedIsCoalesced(t *testing.T) {
 // they are checked. Routes, endpoints and domains are data from servers: what
 // cannot be used is left out by Compute, see TestUnusableDataDoesNotBreakATunnel.
 func TestAnnounceRejectsUnsafeIdentifiers(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testAnnounceRejectsUnsafeIdentifiers)
+}
+
+func testAnnounceRejectsUnsafeIdentifiers(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun1", "10.1.0.2/24")
 	base := func() tunnel.Intent { return up("a", 1, "utun1", tunnel.RoleSplit, "10.1.0.0/16") }
 	tests := []struct {
@@ -825,7 +911,11 @@ func TestAnnounceRejectsUnsafeIdentifiers(t *testing.T) {
 // a domain that is not one. None of that may break the announcement or reach the
 // host.
 func TestUnusableDataDoesNotBreakATunnel(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testUnusableDataDoesNotBreakATunnel)
+}
+
+func testUnusableDataDoesNotBreakATunnel(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun10", "10.6.0.2/24")
 	in := up("wg", 1, "utun10", tunnel.RoleFull, "0.0.0.0/0", "127.0.0.1/32", "224.0.0.0/4", "10.7.0.0/16")
 	in.Endpoints = ips("127.0.0.1", "0.0.0.0", "169.254.1.1", "203.0.113.10")
@@ -851,8 +941,10 @@ func TestUnusableDataDoesNotBreakATunnel(t *testing.T) {
 	}
 }
 
-func TestAnnounceKeepsItsOwnCopy(t *testing.T) {
-	e := newEnv(t)
+func TestAnnounceKeepsItsOwnCopy(t *testing.T) { eachKeying(t, testAnnounceKeepsItsOwnCopy) }
+
+func testAnnounceKeepsItsOwnCopy(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun1", "10.1.0.2/24")
 	in := nameserver(up("a", 1, "utun1", tunnel.RoleSplit, "10.1.0.0/16"), "10.1.0.53", "a.lan")
 	e.announce(in)
@@ -871,7 +963,11 @@ func TestAnnounceKeepsItsOwnCopy(t *testing.T) {
 // they are written again and the caches flushed; an event that changed nothing
 // does not touch them.
 func TestDNSIsWrittenAgainAfterANetworkChangeOrWake(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testDNSIsWrittenAgainAfterANetworkChangeOrWake)
+}
+
+func testDNSIsWrittenAgainAfterANetworkChangeOrWake(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(asusIntent())
 	applies := func() int { return count(dnsOps(e), "apply") }
@@ -906,9 +1002,16 @@ func TestDNSIsWrittenAgainAfterANetworkChangeOrWake(t *testing.T) {
 // reported as installed and still be removed and replaced when the router
 // changes, otherwise it would stay behind as a stale route.
 func TestBypassRouteStaysOursWhenTheKernelPicksAnotherInterface(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testBypassRouteStaysOursWhenTheKernelPicksAnotherInterface)
+}
+
+func testBypassRouteStaysOursWhenTheKernelPicksAnotherInterface(t *testing.T, k keyingCase) {
+	if k.windows() {
+		t.Skip("a Windows route is bound to the interface it names; TestWindowsBypassFollowsTheDefaultRouteToAnotherInterface covers the move")
+	}
+	e := newEnv(t, k)
 	// Ethernet joins the router's network next to Wi-Fi; the system keeps one default route.
-	e.host.Routes.AddInterface(osnet.Interface{Name: "en6", Up: true, Addrs: pfxs("192.168.51.136/24")})
+	e.host.AddInterface(osnet.Interface{Name: "en6", Up: true, Addrs: pfxs("192.168.51.136/24")})
 	e.host.Sync()
 	e.host.Routes.KernelPicksInterface("en6")
 	e.host.AddTunnel("utun11", pfx("10.8.0.6/24"))

@@ -26,15 +26,20 @@ func (e *env) crash(ifaces ...string) {
 // are swept by their marker, and routes that are not in the journal are left
 // alone and reported.
 func TestCrashRecoveryRemovesWhatTheLastRunLeft(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testCrashRecoveryRemovesWhatTheLastRunLeft)
+}
+
+func testCrashRecoveryRemovesWhatTheLastRunLeft(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(wgIntent())
 	e.announce(asusIntent())
 	healthy := osnet.Route{Dst: pfx("8.8.4.4/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true}
 	broken := osnet.Route{Dst: pfx("9.9.9.9/32"), Gateway: ip("10.99.0.1"), Iface: "en0", Static: true}
-	e.host.Routes.Inject(healthy)
-	e.host.Routes.Inject(broken)
+	e.host.Inject(healthy)
+	e.host.Inject(broken)
 
+	journaled := len(e.unresolved())
 	e.crash("utun10", "utun11")
 	e.checkTable(
 		"8.8.4.4/32 via 192.168.51.1 dev en0",
@@ -56,7 +61,7 @@ func TestCrashRecoveryRemovesWhatTheLastRunLeft(t *testing.T) {
 		t.Errorf("the journal still lists %+v", left)
 	}
 	rep := r2.Report()
-	if len(rep.Stale) != 1 || rep.Stale[0].Key != "9.9.9.9/32" || rep.Stale[0].Owned {
+	if len(rep.Stale) != 1 || dstOf(rep.Stale[0].Key) != "9.9.9.9/32" || rep.Stale[0].Owned {
 		t.Errorf("only the broken foreign route is reported, as not ours: %+v", rep.Stale)
 	}
 	removed := 0
@@ -65,11 +70,17 @@ func TestCrashRecoveryRemovesWhatTheLastRunLeft(t *testing.T) {
 			removed++
 		}
 	}
-	if removed != 4 {
-		t.Errorf("recovery should journal 2 routes and 2 resolver entries as removed, got %d: %+v", removed, rep.Journal)
+	// Two bypass routes and two resolver entries; on Windows also the five routes
+	// of the tunnels, whose adapters a crash does not necessarily take along.
+	wantJournaled := 4
+	if k.windows() {
+		wantJournaled += 5
+	}
+	if journaled != wantJournaled || removed != journaled {
+		t.Errorf("the last run journaled %d records (want %d) and recovery closed %d: %+v", journaled, wantJournaled, removed, rep.Journal)
 	}
 	e.r = r2
-	if err := r2.RemoveStale("9.9.9.9/32"); err != nil {
+	if err := e.removeStale("9.9.9.9/32"); err != nil {
 		t.Fatal(err)
 	}
 	e.checkTable("8.8.4.4/32 via 192.168.51.1 dev en0")
@@ -78,12 +89,16 @@ func TestCrashRecoveryRemovesWhatTheLastRunLeft(t *testing.T) {
 // A route that somebody else changed since is theirs now: not even a leftover
 // of ours is deleted when its fingerprint no longer matches.
 func TestRecoveryLeavesRoutesChangedByOthers(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRecoveryLeavesRoutesChangedByOthers)
+}
+
+func testRecoveryLeavesRoutesChangedByOthers(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(wgIntent())
 	e.crash("utun10", "utun11")
 	// A different router for one endpoint; same router but no longer static for the other.
-	e.host.Routes.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.77"), Iface: "en0", Static: true})
+	e.host.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.77"), Iface: "en0", Static: true})
 
 	e.newReconciler()
 
@@ -94,24 +109,46 @@ func TestRecoveryLeavesRoutesChangedByOthers(t *testing.T) {
 			notes = append(notes, rec.Note)
 		}
 	}
-	if !slices.Contains(notes, "changed by another program, left in place") {
+	// Where the next hop is part of the key, a route through another router is not
+	// the route the journal names: ours is simply gone and theirs is not touched.
+	want := "changed by another program, left in place"
+	if k.windows() {
+		want = "already gone"
+	}
+	if !slices.Contains(notes, want) {
 		t.Errorf("journal notes: %v", notes)
 	}
 }
 
 func TestRecoveryComparesTheFlagsInTheFingerprint(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRecoveryComparesTheFlagsInTheFingerprint)
+}
+
+func testRecoveryComparesTheFlagsInTheFingerprint(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(wgIntent())
 	e.crash("utun10", "utun11")
 	// Same router and interface, but another program owns it now: not static.
-	e.host.Routes.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0"})
+	replacement := osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0"}
+	if k.windows() {
+		replacement.Metric = windowsBypassMetric // so that the flags are all that differs
+	}
+	e.host.Inject(replacement)
 
 	e.newReconciler()
 
 	if _, ok := e.host.Routes.Get(pfx("203.0.113.10/32")); !ok {
 		t.Error("a route with another fingerprint was deleted")
 	}
+}
+
+// pendingRoute is the record a run leaves when it dies between the journal write
+// and the confirmation of a bypass route through the router.
+func (e *env) pendingRoute(dst string) record {
+	rec := record{Owner: "wg", Kind: kindRoute, Key: dst, State: statePending, Gateway: "192.168.51.1", Iface: "en0"}
+	e.k.keying.stamp(&rec, e.host.index(osnet.Route{Dst: pfx(dst), Gateway: ip("192.168.51.1"), Iface: "en0"}))
+	return rec
 }
 
 // writeJournal leaves a journal file behind, as an earlier run would have.
@@ -133,15 +170,17 @@ func writeJournal(t *testing.T, path string, recs ...record) {
 
 // A crash between the journal write and the add, or between the add and the
 // confirmation, leaves a pending record with only the asked-for gateway.
-func TestRecoveryFromAPendingRecord(t *testing.T) {
-	e := newEnv(t)
+func TestRecoveryFromAPendingRecord(t *testing.T) { eachKeying(t, testRecoveryFromAPendingRecord) }
+
+func testRecoveryFromAPendingRecord(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	// Crashed right after the add: the route is there, the record is pending.
-	e.host.Routes.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true})
+	e.host.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true})
 	e.crash() // the journal belongs to a run that is gone
 	writeJournal(t, e.journal,
-		record{Owner: "wg", Kind: kindRoute, Key: "203.0.113.10/32", State: statePending, Gateway: "192.168.51.1", Iface: "en0"},
+		e.pendingRoute("203.0.113.10/32"),
 		// Crashed right after the journal write: the route was never added.
-		record{Owner: "wg", Kind: kindRoute, Key: "198.51.100.7/32", State: statePending, Gateway: "192.168.51.1", Iface: "en0"},
+		e.pendingRoute("198.51.100.7/32"),
 	)
 
 	e.newReconciler()
@@ -153,7 +192,11 @@ func TestRecoveryFromAPendingRecord(t *testing.T) {
 }
 
 func TestRecoverySweepsResolverEntriesWithoutAJournal(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRecoverySweepsResolverEntriesWithoutAJournal)
+}
+
+func testRecoverySweepsResolverEntriesWithoutAJournal(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.host.DNS.Leave("ghost", osnet.DNSEntry{Servers: ips("10.0.0.53"), MatchDomains: []string{"corp.lan"}})
 
 	e.crash() // the daemon that left the entry is gone
@@ -169,7 +212,11 @@ func TestRecoverySweepsResolverEntriesWithoutAJournal(t *testing.T) {
 
 // When the delete fails, the route stays ours and the next pass tries again.
 func TestRecoveryKeepsARouteItCouldNotDelete(t *testing.T) {
-	e := newEnv(t)
+	eachKeying(t, testRecoveryKeepsARouteItCouldNotDelete)
+}
+
+func testRecoveryKeepsARouteItCouldNotDelete(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.bothTunnels()
 	e.announce(wgIntent())
 	e.crash("utun10", "utun11")
@@ -191,11 +238,14 @@ func TestRecoveryKeepsARouteItCouldNotDelete(t *testing.T) {
 // A line cut short by the crash is skipped; what comes before it is still
 // recovered, and the journal can be appended to afterwards.
 func TestRecoveryToleratesATornJournal(t *testing.T) {
-	e := newEnv(t)
-	e.host.Routes.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true})
+	eachKeying(t, testRecoveryToleratesATornJournal)
+}
+
+func testRecoveryToleratesATornJournal(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
+	e.host.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true})
 	e.crash()
-	writeJournal(t, e.journal,
-		record{Owner: "wg", Kind: kindRoute, Key: "203.0.113.10/32", State: statePending, Gateway: "192.168.51.1", Iface: "en0"})
+	writeJournal(t, e.journal, e.pendingRoute("203.0.113.10/32"))
 	f, err := os.OpenFile(e.journal, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)

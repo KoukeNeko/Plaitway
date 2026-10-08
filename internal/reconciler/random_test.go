@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"math/rand/v2"
@@ -40,24 +41,24 @@ type world struct {
 	intents map[tunnel.OwnerID]tunnel.Intent
 	// foreign are the routes other programs put in the table, as they were
 	// right after the injection: they must come out the way they went in.
-	foreign map[netip.Prefix]osnet.Route
+	foreign map[routeKey]osnet.Route
 	// added are the routes the Reconciler added, from the operation log; it may
 	// delete only those.
-	added   map[netip.Prefix]osnet.Route
-	allowed map[netip.Prefix]bool // foreign routes the user asked to remove
+	added   map[routeKey]osnet.Route
+	allowed map[routeKey]bool // foreign routes the user asked to remove
 	opsSeen int
 	rebinds atomic.Int32
 }
 
-func newWorld(t *testing.T, seed uint64) *world {
-	e := newEnv(t)
+func newWorld(t *testing.T, k keyingCase, seed uint64) *world {
+	e := newEnv(t, k)
 	e.r.journal.noSync = true
 	w := &world{
 		t: t, e: e, rng: rand.New(rand.NewPCG(seed, seed*7919+1)),
 		intents: make(map[tunnel.OwnerID]tunnel.Intent),
-		foreign: make(map[netip.Prefix]osnet.Route),
-		added:   make(map[netip.Prefix]osnet.Route),
-		allowed: make(map[netip.Prefix]bool),
+		foreign: make(map[routeKey]osnet.Route),
+		added:   make(map[routeKey]osnet.Route),
+		allowed: make(map[routeKey]bool),
 	}
 	for i := range ownerNames {
 		e.host.AddTunnel(w.iface(i), pfx(fmt.Sprintf("10.101.%d.2/24", i)))
@@ -71,6 +72,35 @@ func newWorld(t *testing.T, seed uint64) *world {
 }
 
 func (w *world) iface(i int) string { return fmt.Sprintf("utun%d", i+1) }
+
+func (w *world) key(rt osnet.Route) routeKey { return w.e.k.keying.key(rt) }
+
+func (w *world) same(a, b osnet.Route) bool { return w.e.k.keying.same(a, b) }
+
+// table is the unscoped routes in the table by their key.
+func (w *world) table() map[routeKey]osnet.Route {
+	routes, err := w.e.host.Routes.Dump()
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	table := make(map[routeKey]osnet.Route)
+	for _, rt := range routes {
+		if !rt.Scoped {
+			table[w.key(rt)] = rt
+		}
+	}
+	return table
+}
+
+// removeBehindBack deletes a route as another program would: the Reconciler is
+// not told, and the deletion is not one of its operations.
+func (w *world) removeBehindBack(rt osnet.Route) {
+	w.checkOps()
+	if err := w.e.host.Routes.Delete(rt); err != nil && !errors.Is(err, osnet.ErrNotFound) {
+		w.t.Fatalf("removing %s: %v", routeLine(rt), err)
+	}
+	w.opsSeen = len(w.e.host.Routes.Ops())
+}
 
 func (w *world) pick(pool []string) string { return pool[w.rng.IntN(len(pool))] }
 
@@ -122,11 +152,11 @@ func (w *world) step() string {
 		return w.injectForeign()
 	case n < 73:
 		if keys := sortedKeys(w.foreign); len(keys) > 0 {
-			dst := keys[w.rng.IntN(len(keys))]
-			e.host.Routes.Remove(dst)
-			delete(w.foreign, dst)
+			key := keys[w.rng.IntN(len(keys))]
+			w.removeBehindBack(w.foreign[key])
+			delete(w.foreign, key)
 			e.change(osnet.ChangeRoute)
-			return "remove foreign " + dst.String()
+			return "remove foreign " + key.String()
 		}
 	case n < 79:
 		i := w.rng.IntN(len(ownerNames))
@@ -172,9 +202,10 @@ func (w *world) changeNetwork() string {
 
 // pruneForeign forgets the foreign routes the kernel removed with an interface.
 func (w *world) pruneForeign() {
-	for dst := range w.foreign {
-		if _, ok := w.e.host.Routes.Get(dst); !ok {
-			delete(w.foreign, dst)
+	table := w.table()
+	for key := range w.foreign {
+		if _, ok := table[key]; !ok {
+			delete(w.foreign, key)
 		}
 	}
 }
@@ -190,11 +221,13 @@ func (w *world) injectForeign() string {
 	if w.rng.IntN(3) == 0 {
 		rt = osnet.Route{Dst: dst, Iface: "en0", Static: true}
 	}
-	if cur, ok := e.host.Routes.Get(dst); ok && (!cur.Static || sameRoute(cur, rt)) {
+	rt = e.host.index(rt)
+	key := w.key(rt)
+	if cur, ok := w.table()[key]; ok && (!cur.Static || w.same(cur, rt)) {
 		return "skip" // the kernel's own route, or what is already there
 	}
-	e.host.Routes.Inject(rt)
-	w.foreign[dst], _ = e.host.Routes.Get(dst)
+	e.host.Inject(rt)
+	w.foreign[key] = w.table()[key]
 	e.change(osnet.ChangeRoute)
 	return "foreign " + routeLine(rt)
 }
@@ -205,34 +238,36 @@ func (w *world) removeStale() string {
 		return "no stale"
 	}
 	s := stale[w.rng.IntN(len(stale))]
-	if _, ok := w.foreign[s.Route.Dst]; ok {
-		w.allowed[s.Route.Dst] = true
+	key := w.key(s.Route)
+	if _, ok := w.foreign[key]; ok {
+		w.allowed[key] = true
 	}
 	if err := w.e.r.RemoveStale(s.Key); err != nil {
 		w.t.Fatalf("RemoveStale(%s): %v", s.Key, err)
 	}
-	delete(w.foreign, s.Route.Dst)
+	delete(w.foreign, key)
 	return "remove stale " + s.Key
 }
 
 // dropOneOfOurs is another program deleting one of our routes.
 func (w *world) dropOneOfOurs() string {
-	var candidates []netip.Prefix
-	for _, dst := range sortedKeys(w.added) {
-		if cur, ok := w.e.host.Routes.Get(dst); ok && sameRoute(cur, w.added[dst]) {
-			if _, held := w.foreign[dst]; !held {
-				candidates = append(candidates, dst)
+	table := w.table()
+	var candidates []routeKey
+	for _, key := range sortedKeys(w.added) {
+		if cur, ok := table[key]; ok && w.same(cur, w.added[key]) {
+			if _, held := w.foreign[key]; !held {
+				candidates = append(candidates, key)
 			}
 		}
 	}
 	if len(candidates) == 0 {
 		return "nothing to drop"
 	}
-	dst := candidates[w.rng.IntN(len(candidates))]
-	w.e.host.Routes.Remove(dst)
-	delete(w.added, dst)
+	key := candidates[w.rng.IntN(len(candidates))]
+	w.removeBehindBack(table[key])
+	delete(w.added, key)
 	w.e.change(osnet.ChangeHeartbeat)
-	return "someone deletes " + dst.String()
+	return "someone deletes " + key.String()
 }
 
 // settle runs passes until they change nothing.
@@ -273,20 +308,20 @@ func (w *world) checkOps() {
 		if op.Err != nil {
 			continue
 		}
-		dst := op.Route.Dst.Masked()
 		switch op.Kind {
 		case fake.OpAdd:
-			w.added[dst] = op.Route
+			w.added[w.key(op.Route)] = op.Route
 		case fake.OpDelete:
-			if w.allowed[dst] {
-				delete(w.allowed, dst)
+			key := w.key(op.Removed)
+			if w.allowed[key] {
+				delete(w.allowed, key)
 				continue
 			}
-			ours, ok := w.added[dst]
-			if !ok || !sameRoute(op.Removed, ours) {
+			ours, ok := w.added[key]
+			if !ok || !w.same(op.Removed, ours) {
 				w.t.Fatalf("deleted %s, which it did not add (it added %+v)", describe(op.Removed), ours)
 			}
-			delete(w.added, dst)
+			delete(w.added, key)
 		}
 	}
 	w.opsSeen = len(ops)
@@ -317,14 +352,14 @@ func installable(host *fake.Host, rt osnet.Route) bool {
 // told to rebind, no route of ours may still point at a router that is gone.
 func (w *world) checkNoStaleBypass() {
 	ns, _ := w.e.host.Net.Snapshot()
-	for dst, rec := range w.e.r.owned {
-		if rec.route.Gateway.IsValid() && ns.DefaultV4 != nil && dst.Addr().Is4() && rec.route.Gateway != ns.DefaultV4.Gateway {
-			w.t.Errorf("rebind while %s still goes through %s, the default is %s", dst, rec.route.Gateway, ns.DefaultV4.Gateway)
+	for key, rec := range w.e.r.owned {
+		if rec.route.Gateway.IsValid() && ns.DefaultV4 != nil && key.dst.Addr().Is4() && rec.route.Gateway != ns.DefaultV4.Gateway {
+			w.t.Errorf("rebind while %s still goes through %s, the default is %s", key.dst, rec.route.Gateway, ns.DefaultV4.Gateway)
 		}
 	}
 }
 
-func lines(m map[netip.Prefix]osnet.Route) []string {
+func lines(m map[routeKey]osnet.Route) []string {
 	var out []string
 	for _, rt := range m {
 		out = append(out, routeLine(rt))
@@ -345,46 +380,46 @@ func (w *world) checkInvariants(after string) {
 	routes, _ := e.host.Routes.Dump()
 
 	seen := make(map[string]bool)
-	table := make(map[netip.Prefix]osnet.Route)
+	table := make(map[routeKey]osnet.Route)
 	for _, rt := range routes {
-		key := fmt.Sprint(rt.Dst, rt.Scoped, rt.Iface)
+		id := fmt.Sprint(rt.Dst, rt.Scoped, rt.Iface)
 		if !rt.Scoped {
-			key = rt.Dst.String()
-			table[rt.Dst] = rt
+			id = e.k.keying.identity(rt)
+			table[w.key(rt)] = rt
 		}
-		if seen[key] {
-			fail("duplicate route %s", key)
+		if seen[id] {
+			fail("duplicate route %s", id)
 		}
-		seen[key] = true
+		seen[id] = true
 	}
 
 	// Routes of other programs are exactly as they were put there.
-	for dst, f := range w.foreign {
-		if got, ok := table[dst]; !ok || got != f {
+	for key, f := range w.foreign {
+		if got, ok := table[key]; !ok || got != f {
 			fail("foreign route %+v is now %+v (present %v)", f, got, ok)
 		}
 	}
 
 	// What is left in the table is what Compute says, minus what others hold.
-	desired := Compute(w.intentList(), ns)
-	expected := make(map[netip.Prefix]osnet.Route)
+	desired := computeFor(e.k.keying, w.intentList(), ns)
+	expected := make(map[routeKey]osnet.Route)
 	for _, p := range desired.Routes {
-		if _, held := w.foreign[p.Route.Dst]; p.Install && !held && installable(e.host, p.Route) {
-			expected[p.Route.Dst] = p.Route
+		if _, held := w.foreign[w.key(p.Route)]; p.Install && !held && installable(e.host.Host, p.Route) {
+			expected[w.key(p.Route)] = p.Route
 		}
 	}
-	actual := make(map[netip.Prefix]osnet.Route)
-	for dst, rt := range table {
-		if _, ok := w.foreign[dst]; rt.Static && dst.Bits() != 0 && !ok {
-			actual[dst] = rt
+	actual := make(map[routeKey]osnet.Route)
+	for key, rt := range table {
+		if _, ok := w.foreign[key]; rt.Static && key.dst.Bits() != 0 && !ok {
+			actual[key] = rt
 		}
 	}
 	if len(expected) != len(actual) {
 		fail("table:\n got %v\nwant %v", lines(actual), lines(expected))
 	}
-	for dst, want := range expected {
-		if got, ok := actual[dst]; !ok || !sameRoute(got, want) {
-			fail("route %s: got %+v, want %+v\ntable:\n got %v\nwant %v", dst, got, want, lines(actual), lines(expected))
+	for key, want := range expected {
+		if got, ok := actual[key]; !ok || !w.same(got, want) {
+			fail("route %s: got %+v, want %+v\ntable:\n got %v\nwant %v", key, got, want, lines(actual), lines(expected))
 		}
 	}
 
@@ -407,9 +442,11 @@ func (w *world) checkInvariants(after string) {
 
 	// The journal lists exactly what a crash would leave behind.
 	wantLeft := make(map[string]string)
-	for dst, rt := range actual {
-		if rt.Gateway.IsValid() {
-			wantLeft[kindRoute+" "+dst.String()] = rt.Gateway.String()
+	for key, rt := range actual {
+		if e.k.keying.journaled(rt) {
+			rec := record{Kind: kindRoute, Key: key.dst.String()}
+			e.k.keying.stamp(&rec, rt)
+			wantLeft[rec.id()] = rec.Gateway
 		}
 	}
 	for owner := range wantDNS {
@@ -420,7 +457,7 @@ func (w *world) checkInvariants(after string) {
 		fail("journal lists %+v, want %v", left, wantLeft)
 	}
 	for _, rec := range left {
-		gw, ok := wantLeft[rec.Kind+" "+rec.Key]
+		gw, ok := wantLeft[rec.id()]
 		if !ok || rec.Gateway != gw || rec.State != stateApplied {
 			fail("journal record %+v, want gateway %q applied (%v)", rec, gw, ok)
 		}
@@ -428,8 +465,8 @@ func (w *world) checkInvariants(after string) {
 
 	rep := e.r.Report()
 	for _, rr := range rep.Routes {
-		if got, ok := table[rr.Prefix]; rr.State == tunnel.RouteInstalled && (!ok || !sameRoute(got, osnet.Route{Dst: rr.Prefix, Gateway: parseVia(rr.Via), Iface: ifaceOf(rr.Via)})) {
-			fail("report says %+v is installed, the table has %+v (%v)", rr, got, ok)
+		if rr.State == tunnel.RouteInstalled && !goesVia(table, rr.Prefix, rr.Via) {
+			fail("report says %+v is installed, the table has %v", rr, lines(table))
 		}
 	}
 	for _, s := range rep.Stale {
@@ -439,29 +476,36 @@ func (w *world) checkInvariants(after string) {
 	}
 }
 
-func parseVia(via string) netip.Addr {
-	a, _ := netip.ParseAddr(via)
-	return a
-}
-
-func ifaceOf(via string) string {
-	if _, err := netip.ParseAddr(via); err == nil {
-		return ""
+// goesVia says whether some route to dst in the table sends traffic where a
+// report says: through the gateway, or, when via names an interface, bound to
+// it. Where a prefix can have several routes, any of them will do.
+func goesVia(table map[routeKey]osnet.Route, dst netip.Prefix, via string) bool {
+	gateway, err := netip.ParseAddr(via)
+	for _, rt := range table {
+		switch {
+		case rt.Dst != dst:
+		case err == nil && rt.Gateway == gateway:
+			return true
+		case err != nil && !rt.Gateway.IsValid() && rt.Iface == via:
+			return true
+		}
 	}
-	return via
+	return false
 }
 
 // A random mix of everything that happens to the Reconciler: intents coming and
 // going, the network changing, other programs adding and removing routes,
 // interfaces vanishing. After every step it settles and the invariants hold.
-func TestRandomSequences(t *testing.T) {
+func TestRandomSequences(t *testing.T) { eachKeying(t, testRandomSequences) }
+
+func testRandomSequences(t *testing.T, k keyingCase) {
 	seeds, steps := 30, 100
 	if testing.Short() {
 		seeds, steps = 3, 40
 	}
 	for seed := uint64(1); seed <= uint64(seeds); seed++ {
 		t.Run(fmt.Sprint("seed", seed), func(t *testing.T) {
-			w := newWorld(t, seed)
+			w := newWorld(t, k, seed)
 			var history []string
 			defer func() {
 				if t.Failed() {
@@ -481,8 +525,9 @@ func TestRandomSequences(t *testing.T) {
 				t.Fatalf("stop: %v", err)
 			}
 			w.checkOps()
-			for dst, rt := range w.foreign {
-				if got, ok := w.e.host.Routes.Get(dst); !ok || got != rt {
+			table := w.table()
+			for key, rt := range w.foreign {
+				if got, ok := table[key]; !ok || got != rt {
 					t.Errorf("foreign route %+v after exit: %+v %v", rt, got, ok)
 				}
 			}
@@ -505,16 +550,18 @@ func TestRandomSequences(t *testing.T) {
 // Everything at once, from several goroutines, with the event loop and its
 // timers running. This is for the race detector (run it with -count=20); at the
 // end the machine must settle on exactly what the final intents say.
-func TestConcurrentUse(t *testing.T) {
-	e := newEnv(t, func(c *Config) {
+func TestConcurrentUse(t *testing.T) { eachKeying(t, testConcurrentUse) }
+
+func testConcurrentUse(t *testing.T, k keyingCase) {
+	e := newEnv(t, k, func(c *Config) {
 		c.WakeDelay = 2 * time.Millisecond
 		c.RetryDelay = 2 * time.Millisecond
 	})
 	e.r.journal.noSync = true
 	w := &world{
 		t: t, e: e, intents: make(map[tunnel.OwnerID]tunnel.Intent),
-		foreign: make(map[netip.Prefix]osnet.Route),
-		added:   make(map[netip.Prefix]osnet.Route), allowed: make(map[netip.Prefix]bool),
+		foreign: make(map[routeKey]osnet.Route),
+		added:   make(map[routeKey]osnet.Route), allowed: make(map[routeKey]bool),
 	}
 	for i := range ownerNames {
 		e.host.AddTunnel(w.iface(i), pfx(fmt.Sprintf("10.101.%d.2/24", i)))

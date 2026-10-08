@@ -6,6 +6,76 @@
 // Everything it installs that does not disappear with a tunnel interface (host
 // routes through a gateway, resolver entries) is written to a journal before it
 // is applied, so that a crash leaves a record for the next run to clean up.
+//
+// # Routing tables on macOS and Windows
+//
+// What the routing table calls "the same route" differs, and Config.Keying says
+// which table the Reconciler is talking to (RouteKeying). The zero value is the
+// macOS table. Everything below is chosen by it and by nothing else:
+//
+//   - Identity. macOS: one unscoped route per destination prefix; the kernel
+//     picks the interface of a gateway route, so the interface is not compared,
+//     and any other route to the prefix is a conflict ("held by another
+//     program"). Windows: destination, interface index and next hop; several
+//     routes can share a prefix, so a route through another interface or router
+//     is a neighbour, not a conflict, and Plaitway adds its own beside it. The
+//     owned routes, the table read back and the planned routes are all keyed
+//     this way (routeKey), and a route is deleted by its whole key.
+//   - What a route carries. macOS: destination, gateway or interface name.
+//     Windows: also the interface index, which Compute resolves from the
+//     NetState it is given (tunnel.Intent names only the interface), and a
+//     metric: windowsTunnelMetric for tunnel routes and windowsBypassMetric,
+//     lower, for the host routes that keep endpoints reachable through the
+//     physical interface and router of the current default route. The split
+//     halves of a default route beat the system's default by their prefix length,
+//     so the metric only decides between routes of one prefix. A route whose
+//     interface is not in the NetState (just removed, not seen yet) waits as
+//     pending and is not retried on a timer: the interface appearing is a change
+//     of the network.
+//   - The next hop of a tunnel route. macOS: none, the route is bound to the
+//     interface. Windows: the tunnel's own gateway (tunnel.Intent.Gateway) when it
+//     has one of the route's family, otherwise none. A point-to-point adapter
+//     (Wintun) takes on-link routes; an Ethernet-like one (tap-windows6, OpenVPN)
+//     answers only for its gateway's address, so a route without it would
+//     blackhole while the tunnel is up. The gateway is part of the key, the
+//     journal record and the fingerprint like any next hop, and a tunnel that
+//     announces another gateway has its routes replaced: the new ones are added
+//     before the old ones are deleted, so that a full tunnel never lets traffic
+//     out in between.
+//   - Neighbours that win. On Windows a route of another program to the same
+//     prefix, which is not a conflict, can be the one in use: the lowest
+//     effective metric (route metric plus interface metric) decides, and a
+//     default route's halves are also lost to foreign routes that are more
+//     specific and cover the whole internet. Such a route of ours stays in the
+//     table, is reported RouteFailed with the winner in Detail (markOverridden),
+//     and is looked at again on every network event, route events included: the
+//     other program may disconnect or connect at any time. Plaitway never lowers
+//     its metric to win and never deletes a foreign route.
+//   - Journal. A route is journaled (pending, then applied) before and after it
+//     is added. macOS journals only routes through a gateway, since the others go
+//     with their interface; Windows journals every route, because a tunnel
+//     adapter that survives a crash keeps its routes. A Windows record has the
+//     interface index in addition to destination and gateway, which is its
+//     identity in the journal and in the fingerprint (gateway, index, metric,
+//     flags). macOS records and fingerprints are as they always were. A Windows
+//     start that finds a record without an index (written by the macOS version)
+//     does not know which route it meant and removes nothing for it.
+//   - Stale routes. Besides the checks of macOS, a Windows endpoint route that
+//     leaves through another interface than the default route is stale, since
+//     the route is bound to the interface it names. A stale route is named by
+//     its destination on macOS and by destination, index and next hop on Windows
+//     (tunnel.StaleRoute.Key).
+//   - Interface names. At most 15 characters on macOS (IFNAMSIZ), 256 on Windows.
+//
+// What a vanished interface does to its routes is the same on both: they go with
+// it, the Reconciler finds them gone and says nothing about another program.
+//
+// Not yet per platform, and written for macOS: the lookup that decides whether a
+// nameserver is reached through the tunnel breaks a tie between prefixes of equal
+// length by the order the kernel acquired them in (Windows uses the metric, which
+// the lookup does not read); and a tunnel route that names the same prefix as an
+// endpoint is shadowed by that endpoint's bypass route, although a Windows table
+// could hold both.
 package reconciler
 
 import (
@@ -41,6 +111,9 @@ type Config struct {
 	// JournalPath is the write-ahead journal file; its directory is created.
 	JournalPath string
 	Log         *slog.Logger
+	// Keying is how the routing table identifies a route. The zero value is the
+	// macOS table; a Windows daemon sets KeyByPrefixInterfaceNextHop.
+	Keying RouteKeying
 
 	// Now stamps journal records; time.Now when nil.
 	Now func() time.Time
@@ -70,6 +143,7 @@ type Reconciler struct {
 	dns     osnet.DNSConfigurator
 	monitor osnet.NetMonitor
 	journal *journal
+	keying  RouteKeying
 	log     *slog.Logger
 	now     func() time.Time
 
@@ -89,8 +163,11 @@ type Reconciler struct {
 	// a route in the table that is not in owned is somebody else's. A nil entry
 	// in dnsApplied is an owner whose last write failed: it may have left
 	// entries behind, so they are removed when the owner has none to want.
-	owned      map[netip.Prefix]ownedRoute
+	owned      map[routeKey]ownedRoute
 	dnsApplied map[tunnel.OwnerID][]osnet.DNSEntry
+	// overridden says, by destination, why a route we installed is not the one in
+	// use (markOverridden), so that a change is logged once.
+	overridden map[netip.Prefix]string
 
 	desired         Desired
 	routeReports    []tunnel.RouteReport
@@ -125,10 +202,14 @@ func New(cfg Config) (*Reconciler, error) {
 	if cfg.JournalPath == "" {
 		return nil, errors.New("reconciler: JournalPath is required")
 	}
+	if !cfg.Keying.valid() {
+		return nil, fmt.Errorf("reconciler: unknown route keying %d", cfg.Keying)
+	}
 	r := &Reconciler{
 		routes:     cfg.Routes,
 		dns:        cfg.DNS,
 		monitor:    cfg.Net,
+		keying:     cfg.Keying,
 		log:        cfg.Log,
 		now:        cfg.Now,
 		wakeDelay:  cfg.WakeDelay,
@@ -137,7 +218,7 @@ func New(cfg Config) (*Reconciler, error) {
 		changed:    make(chan struct{}, 1),
 		recheck:    make(chan struct{}, 1),
 		intents:    make(map[tunnel.OwnerID]tunnel.Intent),
-		owned:      make(map[netip.Prefix]ownedRoute),
+		owned:      make(map[routeKey]ownedRoute),
 		dnsApplied: make(map[tunnel.OwnerID][]osnet.DNSEntry),
 	}
 	if r.log == nil {
@@ -179,7 +260,7 @@ func New(cfg Config) (*Reconciler, error) {
 // been applied. Routes and DNS that could not be installed are not an error
 // here; Report says what is in place.
 func (r *Reconciler) Announce(in tunnel.Intent) error {
-	if err := validateIntent(in); err != nil {
+	if err := validateIntent(r.keying, in); err != nil {
 		return fmt.Errorf("announce: %w", err)
 	}
 	r.applyMu.Lock()
@@ -315,8 +396,11 @@ func (r *Reconciler) handleChange(c osnet.Change, external bool) (rebind func())
 	}
 	underlay := underlayChanged(r.netState, ns)
 	// Route events that changed nothing we look at are skipped; anything else,
-	// the periodic heartbeat included, is a full pass that also catches drift.
-	full := netChanged(r.netState, ns) || c.Reason != osnet.ChangeRoute || r.dirty
+	// the periodic heartbeat included, is a full pass that also catches drift. On
+	// Windows what another program does to the table decides whether our routes
+	// are in use (markOverridden), and the NetState does not show it, so every
+	// route event is looked at. A pass on an unchanged table writes nothing.
+	full := netChanged(r.netState, ns) || c.Reason != osnet.ChangeRoute || r.dirty || r.keying.byInterface()
 	r.netState = ns
 	if c.Reason == osnet.ChangeWake {
 		r.armWake()
@@ -437,7 +521,7 @@ func (r *Reconciler) RemoveStale(key string) error {
 		return err
 	}
 	var target *tunnel.StaleRoute
-	stale := findStale(table, r.netState, r.endpointsLocked(), r.isOwned)
+	stale := findStale(r.keying, table, r.netState, r.endpointsLocked(), r.isOwned)
 	if i := slices.IndexFunc(stale, func(s tunnel.StaleRoute) bool { return s.Key == key }); i >= 0 {
 		target = &stale[i]
 	}
@@ -447,14 +531,14 @@ func (r *Reconciler) RemoveStale(key string) error {
 	if err := r.routes.Delete(target.Route); err != nil && !errors.Is(err, osnet.ErrNotFound) {
 		return fmt.Errorf("deleting stale route %s: %w", key, err)
 	}
-	r.release(target.Route.Dst.Masked(), "removed as stale")
+	r.release(r.keying.key(target.Route), "removed as stale")
 	r.passLocked(false) // the route may have been in the way of one we want
 	r.notifyLocked()
 	return nil
 }
 
-func (r *Reconciler) isOwned(dst netip.Prefix) bool {
-	_, ok := r.owned[dst]
+func (r *Reconciler) isOwned(rt osnet.Route) bool {
+	_, ok := r.owned[r.keying.key(rt)]
 	return ok
 }
 

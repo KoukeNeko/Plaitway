@@ -12,8 +12,10 @@ import (
 
 // File mode bits are the journal's access control on Unix. Windows ignores
 // them; there the directory's ACL decides, which the service sets up.
-func TestJournalFileIsPrivate(t *testing.T) {
-	e := newEnv(t)
+func TestJournalFileIsPrivate(t *testing.T) { eachKeying(t, testJournalFileIsPrivate) }
+
+func testJournalFileIsPrivate(t *testing.T, k keyingCase) {
+	e := newEnv(t, k)
 	e.addTunnel("utun1", "10.1.0.2/24")
 	e.announce(up("a", 1, "utun1", tunnel.RoleSplit, "10.1.0.0/16"))
 	info, err := os.Stat(e.journal)

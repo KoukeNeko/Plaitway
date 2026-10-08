@@ -7,22 +7,20 @@ import (
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
 
-// Bounds for owner ids and interface names; IFNAMSIZ is 16 on macOS.
-const (
-	maxOwnerLen = 64
-	maxIfaceLen = 15
-)
+// maxOwnerLen bounds owner ids; the bound of interface names depends on the
+// platform, see RouteKeying.
+const maxOwnerLen = 64
 
 // validateIntent checks the identifiers of an intent that an engine announced:
 // the owner ends up in resolver keys and journal records, the interface name in
 // route commands. Everything else in an intent is data from profiles and
 // servers; Compute decides what to do with what it cannot use, and a bad
 // route or domain must not take a whole tunnel down.
-func validateIntent(in tunnel.Intent) error {
+func validateIntent(keying RouteKeying, in tunnel.Intent) error {
 	if !validName(string(in.Owner), maxOwnerLen) {
 		return fmt.Errorf("invalid owner %q", in.Owner)
 	}
-	if carriesRoutes(in.State) && !validName(in.Iface, maxIfaceLen) {
+	if carriesRoutes(in.State) && !validName(in.Iface, keying.maxIfaceName()) {
 		return fmt.Errorf("owner %s: invalid interface %q", in.Owner, in.Iface)
 	}
 	return nil
