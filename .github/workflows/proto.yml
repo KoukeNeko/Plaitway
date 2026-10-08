@@ -1,0 +1,67 @@
+name: Protocol
+
+# The API has one definition, proto/plaitway/v1/plaitway.proto. The Go and Swift code made from
+# it is committed, and this fails when it is not what the proto and the pinned plugins make.
+on:
+  push:
+    branches: [main]
+    paths:
+      - proto/**
+      - buf.yaml
+      - buf.gen.yaml
+      - internal/gen/**
+      - macos/Sources/PlaitwayAPI/**
+      - macos/Package.resolved
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/proto.yml
+  pull_request:
+    paths:
+      - proto/**
+      - buf.yaml
+      - buf.gen.yaml
+      - internal/gen/**
+      - macos/Sources/PlaitwayAPI/**
+      - macos/Package.resolved
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/proto.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proto-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make lint-proto
+
+  generated:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/cache@v6
+        with:
+          path: macos/.build
+          key: swiftpm-plugins-xcode-27-${{ hashFiles('macos/Package.resolved') }}
+          restore-keys: swiftpm-plugins-xcode-27-
+      - run: make generate
+      - name: The committed files are what was generated
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"

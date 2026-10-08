@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'Docs/**', LICENSE]
+  pull_request:
+    paths-ignore: ['**.md', 'Docs/**', LICENSE]
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request makes the run before it pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would change:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+      - name: go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - name: shellcheck
+        run: shellcheck -x -S warning packaging/*.sh scripts/*.sh
+
+  # The helper and the command line client build and test on each system they run on.
+  # The tests that change the routing table need root and the rootintegration tag, and are
+  # run by hand (README, Development).
+  go:
+    name: go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go vet ./...
+      - name: Test
+        if: runner.os != 'Windows'
+        run: go test -race -count=1 ./...
+      # The race detector needs a C toolchain, which Windows has only by chance.
+      - name: Test
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./...
+      - name: Packaging scripts
+        if: runner.os == 'macOS'
+        run: make test-packaging
+
+  # The Swift tests start the helper binary named by PLAITWAY_DAEMON on its in-memory backend.
+  swift:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go build -o bin/plaitwayd ./cmd/plaitwayd
+      - uses: actions/cache@v6
+        with:
+          path: macos/.build
+          key: swiftpm-xcode-27-${{ hashFiles('macos/Package.resolved') }}
+          restore-keys: swiftpm-xcode-27-
+      - run: swift build --package-path macos
+      - name: Test
+        run: PLAITWAY_DAEMON="$PWD/bin/plaitwayd" swift test --package-path macos

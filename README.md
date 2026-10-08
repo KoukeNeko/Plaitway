@@ -371,6 +371,12 @@ go test -c -tags rootintegration -o /tmp/reconciler.test ./internal/reconciler
 sudo env PLAITWAY_ROOT_TESTS=1 /tmp/reconciler.test -test.v
 ```
 
+GitHub Actions (`.github/workflows`) runs `gofmt`, `go mod tidy` and
+`shellcheck`; builds, vets and tests the Go code on macOS, Linux and Windows;
+runs the Swift tests on the Xcode 27 image; and, when `proto/` or the generated
+code changes, runs `make lint-proto` and `make generate` and fails if the
+committed files differ.
+
 ### Release
 
 ```bash

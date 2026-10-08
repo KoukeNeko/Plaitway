@@ -1,6 +1,6 @@
 BUF := go run github.com/bufbuild/buf/cmd/buf@v1.72.0
 
-.PHONY: generate build test openvpn app dist verify test-packaging
+.PHONY: generate lint-proto build test openvpn app dist verify test-packaging
 
 # Regenerates internal/gen and macos/Sources/PlaitwayAPI from proto/. The
 # generated files are committed, so a normal build needs neither this target
@@ -10,6 +10,10 @@ generate:
 	swift build -c release --package-path macos --product protoc-gen-swift
 	swift build -c release --package-path macos --product protoc-gen-grpc-swift-2
 	$(BUF) generate
+
+# buf lint with the buf version pinned above.
+lint-proto:
+	$(BUF) lint
 
 build:
 	go build -o bin/plaitwayd ./cmd/plaitwayd
