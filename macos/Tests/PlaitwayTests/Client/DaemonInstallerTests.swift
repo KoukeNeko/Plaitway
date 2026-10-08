@@ -11,6 +11,8 @@ final class FakeDaemonService: DaemonService {
     /// What registering leads to.
     var afterRegister: DaemonRegistration = .enabled
     var registerFails = false
+    /// Registrations that fail before one works, as the first one does just after an unregister.
+    var registerFailuresBeforeSuccess = 0
     var calls: [String] = []
 
     init(_ registration: DaemonRegistration) {
@@ -19,6 +21,11 @@ final class FakeDaemonService: DaemonService {
 
     func register() throws {
         calls.append("register")
+        if registerFailuresBeforeSuccess > 0 {
+            registerFailuresBeforeSuccess -= 1
+            registration = .notRegistered
+            throw Refusal()
+        }
         registration = afterRegister
         if registerFails { throw Refusal() }
     }
@@ -88,6 +95,37 @@ struct DaemonInstallerTests {
         try await installer.reinstall()
         #expect(service.calls == ["unregister", "register"])
         #expect(installer.registration == .enabled)
+    }
+
+    // macOS answers "invalid record generation" (shown as "Operation not permitted") to a
+    // registration made right after an unregistration; the next one is accepted.
+    @Test func reinstallingTriesAgainWhenTheRegistrationRightAfterTheUnregistrationFails() async throws {
+        let service = FakeDaemonService(.enabled)
+        service.registerFailuresBeforeSuccess = 2
+        let installer = DaemonInstaller(service: service, registerRetryDelay: .milliseconds(1))
+
+        try await installer.reinstall()
+        #expect(service.calls == ["unregister", "register", "register", "register"])
+        #expect(installer.registration == .enabled)
+    }
+
+    @Test func reinstallingReportsAFailureThatLasts() async {
+        let service = FakeDaemonService(.enabled)
+        service.registerFailuresBeforeSuccess = 100
+        let installer = DaemonInstaller(service: service, registerRetryDelay: .milliseconds(1))
+
+        await #expect(throws: FakeDaemonService.Refusal.self) { try await installer.reinstall() }
+        #expect(service.calls.filter { $0 == "register" }.count == 5, "five tries, not forever")
+        #expect(installer.registration == .notRegistered)
+    }
+
+    @Test func aFirstRegistrationIsNotTriedAgain() {
+        let service = FakeDaemonService(.notRegistered)
+        service.registerFailuresBeforeSuccess = 1
+        let installer = DaemonInstaller(service: service, registerRetryDelay: .milliseconds(1))
+
+        #expect(throws: FakeDaemonService.Refusal.self) { try installer.install() }
+        #expect(service.calls == ["register"])
     }
 
     @Test func reinstallingAnUnregisteredHelperOnlyRegisters() async throws {

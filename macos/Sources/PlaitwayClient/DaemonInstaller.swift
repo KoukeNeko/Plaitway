@@ -99,9 +99,14 @@ public final class DaemonInstaller {
     public private(set) var lastRegistered: Date?
 
     @ObservationIgnored private let service: any DaemonService
+    @ObservationIgnored private let registerRetryDelay: Duration
 
-    public init(service: any DaemonService = SystemDaemonService()) {
+    /// Tries of the registration that follows an unregistration.
+    private static let registerAttempts = 5
+
+    public init(service: any DaemonService = SystemDaemonService(), registerRetryDelay: Duration = .seconds(1)) {
         self.service = service
+        self.registerRetryDelay = registerRetryDelay
         registration = service.registration
     }
 
@@ -134,10 +139,19 @@ public final class DaemonInstaller {
     /// launchd start the daemon from the app bundle again.
     public func reinstall() async throws {
         try requireInstallLocation()
-        if registration != .notRegistered {
-            try await uninstall()
+        guard registration != .notRegistered else { return try install() }
+        try await uninstall()
+        // macOS refuses a registration made right after an unregistration ("invalid record generation"
+        // in the log, "Operation not permitted" in the error): the record changed between its read and
+        // its write. A moment later the same call is accepted.
+        for attempt in 1... {
+            do {
+                return try install()
+            } catch where attempt < Self.registerAttempts {
+                Self.logger.info("registering the helper again after a refusal: \(error)")
+                try await Task.sleep(for: registerRetryDelay)
+            }
         }
-        try install()
     }
 
     private func requireInstallLocation() throws {
