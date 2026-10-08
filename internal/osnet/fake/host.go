@@ -24,6 +24,14 @@ func NewHost() *Host {
 	return &Host{Routes: NewRouteTable(), DNS: NewDNS(), Net: NewNetMonitor(), kinds: make(map[string]osnet.LinkKind)}
 }
 
+// NewWindowsHost is a Host whose route table has Windows semantics (see
+// RouteTable.WindowsKeying).
+func NewWindowsHost() *Host {
+	h := NewHost()
+	h.Routes.WindowsKeying()
+	return h
+}
+
 var (
 	defaultV4 = netip.MustParsePrefix("0.0.0.0/0")
 	defaultV6 = netip.MustParsePrefix("::/0")
@@ -99,8 +107,11 @@ func (h *Host) Sync() {
 			}
 		}
 	}
-	// Dump is sorted, so the first physical default per family is stable.
+	// Dump is sorted, so the pick among equals is stable. A route replaces the
+	// pick of its family only when its effective metric is lower, which matters
+	// when the table has Windows semantics and keeps several defaults.
 	if routes, err := h.Routes.Dump(); err == nil {
+		var bestV4, bestV6 uint32
 		for _, r := range routes {
 			if r.Scoped || r.Dst.Bits() != 0 || r.Blackhole {
 				continue
@@ -110,11 +121,12 @@ func (h *Host) Sync() {
 				continue
 			}
 			nh := &osnet.Nexthop{Gateway: r.Gateway, Iface: r.Iface, Kind: h.kinds[r.Iface]}
+			metric := h.Routes.EffectiveMetric(r)
 			switch {
-			case r.Dst.Addr().Is4() && ns.DefaultV4 == nil:
-				ns.DefaultV4 = nh
-			case r.Dst.Addr().Is6() && ns.DefaultV6 == nil:
-				ns.DefaultV6 = nh
+			case r.Dst.Addr().Is4() && (ns.DefaultV4 == nil || metric < bestV4):
+				ns.DefaultV4, bestV4 = nh, metric
+			case r.Dst.Addr().Is6() && (ns.DefaultV6 == nil || metric < bestV6):
+				ns.DefaultV6, bestV6 = nh, metric
 			}
 		}
 	}

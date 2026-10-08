@@ -37,6 +37,13 @@ type Route struct {
 	Scoped bool
 	// Flags is the raw kernel flag word, for display and fingerprinting only.
 	Flags uint32
+	// IfIndex is the index of the interface the route leaves through, zero when
+	// unknown. Windows keys a route by destination, interface index and next hop,
+	// so there it takes precedence over Iface; macOS ignores it and leaves it zero.
+	IfIndex uint32
+	// Metric is the route metric, added by the kernel to the metric of the
+	// interface. Zero is a valid metric. macOS has none and ignores it.
+	Metric uint32
 }
 
 // RouteTable reads and writes the routing table. Implementations write routes
@@ -58,6 +65,9 @@ type Interface struct {
 	Tunnel bool
 	// Addrs are the configured addresses with their prefix lengths.
 	Addrs []netip.Prefix
+	// Metric is the interface metric that Windows adds to the metric of every
+	// route through the interface (0 where unknown or not used: macOS).
+	Metric uint32
 }
 
 // LinkKind is what kind of network an interface connects to.

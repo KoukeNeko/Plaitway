@@ -64,11 +64,16 @@ type routeKey struct {
 	dst netip.Prefix
 	// scope is the interface name of a scoped route, empty otherwise.
 	scope string
+	// iface and gateway complete the key in Windows mode (see WindowsKeying).
+	iface   string
+	gateway netip.Addr
 }
 
-func keyOf(r osnet.Route) routeKey {
+func (t *RouteTable) keyOf(r osnet.Route) routeKey {
 	k := routeKey{dst: r.Dst.Masked()}
-	if r.Scoped {
+	if t.windows {
+		k.iface, k.gateway = r.Iface, r.Gateway.WithZone("")
+	} else if r.Scoped {
 		k.scope = r.Iface
 	}
 	return k
@@ -91,16 +96,75 @@ type RouteTable struct {
 	// pickIface, when set, is the interface gateway routes leave through whenever
 	// the gateway is reachable on it (see KernelPicksInterface).
 	pickIface string
+	// windows selects the Windows key (see WindowsKeying).
+	windows bool
+	// ifaceMetric is the interface metric Windows adds to a route metric.
+	ifaceMetric map[string]uint32
 }
 
 func NewRouteTable() *RouteTable {
 	return &RouteTable{
-		ifaces: make(map[string]*osnet.Interface),
-		routes: make(map[routeKey]osnet.Route),
+		ifaces:      make(map[string]*osnet.Interface),
+		routes:      make(map[routeKey]osnet.Route),
+		ifaceMetric: make(map[string]uint32),
 	}
 }
 
-// Dump returns every route, sorted by family, destination and scope.
+// WindowsLoopback is the interface the table puts blackhole routes on in Windows
+// mode: Windows has no blackhole route type, and the adapter uses a route to the
+// loopback address on the loopback pseudo-interface instead.
+const WindowsLoopback = "Loopback Pseudo-Interface 1"
+
+// windowsLoopbackIndex is the index of WindowsLoopback on every Windows.
+const windowsLoopbackIndex = 1
+
+// WindowsKeying switches the table from macOS to Windows semantics, which the
+// Reconciler has to handle as well. It must be called on an empty table.
+//
+//   - A route is keyed by destination, interface and next hop, so several routes
+//     can share a prefix when they differ in either; there is no scope.
+//   - The metric is an attribute, not part of the key: adding a route whose key
+//     exists with another metric is ErrExists.
+//   - Delete names the key. Without an interface (name or index) it deletes the
+//     route to that destination (and gateway, when given) if exactly one
+//     matches, and fails when several do.
+//   - Among routes of equal prefix length the lowest effective metric wins: the
+//     route metric plus the interface metric (SetInterfaceMetric).
+//   - Routes carry IfIndex, taken from the interface; blackholes leave through
+//     WindowsLoopback.
+func (t *RouteTable) WindowsKeying() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.routes) > 0 {
+		panic("fake route table: WindowsKeying on a table that has routes")
+	}
+	t.windows = true
+}
+
+// SetInterfaceMetric sets the interface metric that is added to the metric of
+// every route through the interface when routes are compared (Windows mode).
+// Interfaces reports it as osnet.Interface.Metric, which is how the Reconciler
+// learns it; the Host hands it on with its next Sync.
+func (t *RouteTable) SetInterfaceMetric(name string, metric uint32) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.ifaceMetric[name] = metric
+}
+
+// EffectiveMetric is the metric the table compares: the route metric plus the
+// metric of its interface.
+func (t *RouteTable) EffectiveMetric(r osnet.Route) uint32 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.effectiveMetricLocked(r)
+}
+
+func (t *RouteTable) effectiveMetricLocked(r osnet.Route) uint32 {
+	return r.Metric + t.ifaceMetric[r.Iface]
+}
+
+// Dump returns every route, sorted by family, destination, scope, interface
+// and gateway.
 func (t *RouteTable) Dump() ([]osnet.Route, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -133,7 +197,10 @@ func (t *RouteTable) Add(r osnet.Route) (err error) {
 	if err := t.resolveLocked(&r); err != nil {
 		return err
 	}
-	key := keyOf(r)
+	if ifc, ok := t.ifaces[r.Iface]; ok && t.windows && r.IfIndex == 0 {
+		r.IfIndex = uint32(ifc.Index)
+	}
+	key := t.keyOf(r)
 	if _, ok := t.routes[key]; ok {
 		return osnet.ErrExists
 	}
@@ -143,7 +210,7 @@ func (t *RouteTable) Add(r osnet.Route) (err error) {
 }
 
 // Delete matches on destination and scope only, not on gateway or interface,
-// like RTM_DELETE on macOS.
+// like RTM_DELETE on macOS. In Windows mode see deleteKeyLocked.
 func (t *RouteTable) Delete(r osnet.Route) (err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -152,7 +219,10 @@ func (t *RouteTable) Delete(r osnet.Route) (err error) {
 	if err := t.faultLocked(OpDelete, r.Dst); err != nil {
 		return err
 	}
-	key := keyOf(r)
+	key, err := t.deleteKeyLocked(r)
+	if err != nil {
+		return err
+	}
 	old, ok := t.routes[key]
 	if !ok {
 		return osnet.ErrNotFound
@@ -162,8 +232,51 @@ func (t *RouteTable) Delete(r osnet.Route) (err error) {
 	return nil
 }
 
+// deleteKeyLocked is the key Delete removes: the route's own key on macOS, and
+// on Windows the one route that the interface (name or index), destination and
+// gateway of r single out.
+func (t *RouteTable) deleteKeyLocked(r osnet.Route) (routeKey, error) {
+	if !t.windows {
+		return t.keyOf(r), nil
+	}
+	if r.Iface == "" && r.IfIndex != 0 {
+		r.Iface = t.nameOfIndexLocked(r.IfIndex)
+	}
+	if r.Iface != "" {
+		return t.keyOf(r), nil
+	}
+	var matches []routeKey
+	for key := range t.routes {
+		if key.dst == r.Dst.Masked() && (!r.Gateway.IsValid() || key.gateway == r.Gateway.WithZone("")) {
+			matches = append(matches, key)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return t.keyOf(r), nil // not in the table: Delete reports ErrNotFound
+	case 1:
+		return matches[0], nil
+	}
+	return routeKey{}, fmt.Errorf("fake route table: %d routes to %v match, name the interface", len(matches), r.Dst)
+}
+
+func (t *RouteTable) nameOfIndexLocked(index uint32) string {
+	if index == windowsLoopbackIndex {
+		return WindowsLoopback
+	}
+	for name, ifc := range t.ifaces {
+		if uint32(ifc.Index) == index {
+			return name
+		}
+	}
+	return ""
+}
+
 func (t *RouteTable) resolveLocked(r *osnet.Route) error {
 	switch {
+	case r.Blackhole && t.windows:
+		r.Iface, r.IfIndex = WindowsLoopback, windowsLoopbackIndex
+		return nil
 	case r.Blackhole:
 		r.Iface = "lo0"
 	case r.Gateway.IsValid():
@@ -258,6 +371,8 @@ func compareRoutes(a, b osnet.Route) int {
 		a.Dst.Addr().Compare(b.Dst.Addr()),
 		cmp.Compare(a.Dst.Bits(), b.Dst.Bits()),
 		cmp.Compare(scopeName(a), scopeName(b)),
+		cmp.Compare(a.Iface, b.Iface),
+		a.Gateway.Compare(b.Gateway),
 	)
 }
 
@@ -277,6 +392,9 @@ func (t *RouteTable) AddInterface(ifc osnet.Interface) {
 		t.dropConnectedLocked(old)
 	}
 	ifc.Addrs = slices.Clone(ifc.Addrs)
+	if ifc.Metric != 0 {
+		t.ifaceMetric[ifc.Name] = ifc.Metric
+	}
 	t.ifaces[ifc.Name] = &ifc
 	t.addConnectedLocked(&ifc)
 }
@@ -323,7 +441,8 @@ func (t *RouteTable) SetAddrs(name string, addrs []netip.Prefix) {
 	t.addConnectedLocked(ifc)
 }
 
-// Interfaces returns the interfaces sorted by name.
+// Interfaces returns the interfaces sorted by name, each with the metric the
+// table adds to the routes through it.
 func (t *RouteTable) Interfaces() []osnet.Interface {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -331,6 +450,7 @@ func (t *RouteTable) Interfaces() []osnet.Interface {
 	for _, ifc := range t.ifaces {
 		c := *ifc
 		c.Addrs = slices.Clone(ifc.Addrs)
+		c.Metric = t.ifaceMetric[ifc.Name]
 		out = append(out, c)
 	}
 	slices.SortFunc(out, func(a, b osnet.Interface) int { return cmp.Compare(a.Name, b.Name) })
@@ -345,16 +465,19 @@ func (t *RouteTable) addConnectedLocked(ifc *osnet.Interface) {
 	}
 	for _, a := range ifc.Addrs {
 		r := osnet.Route{Dst: a.Masked(), Iface: ifc.Name}
+		if t.windows {
+			r.IfIndex = uint32(ifc.Index)
+		}
 		r.Flags = flagsFor(r)
-		if _, ok := t.routes[keyOf(r)]; !ok {
-			t.routes[keyOf(r)] = r
+		if _, ok := t.routes[t.keyOf(r)]; !ok {
+			t.routes[t.keyOf(r)] = r
 		}
 	}
 }
 
 func (t *RouteTable) dropConnectedLocked(ifc *osnet.Interface) {
 	for _, a := range ifc.Addrs {
-		key := routeKey{dst: a.Masked()}
+		key := t.keyOf(osnet.Route{Dst: a, Iface: ifc.Name})
 		if r, ok := t.routes[key]; ok && r.Iface == ifc.Name && isConnected(r) {
 			delete(t.routes, key)
 		}
@@ -377,30 +500,64 @@ func (t *RouteTable) Inject(r osnet.Route) {
 	defer t.mu.Unlock()
 	r.Dst = r.Dst.Masked()
 	r.Flags = flagsFor(r)
-	t.routes[keyOf(r)] = r
+	t.routes[t.keyOf(r)] = r
 }
 
 // Remove deletes the unscoped route to dst behind the Reconciler's back, and
-// reports whether there was one. Nothing is recorded.
+// reports whether there was one. Nothing is recorded. In Windows mode it is the
+// route Get returns.
 func (t *RouteTable) Remove(dst netip.Prefix) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := routeKey{dst: dst.Masked()}
-	_, ok := t.routes[key]
+	key, ok := t.bestKeyLocked(dst)
 	delete(t.routes, key)
 	return ok
 }
 
-// Get returns the unscoped route to dst.
+// Get returns the unscoped route to dst; in Windows mode the one with the
+// lowest effective metric when there are several.
 func (t *RouteTable) Get(dst netip.Prefix) (osnet.Route, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	r, ok := t.routes[routeKey{dst: dst.Masked()}]
-	return r, ok
+	key, ok := t.bestKeyLocked(dst)
+	return t.routes[key], ok
+}
+
+// bestKeyLocked is the key of the route to dst that the kernel would use.
+func (t *RouteTable) bestKeyLocked(dst netip.Prefix) (routeKey, bool) {
+	dst = dst.Masked()
+	if !t.windows {
+		key := routeKey{dst: dst}
+		_, ok := t.routes[key]
+		return key, ok
+	}
+	var best routeKey
+	found := false
+	for key, r := range t.routes {
+		if key.dst != dst {
+			continue
+		}
+		if !found || t.beats(r, t.routes[best]) {
+			best, found = key, true
+		}
+	}
+	return best, found
+}
+
+// beats says whether route a is preferred over b of the same prefix: the lower
+// effective metric, then the interface name and the gateway, so that the pick
+// does not depend on map order.
+func (t *RouteTable) beats(a, b osnet.Route) bool {
+	return cmp.Or(
+		cmp.Compare(t.effectiveMetricLocked(a), t.effectiveMetricLocked(b)),
+		cmp.Compare(a.Iface, b.Iface),
+		a.Gateway.Compare(b.Gateway),
+	) < 0
 }
 
 // Lookup returns the unscoped route the kernel would pick for addr: the
-// longest matching prefix.
+// longest matching prefix, and in Windows mode the lowest effective metric
+// among those.
 func (t *RouteTable) Lookup(addr netip.Addr) (osnet.Route, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -410,7 +567,7 @@ func (t *RouteTable) Lookup(addr netip.Addr) (osnet.Route, bool) {
 		if key.scope != "" || !r.Dst.Contains(addr) {
 			continue
 		}
-		if !found || r.Dst.Bits() > best.Dst.Bits() {
+		if !found || r.Dst.Bits() > best.Dst.Bits() || (t.windows && r.Dst.Bits() == best.Dst.Bits() && t.beats(r, best)) {
 			best, found = r, true
 		}
 	}
