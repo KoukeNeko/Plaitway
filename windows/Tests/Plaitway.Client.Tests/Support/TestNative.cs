@@ -55,6 +55,13 @@ internal static partial class TestNative
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool CloseHandle(nint handle);
 
+    private static byte[] BinaryFormOf(SecurityIdentifier sid)
+    {
+        var bytes = new byte[sid.BinaryLength];
+        sid.GetBinaryForm(bytes, 0);
+        return bytes;
+    }
+
     /// <summary>The access mask the handle was opened with, as the kernel granted it.</summary>
     public static uint GrantedAccess(SafeHandle handle)
     {
@@ -63,7 +70,7 @@ internal static partial class TestNative
     }
 
     /// <summary>
-    /// Runs <paramref name="action"/> on this thread with the user's own SID reduced to deny-only. An
+    /// Runs <paramref name="action"/> on this thread with the user's own SID (and Administrators, when the token is elevated) reduced to deny-only. An
     /// access check then matches no entry for the user itself and sees what any other interactive user
     /// would: the Interactive group and nothing else (the Go test <c>impersonateOrdinaryInteractiveUser</c>).
     /// The action has to be synchronous: the impersonation belongs to the thread.
@@ -71,15 +78,26 @@ internal static partial class TestNative
     public static unsafe void AsOrdinaryInteractiveUser(Action action)
     {
         using var identity = WindowsIdentity.GetCurrent(System.Security.Principal.TokenAccessLevels.Duplicate | System.Security.Principal.TokenAccessLevels.Query);
-        var user = identity.User!;
-        var userBytes = new byte[user.BinaryLength];
-        user.GetBinaryForm(userBytes, 0);
+        var userBytes = BinaryFormOf(identity.User!);
+        // An elevated token has Administrators enabled, and the pipe lets them in with full control; an ordinary
+        // user does not have that group, so it is reduced to deny-only too.
+        var administratorsBytes = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)
+            ? BinaryFormOf(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null))
+            : null;
 
         nint restricted;
         fixed (byte* userPointer = userBytes)
+        fixed (byte* administratorsPointer = administratorsBytes)
         {
-            var disable = new SidAndAttributes { Sid = (nint)userPointer };
-            if (!CreateRestrictedToken(identity.AccessToken, 0, 1, &disable, 0, nint.Zero, 0, nint.Zero, out restricted))
+            var disable = stackalloc SidAndAttributes[2];
+            disable[0] = new SidAndAttributes { Sid = (nint)userPointer };
+            var disableCount = 1u;
+            if (administratorsBytes is not null)
+            {
+                disable[disableCount++] = new SidAndAttributes { Sid = (nint)administratorsPointer };
+            }
+
+            if (!CreateRestrictedToken(identity.AccessToken, 0, disableCount, disable, 0, nint.Zero, 0, nint.Zero, out restricted))
             {
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError());
             }

@@ -11,7 +11,8 @@ public sealed class SecretMaskTests
     private const string PrivateKey = "kPRIVATEkMATERIALkAAAAAAAAAAAAAAAAAAAAAAAA=";
     private const string PresharedKey = "kPRESHAREDkMATERIALkBBBBBBBBBBBBBBBBBBBBBB=";
 
-    private const string WireGuardProfile = $"""
+    // The compiler keeps the line endings of the source file, which a checkout with autocrlf makes CRLF.
+    private static readonly string WireGuardProfile = $"""
         [Interface]
         PrivateKey = {PrivateKey}
         Address = 10.6.0.2/32
@@ -23,7 +24,7 @@ public sealed class SecretMaskTests
         AllowedIPs = 0.0.0.0/0
         Endpoint = 203.0.113.5:51820
 
-        """;
+        """.ReplaceLineEndings("\n");
 
     private const string OvpnText = "client\nremote vpn.example.net 1194\n<key>\nKEY BODY\n</key>\n<tls-crypt>\nCRYPT BODY\n</tls-crypt>\nverb 3\n";
 

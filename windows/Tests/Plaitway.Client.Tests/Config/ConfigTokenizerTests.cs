@@ -217,7 +217,7 @@ public sealed class ConfigTokenizerTests
             </ca>
             verb 3
 
-            """;
+            """.ReplaceLineEndings("\n");
 
         Assert.Equal(
             [
