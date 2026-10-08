@@ -180,17 +180,21 @@ private struct OverviewTab: View {
     }
 }
 
-/// The state, why it is so, and for how long: what a person opens the page to see.
+/// The state, why it is so, and for how long: what a person opens the page to see. The glyph sits
+/// on a tile of its colour, centred against the words, and the uptime is laid out as the rates
+/// below it are, the name above its value.
 private struct StatusHero: View {
     let profile: Profile
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: profile.lastError.isEmpty ? .center : .top, spacing: 16) {
             StatusGlyph(profile.state)
-                .font(.system(size: 32))
-            VStack(alignment: .leading, spacing: 3) {
+                .font(.system(size: 28))
+                .frame(width: 52, height: 52)
+                .background(profile.state.tint.opacity(0.14), in: .rect(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 4) {
                 Text(verbatim: profile.state.label)
-                    .font(.title3.weight(.semibold))
+                    .font(.title2.weight(.semibold))
                     .accessibilityIdentifier("profile.state")
                 if !profile.lastError.isEmpty {
                     Text(verbatim: profile.lastError)
@@ -199,18 +203,20 @@ private struct StatusHero: View {
                         .accessibilityIdentifier("profile.cause")
                 }
             }
+            // The tile's height is the line's, so that a one-line state is centred on it.
+            .frame(minHeight: 52, alignment: profile.lastError.isEmpty ? .center : .top)
             Spacer(minLength: 12)
             if profile.state == .connected, profile.status.hasConnectedSince {
                 VStack(alignment: .trailing, spacing: 2) {
+                    Text("Uptime", bundle: .module).font(.caption).foregroundStyle(.secondary)
                     Text(timerInterval: profile.status.connectedSince.date...Date.distantFuture, pauseTime: nil, countsDown: false, showsHours: true)
                         .font(.title3.weight(.semibold))
                         .monospacedDigit()
                         .help(Text(verbatim: profile.status.connectedSince.date.formatted(date: .abbreviated, time: .shortened)))
-                    Text("Uptime", bundle: .module).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .contain)
     }
 }
