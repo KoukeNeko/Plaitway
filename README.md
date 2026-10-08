@@ -189,7 +189,9 @@ itself, such as why a connection is stuck, are in English.
 
 ## Getting started
 
-1. Build the app (see [Release](#release)); there is no download yet
+1. Download the dmg or the zip from the
+   [latest release](https://github.com/KoukeNeko/Plaitway/releases/latest), or
+   build the app yourself (see [Release](#release))
 2. Copy `Plaitway.app` to `/Applications` and open it. The first run offers to
    install the helper: **Install Helper**, then allow Plaitway in **System
    Settings › General › Login Items & Extensions**. The app carries on by
