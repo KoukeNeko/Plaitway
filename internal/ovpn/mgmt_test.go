@@ -2,12 +2,9 @@ package ovpn
 
 import (
 	"bufio"
-	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -281,49 +278,56 @@ func TestReadLoopStopsWhenEmitSaysSo(t *testing.T) {
 	}
 }
 
-type fakeServer struct {
-	path string
-	ln   net.Listener
-}
-
-func newFakeServer(t *testing.T) *fakeServer {
+// loopbackPair connects two ends over TCP on the loopback interface. Unlike
+// net.Pipe it buffers, as a socket to openvpn does: Send holds the connection
+// while it writes, and the reader needs the same lock to match a reply.
+func loopbackPair(t *testing.T) (server, client net.Conn) {
 	t.Helper()
-	path := filepath.Join(shortTempDir(t), "m.sock")
-	ln, err := net.Listen("unix", path)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
-	return &fakeServer{path: path, ln: ln}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			close(accepted)
+			return
+		}
+		accepted <- conn
+	}()
+	client, err = net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.Close() })
+	server, ok := <-accepted
+	if !ok {
+		t.Fatal("the loopback listener accepted nothing")
+	}
+	t.Cleanup(func() { server.Close() })
+	return server, client
 }
 
 func TestSendAndReplyAttribution(t *testing.T) {
-	srv := newFakeServer(t)
+	server, client := loopbackPair(t)
 	received := make(chan string, 8)
 	go func() {
-		conn, err := srv.ln.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		sc := bufio.NewScanner(conn)
+		defer server.Close()
+		sc := bufio.NewScanner(server)
 		for sc.Scan() {
 			received <- sc.Text()
 			switch {
 			case strings.HasPrefix(sc.Text(), "username"):
-				conn.Write([]byte("ERROR: bad username\r\n"))
+				server.Write([]byte("ERROR: bad username\r\n"))
 			default:
-				conn.Write([]byte("SUCCESS: ok\r\n"))
+				server.Write([]byte("SUCCESS: ok\r\n"))
 			}
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	c, err := dialMgmt(ctx, srv.path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := &mgmtConn{conn: client}
 	defer c.Close()
 
 	var mu sync.Mutex
@@ -385,52 +389,4 @@ func TestSendRefusesLineBreaks(t *testing.T) {
 	if len(c.pending) != 0 {
 		t.Errorf("a refused command was queued: %v", c.pending)
 	}
-}
-
-func TestDialMgmtWaitsForTheSocket(t *testing.T) {
-	path := filepath.Join(shortTempDir(t), "late.sock")
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		ln, err := net.Listen("unix", path)
-		if err != nil {
-			return
-		}
-		defer ln.Close()
-		conn, err := ln.Accept()
-		if err == nil {
-			conn.Close()
-		}
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	c, err := dialMgmt(ctx, path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.Close()
-}
-
-func TestDialMgmtGivesUp(t *testing.T) {
-	path := filepath.Join(shortTempDir(t), "never.sock")
-
-	t.Run("deadline", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-		if _, err := dialMgmt(ctx, path, nil); !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("dialMgmt error = %v, want a deadline error", err)
-		}
-	})
-	t.Run("child exited", func(t *testing.T) {
-		abort := make(chan struct{})
-		close(abort)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		start := time.Now()
-		if _, err := dialMgmt(ctx, path, abort); err == nil || !strings.Contains(err.Error(), "exited") {
-			t.Fatalf("dialMgmt error = %v, want the child-exited error", err)
-		}
-		if time.Since(start) > 2*time.Second {
-			t.Error("dialMgmt kept waiting after the child exited")
-		}
-	})
 }

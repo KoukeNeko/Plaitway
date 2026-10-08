@@ -683,6 +683,23 @@ func requireTunClosed(t *testing.T, rec *recorder) {
 	}
 }
 
+// portTakenMessage is how this OS words "that UDP port is taken". It reaches
+// the engine only as text inside wireguard-go's IPC error, so the test asks
+// the OS for it by binding the port a second time.
+func portTakenMessage(t *testing.T, port int) string {
+	t.Helper()
+	second, err := net.ListenPacket("udp4", fmt.Sprintf("0.0.0.0:%d", port))
+	if err == nil {
+		second.Close()
+		t.Fatalf("UDP port %d can be bound twice", port)
+	}
+	var sysErr *os.SyscallError
+	if !errors.As(err, &sysErr) {
+		t.Fatalf("binding a taken port failed with %v, want a system error", err)
+	}
+	return sysErr.Err.Error()
+}
+
 // Start itself fails only when it is given up on before it begins; the engine
 // reports what goes wrong afterwards in its status, and these failures do not
 // pass by themselves.
@@ -693,6 +710,7 @@ func TestStartFailures(t *testing.T) {
 	}
 	defer busy.Close()
 	busyPort := busy.LocalAddr().(*net.UDPAddr).Port
+	portTaken := portTakenMessage(t, busyPort)
 
 	tests := []struct {
 		name      string
@@ -724,7 +742,7 @@ func TestStartFailures(t *testing.T) {
 			},
 			// wireguard-go reports a port that is taken itself, or leaves the
 			// device on another port, which the engine notices.
-			wantErr:   []string{"address already in use", "cannot listen on port"},
+			wantErr:   []string{portTaken, "cannot listen on port"},
 			wantKinds: []string{"tun", "configure", "announce:connecting", "withdraw"},
 		},
 	}

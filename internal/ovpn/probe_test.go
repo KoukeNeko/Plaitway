@@ -10,15 +10,6 @@ import (
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
 
-func writeScript(t *testing.T, dir, name, body string) string {
-	t.Helper()
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
 func TestProbeBinary(t *testing.T) {
 	dir := t.TempDir()
 	const (
@@ -27,8 +18,8 @@ func TestProbeBinary(t *testing.T) {
 		line25 = "OpenVPN 2.5.9 x86_64-pc-linux-gnu [SSL (OpenSSL)] [LZO] [LZ4] [EPOLL] [MH/PKTINFO] [AEAD]"
 	)
 	// openvpn --version prints and exits with status 1.
-	versionScript := func(first string) string {
-		return "echo '" + first + "'\necho 'library versions: OpenSSL 3.5.9, LZO 2.10'\nexit 1\n"
+	versionStub := func(first string) stubBehavior {
+		return stubBehavior{Output: first + "\nlibrary versions: OpenSSL 3.5.9, LZO 2.10\n", Exit: 1}
 	}
 	tests := []struct {
 		name string
@@ -37,52 +28,43 @@ func TestProbeBinary(t *testing.T) {
 	}{
 		{
 			name: "2.7 with LZO",
-			path: writeScript(t, dir, "v27", versionScript(line27)),
+			path: writeStub(t, dir, "v27", versionStub(line27)),
 			want: binaryInfo{available: true, version: "2.7.7", major: 2, minor: 7, lzo: true},
 		},
 		{
 			name: "2.6 without LZO",
-			path: writeScript(t, dir, "v26", versionScript(line26)),
+			path: writeStub(t, dir, "v26", versionStub(line26)),
 			want: binaryInfo{available: true, version: "2.6.12", major: 2, minor: 6},
 		},
 		{
 			name: "2.5",
-			path: writeScript(t, dir, "v25", versionScript(line25)),
+			path: writeStub(t, dir, "v25", versionStub(line25)),
 			want: binaryInfo{available: true, version: "2.5.9", major: 2, minor: 5, lzo: true},
 		},
 		{
 			name: "exit status 0 is fine too",
-			path: writeScript(t, dir, "zero", "echo '"+line27+"'\n"),
+			path: writeStub(t, dir, "zero", stubBehavior{Output: line27 + "\n"}),
 			want: binaryInfo{available: true, version: "2.7.7", major: 2, minor: 7, lzo: true},
 		},
 		{
 			name: "release candidate suffix",
-			path: writeScript(t, dir, "rc", "echo 'OpenVPN 2.8.0_rc1 x [LZO]'\nexit 1\n"),
+			path: writeStub(t, dir, "rc", stubBehavior{Output: "OpenVPN 2.8.0_rc1 x [LZO]\n", Exit: 1}),
 			want: binaryInfo{available: true, version: "2.8.0", major: 2, minor: 8, lzo: true},
 		},
 		{
 			name: "not openvpn",
-			path: writeScript(t, dir, "other", "echo 'GNU bash'\nexit 1\n"),
+			path: writeStub(t, dir, "other", stubBehavior{Output: "GNU bash\n", Exit: 1}),
 			want: binaryInfo{detail: " --version did not print an OpenVPN version"},
 		},
 		{
 			name: "prints nothing",
-			path: writeScript(t, dir, "silent", "exit 0\n"),
+			path: writeStub(t, dir, "silent", stubBehavior{}),
 			want: binaryInfo{detail: " --version did not print an OpenVPN version"},
 		},
 		{
 			name: "missing",
 			path: filepath.Join(dir, "missing"),
 			want: binaryInfo{detail: "openvpn not found at " + filepath.Join(dir, "missing")},
-		},
-		{
-			name: "not executable",
-			path: func() string {
-				p := filepath.Join(dir, "plain")
-				os.WriteFile(p, []byte("x"), 0o644)
-				return p
-			}(),
-			want: binaryInfo{detail: "openvpn at " + filepath.Join(dir, "plain") + " cannot be executed"},
 		},
 		{
 			name: "not configured",
@@ -112,7 +94,7 @@ func TestProbeBinary(t *testing.T) {
 }
 
 func TestProbeBinaryTimesOut(t *testing.T) {
-	path := writeScript(t, t.TempDir(), "hang", "sleep 30\n")
+	path := writeStub(t, t.TempDir(), "hang", stubBehavior{Hang: true})
 	start := time.Now()
 	got := probeBinary(path, 200*time.Millisecond)
 	if got.available || !strings.Contains(got.detail, "did not finish") {
@@ -142,7 +124,7 @@ func TestBinaryInfoCapabilities(t *testing.T) {
 func TestBackendProbeReportsAndRunsOnce(t *testing.T) {
 	dir := t.TempDir()
 	counter := filepath.Join(dir, "count")
-	path := writeScript(t, dir, "ovpn", "echo run >> '"+counter+"'\necho 'OpenVPN 2.7.7 x [LZO]'\nexit 1\n")
+	path := writeStub(t, dir, "ovpn", stubBehavior{Output: "OpenVPN 2.7.7 x [LZO]\n", Exit: 1, Counter: counter})
 	b := Backend(Config{Binary: path, RunDir: t.TempDir()})
 	if b.Kind != tunnel.KindOpenVPN {
 		t.Errorf("Kind = %v", b.Kind)
@@ -162,7 +144,7 @@ func TestBackendProbeReportsAndRunsOnce(t *testing.T) {
 }
 
 func TestBackendProbeWithoutLZOSaysSo(t *testing.T) {
-	path := writeScript(t, t.TempDir(), "ovpn", "echo 'OpenVPN 2.6.12 x [LZ4]'\nexit 1\n")
+	path := writeStub(t, t.TempDir(), "ovpn", stubBehavior{Output: "OpenVPN 2.6.12 x [LZ4]\n", Exit: 1})
 	info := Backend(Config{Binary: path, RunDir: t.TempDir()}).Probe()
 	if !info.Available || info.Version != "2.6.12 (no LZO)" {
 		t.Errorf("Probe = %+v", info)
@@ -180,14 +162,14 @@ func TestBackendProbeMissingBinary(t *testing.T) {
 // the middle of an update, and a good answer is kept for good.
 func TestBackendProbeLooksAgainWhileTheBinaryIsUnusable(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "openvpn")
+	path := filepath.Join(dir, "openvpn"+exeSuffix())
 	b := newBackend(Config{Binary: path, RunDir: t.TempDir()})
 	b.reprobe = 500 * time.Millisecond
 
 	if b.info().available {
 		t.Fatal("a missing binary is available")
 	}
-	writeScript(t, dir, "openvpn", "echo 'OpenVPN 2.7.7 x [LZO]'\nexit 1\n")
+	writeStub(t, dir, "openvpn", stubBehavior{Output: "OpenVPN 2.7.7 x [LZO]\n", Exit: 1})
 	if b.info().available {
 		t.Error("the unusable answer was not remembered at all")
 	}

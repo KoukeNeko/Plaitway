@@ -2,6 +2,7 @@ package ovpn
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -349,5 +350,58 @@ func TestReadableTail(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("readableTail = %q, want %q", got, want)
+	}
+}
+
+func TestProvideCredentialsValidates(t *testing.T) {
+	e := newTestEngine(t, shortTempDir(t), minimalProfile)
+	tests := []struct {
+		name       string
+		kind       tunnel.CredentialKind
+		user, pass string
+	}{
+		{"empty username", tunnel.CredentialUserPassword, "", "pw"},
+		{"username with a line break", tunnel.CredentialUserPassword, "a\nsignal SIGTERM", "pw"},
+		{"password with a line break", tunnel.CredentialUserPassword, "a", "p\nw"},
+		{"password with a carriage return", tunnel.CredentialUserPassword, "a", "p\rw"},
+		{"passphrase with a NUL", tunnel.CredentialKeyPassphrase, "", "p\x00w"},
+		{"unknown kind", tunnel.CredentialNone, "a", "b"},
+	}
+	for _, tt := range tests {
+		if err := e.ProvideCredentials(tt.kind, tt.user, tt.pass); err == nil {
+			t.Errorf("%s: ProvideCredentials succeeded", tt.name)
+		}
+	}
+	// Nothing invalid was stored.
+	if e.userPass.set || e.keyPass.set || len(e.secrets) != 0 {
+		t.Error("a rejected credential was stored")
+	}
+}
+
+func TestPublishNeverBlocksAndLatestWins(t *testing.T) {
+	e := newTestEngine(t, shortTempDir(t), minimalProfile)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			n := i
+			e.update(func(s *tunnel.Status) { s.Stats = tunnel.Stats{RxBytes: uint64(n)} })
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("publishing blocked on a reader that is not reading")
+	}
+	if got := (<-e.Status()).Stats.RxBytes; got != 99 {
+		t.Errorf("the reader got snapshot %d, want the latest (99)", got)
+	}
+}
+
+func TestEngineStartRefusesAMissingBinary(t *testing.T) {
+	e := newTestEngine(t, shortTempDir(t), minimalProfile)
+	err := e.Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "openvpn not found at /nonexistent/openvpn") {
+		t.Fatalf("Start = %v", err)
 	}
 }

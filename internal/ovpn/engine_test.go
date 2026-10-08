@@ -1,3 +1,5 @@
+//go:build unix
+
 package ovpn
 
 import (
@@ -510,31 +512,6 @@ func TestEngineRefusesCredentialsItCannotSupply(t *testing.T) {
 	}
 }
 
-func TestProvideCredentialsValidates(t *testing.T) {
-	h := newHarness(t, harnessOpts{})
-	tests := []struct {
-		name       string
-		kind       tunnel.CredentialKind
-		user, pass string
-	}{
-		{"empty username", tunnel.CredentialUserPassword, "", "pw"},
-		{"username with a line break", tunnel.CredentialUserPassword, "a\nsignal SIGTERM", "pw"},
-		{"password with a line break", tunnel.CredentialUserPassword, "a", "p\nw"},
-		{"password with a carriage return", tunnel.CredentialUserPassword, "a", "p\rw"},
-		{"passphrase with a NUL", tunnel.CredentialKeyPassphrase, "", "p\x00w"},
-		{"unknown kind", tunnel.CredentialNone, "a", "b"},
-	}
-	for _, tt := range tests {
-		if err := h.eng.ProvideCredentials(tt.kind, tt.user, tt.pass); err == nil {
-			t.Errorf("%s: ProvideCredentials succeeded", tt.name)
-		}
-	}
-	// Nothing invalid was stored.
-	if h.eng.userPass.set || h.eng.keyPass.set || len(h.eng.secrets) != 0 {
-		t.Error("a rejected credential was stored")
-	}
-}
-
 func TestEngineKeepsCredentialsAcrossReconnects(t *testing.T) {
 	h := newHarness(t, harnessOpts{env: map[string]string{
 		"OVPN_FAKE_PASSWORD": "pw", "OVPN_FAKE_REAUTH": "1",
@@ -765,17 +742,6 @@ func TestEngineStopBeforeStart(t *testing.T) {
 }
 
 func TestEngineStartErrors(t *testing.T) {
-	t.Run("binary missing", func(t *testing.T) {
-		b := Backend(Config{Binary: "/nonexistent/openvpn", RunDir: shortTempDir(t)})
-		eng, err := b.New(tunnel.Spec{Owner: "o", Content: []byte(minimalProfile)}, tunnel.Deps{Network: &fakeNetwork{}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = eng.Start(context.Background())
-		if err == nil || !strings.Contains(err.Error(), "openvpn not found at /nonexistent/openvpn") {
-			t.Fatalf("Start = %v", err)
-		}
-	})
 	t.Run("LZO profile on a binary without LZO", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{realProbe: true, env: map[string]string{"OVPN_FAKE_VERSION": "OpenVPN 2.7.7 x [LZ4]"}})
 		err := h.eng.Start(context.Background())
@@ -876,31 +842,6 @@ func TestEngineForwardsChildOutputOnlyBeforeManagement(t *testing.T) {
 	// But everything is kept for failure reports.
 	if tail := h.eng.ring.tail(10); !strings.Contains(strings.Join(tail, "\n"), "line on stdout after management") {
 		t.Errorf("ring = %v", tail)
-	}
-}
-
-func TestPublishNeverBlocksAndLatestWins(t *testing.T) {
-	b := Backend(Config{Binary: "/x", RunDir: shortTempDir(t)})
-	eng, err := b.New(tunnel.Spec{Owner: "o", Content: []byte(minimalProfile)}, tunnel.Deps{Network: &fakeNetwork{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := eng.(*engine)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for i := 0; i < 100; i++ {
-			n := i
-			e.update(func(s *tunnel.Status) { s.Stats = tunnel.Stats{RxBytes: uint64(n)} })
-		}
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("publishing blocked on a reader that is not reading")
-	}
-	if got := (<-e.Status()).Stats.RxBytes; got != 99 {
-		t.Errorf("the reader got snapshot %d, want the latest (99)", got)
 	}
 }
 

@@ -1,3 +1,5 @@
+//go:build unix
+
 package ovpn
 
 import (
@@ -25,13 +27,11 @@ import (
 // OpenVPN 2.7 writes, and records what it receives in OVPN_FAKE_DIR. Its
 // behaviour is set with OVPN_FAKE_* environment variables, written into the
 // script because the engine gives the child a bare environment.
+//
+// It is Unix only: the engine reaches openvpn through a Unix socket and a
+// shell script, and how the Windows engine will do it is not decided yet.
 
-func TestMain(m *testing.M) {
-	if os.Getenv("OVPN_FAKE") != "" {
-		os.Exit(runFakeOpenVPN())
-	}
-	os.Exit(m.Run())
-}
+func init() { fakeOpenVPNMain = runFakeOpenVPN }
 
 const defaultFakeVersion = "OpenVPN 2.7.7 aarch64-apple-darwin27.0.0 [SSL (OpenSSL)] [LZO] [LZ4] [MH/RECVDA] [AEAD]"
 
@@ -361,47 +361,6 @@ func (f *fakeOpenVPN) failLoop(wait string) bool {
 
 // --- the other side: what the daemon gives the engine ---
 
-type netCall struct {
-	withdraw bool
-	intent   tunnel.Intent
-}
-
-// fakeNetwork records what the engine asks of the Reconciler.
-type fakeNetwork struct {
-	mu          sync.Mutex
-	calls       []netCall
-	announceErr func(n int, it tunnel.Intent) error
-	onWithdraw  func()
-}
-
-func (n *fakeNetwork) Announce(it tunnel.Intent) error {
-	n.mu.Lock()
-	n.calls = append(n.calls, netCall{intent: it})
-	count := len(n.calls)
-	hook := n.announceErr
-	n.mu.Unlock()
-	if hook != nil {
-		return hook(count, it)
-	}
-	return nil
-}
-
-func (n *fakeNetwork) Withdraw(owner tunnel.OwnerID) {
-	n.mu.Lock()
-	n.calls = append(n.calls, netCall{withdraw: true, intent: tunnel.Intent{Owner: owner}})
-	hook := n.onWithdraw
-	n.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
-}
-
-func (n *fakeNetwork) snapshot() []netCall {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return append([]netCall(nil), n.calls...)
-}
-
 // harness runs an engine against the fake openvpn.
 type harness struct {
 	t      *testing.T
@@ -660,7 +619,7 @@ func (h *harness) requireProcessGone() {
 	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
+		if !processExists(pid) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

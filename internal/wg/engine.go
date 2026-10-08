@@ -65,7 +65,7 @@ type engine struct {
 	endpoints      []netip.AddrPort // resolved endpoint of each peer
 	announcedState tunnel.State     // StateConnecting or StateUp
 	upSince        time.Time
-	// While awaiting, the engine waits for a handshake newer than awaitSince.
+	// While awaiting, the engine waits for a handshake not older than awaitSince.
 	awaiting    bool
 	awaitSince  time.Time
 	noHandshake bool
@@ -326,7 +326,9 @@ func (e *engine) poll() {
 	}
 
 	switch {
-	case e.awaiting && stats.lastHandshake.After(e.awaitSince):
+	case e.awaiting && !stats.lastHandshake.Before(e.awaitSince):
+		// Not After: the Windows wall clock ticks about every millisecond, so a
+		// handshake answered over a fast link can carry awaitSince's timestamp.
 		e.handshakeDone()
 	case e.awaiting:
 		// Without routes nothing else would make wireguard-go try again once

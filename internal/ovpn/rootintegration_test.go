@@ -1,4 +1,4 @@
-//go:build rootintegration
+//go:build rootintegration && unix
 
 package ovpn
 
