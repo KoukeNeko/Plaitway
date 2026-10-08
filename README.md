@@ -57,8 +57,11 @@ Menu bar
 └── Quit Plaitway
 ```
 
-The window is a sidebar of profiles and **Diagnostics**. Each profile has five
-pages, also in the **View** menu (⌘1 to ⌘5):
+The window is a sidebar of profiles and **Diagnostics**, as tall as the window.
+The page switcher and **+** (import) are at the right of the toolbar;
+**Connect** or **Disconnect**, and **Retry** for a profile that failed, are in a
+bar at the bottom. Each profile has five pages, also in the **View** menu (⌘1
+to ⌘5):
 
 | Page | What it shows |
 |---|---|
@@ -68,7 +71,13 @@ pages, also in the **View** menu (⌘1 to ⌘5):
 | **Configuration** | The profile's text, to read and to change |
 | **Settings** | The name, auto-connect, tunnel mode, priority, on-demand activation, and for WireGuard leaving the private ranges out |
 
+What a page does that the others do not — the search and level of the log,
+**Save** and **Show Secrets** of the configuration — is in a strip at its top,
+not in the toolbar. **Diagnostics** has two pages: the overview and the helper's
+own log.
+
 Every state has a glyph of its own, a word and a colour — never a colour alone.
+The sidebar shows it as a shield, the one the menu bar item uses.
 
 ## Several profiles at the same time
 
@@ -290,6 +299,25 @@ connect or disconnect holds until the kind changes.
 the deployment target as the SDK version, and macOS draws an app linked that way
 in the pre-Tahoe design. The binary still runs on macOS 15; everything newer is
 behind availability checks.
+
+**Toolbar items are declared in `MainView`, and the page switcher is AppKit's.**
+SwiftUI replaces a toolbar item, and the toolbar is seen to be built again,
+whenever the view that declares the item is drawn again or the item's own
+content changes. A profile's page is drawn again with every reading of its
+traffic, and a SwiftUI picker whose selection changes inside an item is
+replaced with each change, so the items declared by a page, a picker and an
+explicit `ToolbarItem(id:)` were all replaced, at each reading of a profile's
+traffic and at each choice of a page. The page switcher is an
+`NSSegmentedControl` that follows `AppModel` itself, declared next to **+** in
+`MainView`, where neither happens.
+The toolbar background is set to visible for every page: left to the system it
+follows what is under it, and changed between a page that starts with a scroll
+view and a page that starts with a strip of controls.
+
+**The log backlog is shown in one update.** The helper sends the last 200 lines
+of a log as a burst. Applied line by line, the page was drawn 487 times over
+2.3 seconds when Logs was opened; lines that arrive within 50 ms of each other
+are now shown together.
 
 **The menu bar item is a menu, not a popover.** The HIG asks for a menu unless
 the content is too complex for one; macOS 27 changes how windows shown from a
