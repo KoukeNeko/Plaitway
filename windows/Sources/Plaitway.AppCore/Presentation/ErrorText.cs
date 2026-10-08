@@ -17,6 +17,7 @@ public sealed class ErrorText(UiText text)
     {
         ProfileImportException import => Describe(import.Failure),
         HelperCommandFailedException failed => text.HelperCommandFailedWithExitCode(failed.ExitCode),
+        HelperMissingException { Distrust: { } distrust } => distrust.Describe(text),
         HelperMissingException => text.TheHelperFileIsMissingFromThisCopyOfPlaitwayInstallPlaitwayAgain,
         _ => Describe(DaemonFailure.From(error)),
     };

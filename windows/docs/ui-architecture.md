@@ -99,6 +99,30 @@ sequenceDiagram
 There are no toasts: the macOS app posts no notifications either. There is no explanation of hide-to-tray on the first
 close: macOS has none of that either.
 
+### Window visibility
+
+`ShellViewModel.SetWindowVisible(false)` disposes the page, and no page is made while the window is hidden, whatever the
+selection does meanwhile (another client deletes the profile; the first snapshot of a `--hidden` start). Showing the window makes the page of the
+selection. `ShellViewModel` takes `isWindowVisible: false` for a start in the notification area. A page that is not on
+screen keeps no log stream and no poll open (`ShellWindowTests`).
+
+### Dropping files
+
+The window imports what is dropped on it, as `dropDestination` of `RootView.swift` does, with the same rule as the file dialog
+and the importer: no file is judged by its name, because the daemon tells a profile from something else by its content
+(`ImportsAProfileWhateverItsFileIsCalled`). The view (`Plaitway.App`) does the platform part and nothing else:
+
+| Event | Calls |
+|---|---|
+| `DragOver` | `ShellViewModel.CanAcceptDrop` decides `AcceptedOperation` (`Copy` or `None`); `SetDropTargeted(true)` |
+| `DragLeave` | `SetDropTargeted(false)` |
+| `Drop` | `DropAsync(items)`, one `DroppedItem(Name, Path)` per storage item; `Path` is null or empty for an item that is not a file on this PC |
+| the outline | `ShellViewModel.ShowsDropHint`: an accent border, as macOS draws; it needs no string |
+
+An item without a path, and a duplicate, are never sent to the daemon; the first is a failure row of the import report
+(`Not a file on this PC`), the second is imported once. A folder is passed on and the importer refuses it as `Not a text file`.
+While the helper is not ready nothing is accepted and no outline is drawn.
+
 ## How to add a page
 
 A page is a view model, a view and four small registrations.
@@ -211,15 +235,25 @@ The helper is the Windows service `PlaitwayHelper` (the daemon). The app never s
 
 - `ScmHelperService` reads the service state through the Service Control Manager without elevation (not installed,
   stopped, running).
-- `HelperLocator` finds `plaitwayd.exe` in one place, next to the app's directory (`..\plaitwayd.exe`).
+- `HelperLocator` finds `plaitwayd.exe` in one place: next to the app, or one folder up. A Debug build also looks at
+  `bin\plaitwayd.exe` of the repository it was built from (`HelperLocator.IsDevelopmentBuild`), and trusts it.
+- What is found runs with administrator rights, so it is first judged by `HelperTrustPolicy` against `IHelperTrust`
+  (the Windows implementation is in `Plaitway.App`): trusted when every folder of its path is writable by administrators
+  only on a local fixed disk (the rule of `CheckAdminOnlyPath` in `cmd/plaitwayd`), or when it carries a valid
+  Authenticode signature of the expected publisher. Otherwise it is not run: the setup page says `Helper not trusted`
+  with the reason (`HelperTrustVerdict`) and what to do, the commands throw `HelperMissingException` with the same
+  reason, and no consent prompt is shown. `HelperInstaller` judges again when a command is run, because the file may
+  have been replaced since the page was drawn. A signature in a folder that users can write to is checked at one moment and
+  the file is launched at another; the folder rule is the one that holds.
 - `HelperInstaller` runs `plaitwayd.exe install -start` (and `uninstall`, and the reinstall) through
   `ShellElevatedLauncher`, which is `ShellExecute` with the `runas` verb: Windows asks for consent once. A declined prompt
   is a decision, not an error.
 - `DaemonSetup` reduces the connection, the service state, the versions and the executable to one `SetupKind`; the
   window shows `SetupView` for the ones that block it and a banner for the ones that do not.
 
-**Nothing in the tests or the screenshots runs the elevated command.** The tests use `FakeHelperService` and
-`FakeElevatedLauncher`; a Debug build that follows `PLAITWAY_SOCKET` uses `DisabledElevatedLauncher`.
+**Nothing in the tests or the screenshots runs the elevated command.** The tests use `FakeHelperService`,
+`FakeElevatedLauncher` and `FakeHelperTrust` (`HelperTrustTests`: every branch of the rule, the locator and the installer);
+a Debug build that follows `PLAITWAY_SOCKET` uses `DisabledElevatedLauncher`.
 
 ## Where each page lives
 
@@ -255,13 +289,13 @@ ones that need AppKit or SwiftUI have no counterpart and are listed after the ta
 
 | Swift | C# |
 |---|---|
-| importsDroppedFilesInlinesTheirReferencesAndSelectsTheLastProfile | `AppModelImportTests.ImportsDroppedFilesInlinesTheirReferencesAndSelectsTheLastProfile` |
+| importsDroppedFilesInlinesTheirReferencesAndSelectsTheLastProfile | `AppModelImportTests.ImportsDroppedFilesInlinesTheirReferencesAndSelectsTheLastProfile` (the model's import of a list of paths). The drop itself, which the Swift test does not reach either, is `ShellWindowTests.DroppedFilesAreImportedWhateverTheyAreCalledAndTheLastOneIsSelected`, `ADropReportsWhatTheDaemonRefusedAndWhatIsNotAFileOnThisPc`, `AFileDroppedTwiceIsImportedOnce`, `WhileTheHelperIsNotReadyNothingCanBeDroppedAndNoOutlineIsDrawn` and `TheWindowOutlinesItselfWhileSomethingIsDraggedOverItAndStopsWhenItIsDropped`. `DragOver` and `Drop` of the window are not under test: see [Dropping files](#dropping-files) |
 | importsAProfileWhateverItsFileIsCalled | `AppModelImportTests.ImportsAProfileWhateverItsFileIsCalled` |
 | reportsWhatWentWrongPerFile | `AppModelImportTests.ReportsWhatWentWrongPerFile` |
 | aFailedImportSelectsNothing | `AppModelImportTests.AFailedImportSelectsNothing` |
 | anAuthUserPassFileBecomesSavedCredentialsAndTheFirstConnectionDoesNotAsk | `AppModelImportTests.AnAuthUserPassFileBecomesSavedCredentialsAndTheFirstConnectionDoesNotAsk` |
 | aProfileThatNamesAFileOutsideItsFolderIsRefusedAndNothingIsStored | `AppModelImportTests.AProfileThatNamesAFileOutsideItsFolderIsRefusedAndNothingIsStored` |
-| theDaemonsReasonForRefusingAPkcs12ProfileIsShown | `AppModelImportTests.TheDaemonsReasonForRefusingAPkcs12ProfileIsShown` (needs the real engines; skipped without `PLAITWAY_REAL_DAEMON_TESTS=1`) |
+| theDaemonsReasonForRefusingAPkcs12ProfileIsShown | `AppModelImportTests.TheDaemonsReasonForRefusingAPkcs12ProfileIsShown` (starts the real daemon, without elevation and in a scratch state folder; it only parses, so it connects nothing) |
 | deletionAsksFirstAndThenSelectsAnotherProfile | `AppModelTests.DeletionAsksFirstAndThenSelectsAnotherProfile` |
 | reconcilingKeepsASelectionThatStillExists | `AppModelTests.ReconcilingKeepsASelectionThatStillExists` |
 | draggingAProfileSetsThePriorityOrder | `AppModelTests.DraggingAProfileSetsThePriorityOrder` |
@@ -278,7 +312,7 @@ ones that need AppKit or SwiftUI have no counterpart and are listed after the ta
 | aDaemonOfTheDeveloperOrOneThatIsDownIsNotAnExternalHelper | `AppModelTests.ADaemonOfTheDeveloperOrOneThatIsDownIsNotAnExternalHelper` |
 | profilesThatAreOnAreWhatQuittingLeavesRunning | `AppModelTests.ProfilesThatAreOnAreWhatQuittingLeavesRunning`, `QuitAsksWhatToDoWithTheProfilesThatAreOn`, `QuitAsksBeforeEditsThatWereNotSavedAreLost` |
 | aRefusedRenameSaysSoSoTheFieldCanGoBack | `AppModelTests.ARefusedRenameSaysSoSoTheFieldCanGoBack` |
-| followsAProfilesLogAndStopsWhenCancelled | `AppModelTests.FollowsAProfilesLogAndStopsWhenCancelled` |
+| followsAProfilesLogAndStopsWhenCancelled | `AppModelTests.FollowsAProfilesLogAndStopsWhenCancelled`; a stream that begins again replaces the lines of the one before, as `replacesEntries` does in `LogTail.swift`: `LogStreamTests` |
 | aLogOfADeletedProfileEnds | `AppModelTests.ALogOfADeletedProfileEnds` |
 | keepsTheNewestLogLinesWithinItsCapacity | `TrafficAndLogTests.KeepsTheNewestLogLinesWithinItsCapacity` |
 | showsLinesThatComeTogetherInOneUpdate | `TrafficAndLogTests.ShowsLinesThatComeTogetherInOneUpdate` |
@@ -348,7 +382,7 @@ whatever the file used: `AFileWithWindowsLineEndingsIsNotDirtyUntilItIsChanged`,
 | everyStringIsTranslatedIntoTraditionalChinese | `EveryStringIsTranslatedIntoTraditionalChineseWithTheSamePlaceholders`, `BothLanguagesHaveTheSameIdsAndNoEmptyString`, `ThePlaceholdersOfEveryStringFormatInBothLanguages` |
 | theTranslationsUseTaiwanTerms | `TheTranslationsUseTaiwanTerms` |
 | theTextCarriesNoPersonality | `TheTextCarriesNoPersonality`, `LabelsAreNounsAndShortStatesAndNeverQuestionsExceptWhereTheUserDecides` |
-| theCompiledBundleHasTheTraditionalChineseStrings | `EveryMemberResolvesInBothLanguagesAndFormatsItsArguments`, `TheGeneratedClassHasAMemberForEveryStringOfTheCatalogs` |
+| theCompiledBundleHasTheTraditionalChineseStrings | **no counterpart yet.** `EveryMemberResolvesInBothLanguagesAndFormatsItsArguments` and `TheGeneratedClassHasAMemberForEveryStringOfTheCatalogs` read the catalogs through `CatalogLocalizer`; no test loads the generated `Resources.resw` or the `.pri` of the app. What is missing is a UI test that starts the app with `--language zh-TW` and reads a string from the window (`Plaitway.App.UiTests`) |
 | sameActionSameLabel | `SameActionSameLabel` |
 
 Added: `TheCatalogsHaveNoStringInBoth`, `TheWordsOfTheMacAppAreTheWordsOfThisOne`, and the tool's own tests in

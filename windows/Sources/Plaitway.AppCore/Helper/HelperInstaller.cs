@@ -2,8 +2,14 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Plaitway.AppCore.Helper;
 
-/// <summary><c>plaitwayd.exe</c> was not found where the app looks for it.</summary>
-public sealed class HelperMissingException() : Exception("plaitwayd.exe was not found next to the app");
+/// <summary><c>plaitwayd.exe</c> was not found where the app looks for it, or was found and is not trusted to run elevated.</summary>
+/// <param name="distrust">The program that was found and refused; null when there was none.</param>
+public sealed class HelperMissingException(HelperDistrust? distrust = null)
+    : Exception(distrust is null ? "plaitwayd.exe was not found next to the app" : $"plaitwayd.exe at {distrust.Path} is not trusted: {distrust.Verdict}")
+{
+    /// <summary>The program that was found and refused; null when there was none.</summary>
+    public HelperDistrust? Distrust { get; } = distrust;
+};
 
 /// <summary>An elevated helper command ran and failed.</summary>
 /// <param name="exitCode">The exit code of <c>plaitwayd.exe</c>; its reason went to a console nobody saw.</param>
@@ -65,11 +71,23 @@ public sealed partial class HelperInstaller : ObservableObject
     /// <exception cref="HelperCommandFailedException">The command ran and failed.</exception>
     public Task<bool> UninstallAsync(CancellationToken cancellationToken = default) => RunAsync(UninstallCommand, cancellationToken);
 
-    private HelperStatus ReadStatus() => new(_service.Query(), _locator.Find());
+    private HelperStatus ReadStatus()
+    {
+        var resolution = _locator.Resolve();
+        return new HelperStatus(_service.Query(), resolution.TrustedPath, resolution.Distrust);
+    }
 
     private async Task<bool> RunAsync(string arguments, CancellationToken cancellationToken)
     {
-        var program = _locator.Find() ?? throw new HelperMissingException();
+        // Judged again here, not taken from the status: the file may have been replaced since the page was drawn.
+        var resolution = _locator.Resolve();
+        if (resolution.TrustedPath is not { } program)
+        {
+            // The page that offered this command is out of date.
+            Refresh();
+            throw new HelperMissingException(resolution.Distrust);
+        }
+
         ElevatedResult result;
         try
         {

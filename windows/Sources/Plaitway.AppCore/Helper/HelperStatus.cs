@@ -24,8 +24,9 @@ public enum HelperState
 
 /// <summary>What the app knows about the helper without asking the daemon: the service and the file it runs from.</summary>
 /// <param name="State">The service.</param>
-/// <param name="ExecutablePath">Where <c>plaitwayd.exe</c> is, or null when it is not where the app looks.</param>
-public readonly record struct HelperStatus(HelperState State, string? ExecutablePath)
+/// <param name="ExecutablePath">Where <c>plaitwayd.exe</c> is and may be run elevated, or null when it is not where the app looks or was refused.</param>
+/// <param name="Distrust">The <c>plaitwayd.exe</c> that was found and refused, and why; null when none was.</param>
+public readonly record struct HelperStatus(HelperState State, string? ExecutablePath, HelperDistrust? Distrust = null)
 {
     /// <summary>The service can be registered or started: the program exists.</summary>
     public bool HasExecutable => ExecutablePath is not null;

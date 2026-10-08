@@ -40,11 +40,18 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
     private readonly IDialogService _dialogs;
     private string? _pageKey;
     private bool _hasOfferedInstallation;
+    private bool _isWindowVisible;
 
     /// <summary>Makes the window's model.</summary>
-    public ShellViewModel(AppModel model, IClipboard clipboard, IFilePicker filePicker, IDialogService dialogs)
+    /// <param name="model">The app.</param>
+    /// <param name="clipboard">The clipboard.</param>
+    /// <param name="filePicker">The file dialog.</param>
+    /// <param name="dialogs">The dialogs.</param>
+    /// <param name="isWindowVisible">False for a start in the notification area: no page is made until the window is shown.</param>
+    public ShellViewModel(AppModel model, IClipboard clipboard, IFilePicker filePicker, IDialogService dialogs, bool isWindowVisible = true)
     {
         Model = model;
+        _isWindowVisible = isWindowVisible;
         _clipboard = clipboard;
         _filePicker = filePicker;
         _dialogs = dialogs;
@@ -115,8 +122,30 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Imports files that were dropped on the window.</summary>
-    public Task ImportFilesAsync(IReadOnlyList<string> paths) => Model.Setup.IsUsable ? Model.ImportFilesAsync(paths) : Task.CompletedTask;
+    /// <summary>Files can be dropped on the window: the helper answers and can store them.</summary>
+    public bool CanAcceptDrop => Model.Setup.IsUsable;
+
+    /// <summary>Something that can be dropped is over the window.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsDropHint))]
+    public partial bool IsDropTargeted { get; private set; }
+
+    /// <summary>The window outlines itself to say that a drop imports: the accent border of the drop on macOS.</summary>
+    public bool ShowsDropHint => IsDropTargeted && CanAcceptDrop;
+
+    /// <summary>What a drag does while it is over the window: the view sets it on enter and leave.</summary>
+    public void SetDropTargeted(bool isTargeted) => IsDropTargeted = isTargeted;
+
+    /// <summary>Imports what was dropped on the window; files only, and the items that are not files are reported.</summary>
+    public async Task DropAsync(IEnumerable<DroppedItem> items)
+    {
+        // The drag is over; no event says so after a drop.
+        IsDropTargeted = false;
+        if (CanAcceptDrop)
+        {
+            await Model.ImportDroppedAsync(DropBatch.Of(items, Text));
+        }
+    }
 
     /// <summary>Switches every profile off; one that stays on is reported.</summary>
     [RelayCommand]
@@ -128,6 +157,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
     /// </summary>
     public void SetWindowVisible(bool isVisible)
     {
+        _isWindowVisible = isVisible;
         if (isVisible)
         {
             ShowPage();
@@ -246,6 +276,8 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
             case nameof(AppModel.Setup):
                 RefreshBanner();
                 OfferInstallationOnce();
+                OnPropertyChanged(nameof(CanAcceptDrop));
+                OnPropertyChanged(nameof(ShowsDropHint));
                 break;
             case nameof(AppModel.KeepsProfilesInView):
                 RefreshBanner();
@@ -300,6 +332,13 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
     private void ShowPage()
     {
+        // A selection can change while the window is hidden (another client deletes the profile, the first snapshot
+        // arrives): a page made then would follow a log for nobody.
+        if (!_isWindowVisible)
+        {
+            return;
+        }
+
         var key = Model.Selection switch
         {
             SidebarItem.ProfileItem item when Model.Store.Find(item.Id) is not null => "profile:" + item.Id,

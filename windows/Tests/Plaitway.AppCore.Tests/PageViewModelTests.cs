@@ -457,4 +457,43 @@ public sealed class PageViewModelTests(DaemonBinary binary)
             return Task.CompletedTask;
         });
     }
+
+    [Fact]
+    public async Task AfterASaveThatStoresExactlyWhatWasTypedRevertAndSaveAreOffAndTheOldTextIsFlagged()
+    {
+        await using var app = await AppHarness.StartAsync(binary);
+        await app.RunAsync(async () =>
+        {
+            var id = await app.ImportFixtureAsync("home.conf", Fixture.WireGuard());
+            await app.Store.SetEnabledAsync(id, enabled: true);
+            await app.WaitForStateAsync(id, ProfileState.Connected);
+            using var configuration = new ConfigurationViewModel(app.Model, id);
+            configuration.Activate();
+            await Wait.UntilAsync("the text", () => configuration.IsReady);
+
+            configuration.Content += "# a note\n";
+            Assert.True(configuration.IsDirty);
+            Assert.True(configuration.SaveCommand.CanExecute(null));
+            var changed = new List<string?>();
+            configuration.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+            await configuration.SaveCommand.ExecuteAsync(null);
+
+            // IsDirty drives the Revert button; the text is the same as before the save, so no change of it says so.
+            Assert.DoesNotContain(nameof(ConfigurationViewModel.Content), changed);
+            Assert.False(configuration.IsDirty);
+            Assert.Contains(nameof(ConfigurationViewModel.IsDirty), changed);
+            Assert.False(configuration.CanSave);
+            Assert.Contains(nameof(ConfigurationViewModel.CanSave), changed);
+            Assert.False(configuration.SaveCommand.CanExecute(null));
+            Assert.False(configuration.SaveAndReconnectCommand.CanExecute(null));
+            Assert.True(configuration.RunsOldText);
+            Assert.False(configuration.IsSaving);
+
+            configuration.Content += "# more\n";
+            Assert.True(configuration.IsDirty);
+            Assert.False(configuration.RunsOldText, "the note is about the saved text, not about a new edit");
+            Assert.True(configuration.SaveCommand.CanExecute(null));
+        });
+    }
 }

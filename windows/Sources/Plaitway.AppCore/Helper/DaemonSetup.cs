@@ -53,7 +53,9 @@ public readonly record struct SetupInputs(
 /// <param name="DaemonVersion">For <see cref="SetupKind.VersionMismatch"/>, the daemon's.</param>
 /// <param name="AppVersion">For <see cref="SetupKind.VersionMismatch"/>, the app's.</param>
 /// <param name="Cause">For <see cref="SetupKind.NotResponding"/>, why the daemon cannot be used.</param>
-public readonly record struct DaemonSetup(SetupKind Kind, string? DaemonVersion = null, string? AppVersion = null, DaemonFailureKind? Cause = null)
+/// <param name="Distrust">For <see cref="SetupKind.HelperMissing"/>, the program that was found and refused; null when none was found.</param>
+public readonly record struct DaemonSetup(
+    SetupKind Kind, string? DaemonVersion = null, string? AppVersion = null, DaemonFailureKind? Cause = null, HelperDistrust? Distrust = null)
 {
     /// <summary>The daemon answers.</summary>
     public static DaemonSetup Ready { get; } = new(SetupKind.Ready);
@@ -98,7 +100,8 @@ public readonly record struct DaemonSetup(SetupKind Kind, string? DaemonVersion 
         // While connecting, a helper that something else installed or started may be about to answer.
         return inputs.Helper.State switch
         {
-            HelperState.NotInstalled when !inputs.Helper.HasExecutable => isConnecting ? Connecting : new DaemonSetup(SetupKind.HelperMissing),
+            HelperState.NotInstalled when !inputs.Helper.HasExecutable =>
+                isConnecting ? Connecting : new DaemonSetup(SetupKind.HelperMissing, Distrust: inputs.Helper.Distrust),
             HelperState.NotInstalled => isConnecting ? Connecting : new DaemonSetup(SetupKind.NeedsInstall),
             HelperState.Stopped => isConnecting || inputs.IsSettling ? Connecting : new DaemonSetup(SetupKind.Stopped),
             HelperState.Starting => Connecting,

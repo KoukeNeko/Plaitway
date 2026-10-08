@@ -32,7 +32,14 @@ public sealed partial class AppModel
     }
 
     /// <summary>Imports the files in order and selects the last profile that was stored.</summary>
-    public async Task ImportFilesAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
+    public Task ImportFilesAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
+        ImportAsync(paths, [], cancellationToken);
+
+    /// <summary>Imports what was dropped on the window; the items that are not files are reported with the failures of the others.</summary>
+    public Task ImportDroppedAsync(DropBatch batch, CancellationToken cancellationToken = default) =>
+        ImportAsync(batch.Files, batch.Ignored, cancellationToken);
+
+    private async Task ImportAsync(IEnumerable<string> paths, IReadOnlyList<ImportOutcome> ignored, CancellationToken cancellationToken)
     {
         List<ImportOutcome> outcomes = [];
         string? lastImported = null;
@@ -53,6 +60,7 @@ public sealed partial class AppModel
             }
         }
 
+        outcomes.AddRange(ignored);
         var report = new ImportReport(outcomes);
         if (report.NeedsAttention)
         {

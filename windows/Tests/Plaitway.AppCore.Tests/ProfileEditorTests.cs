@@ -387,4 +387,32 @@ public sealed class ProfileEditorTests(DaemonBinary binary)
             Assert.False(editor.IsDirty);
         });
     }
+
+    [Fact]
+    public async Task ASaveThatStoresExactlyWhatWasTypedStillTellsThePageThatNothingIsEditedAnyMore()
+    {
+        await using var app = await AppHarness.StartAsync(binary);
+        await app.RunAsync(async () =>
+        {
+            var (editor, _) = await LoadedWireGuardAsync(app);
+            editor.Text += "# a note\n";
+            Assert.True(editor.IsDirty);
+            var changed = new List<string?>();
+            editor.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+            Assert.True(await editor.SaveAsync(app.Store, reconnect: false, isOn: true));
+
+            // The daemon stored the text as it was typed, so the text did not change; the page learns it from the others.
+            Assert.DoesNotContain(nameof(ProfileEditor.Text), changed);
+            Assert.False(editor.IsDirty);
+            Assert.Contains(nameof(ProfileEditor.IsDirty), changed);
+            Assert.True(editor.RunsOldText);
+            Assert.Contains(nameof(ProfileEditor.RunsOldText), changed);
+            Assert.False(editor.IsSaving);
+            Assert.Contains(nameof(ProfileEditor.IsSaving), changed);
+
+            // The notification that ends the edit comes after the save is over, or the Save button would stay disabled.
+            Assert.Equal(nameof(ProfileEditor.IsSaving), changed[^1]);
+        });
+    }
 }

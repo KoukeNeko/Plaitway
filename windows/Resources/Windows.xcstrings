@@ -31,6 +31,86 @@
         }
       }
     },
+    "Helper not trusted" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式不受信任"
+          }
+        }
+      }
+    },
+    "Install Plaitway again in a folder that only administrators can change." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請將 Plaitway 重新安裝到只有系統管理員能變更的資料夾。"
+          }
+        }
+      }
+    },
+    "Not a file on this PC" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不是這台電腦上的檔案"
+          }
+        }
+      }
+    },
+    "The folder of the helper file could not be checked: %@" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法檢查輔助程式檔案所在的資料夾：%@"
+          }
+        }
+      }
+    },
+    "The helper file is in a folder that standard users can change: %@" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式檔案所在的資料夾可由標準使用者變更：%@"
+          }
+        }
+      }
+    },
+    "The helper file is not on a local disk: %@" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式檔案不在本機磁碟上：%@"
+          }
+        }
+      }
+    },
+    "The helper file is signed by an unexpected publisher: %@" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式檔案由非預期的發行者簽署：%@"
+          }
+        }
+      }
+    },
+    "The signature of the helper file is not valid: %@" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輔助程式檔案的簽章無效：%@"
+          }
+        }
+      }
+    },
     "Running" : {
       "localizations" : {
         "zh-Hant" : {

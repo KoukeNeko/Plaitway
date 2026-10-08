@@ -50,6 +50,33 @@ internal sealed class FakeElevatedLauncher : IElevatedLauncher
     }
 }
 
+/// <summary>What Windows says about the helper file, as the test sets it; the folder is admin-only until it says otherwise.</summary>
+internal sealed class FakeHelperTrust : IHelperTrust
+{
+    private readonly List<string> _signatureAsks = [];
+
+    public FolderProtection Folder { get; set; } = FolderProtection.AdminOnly;
+
+    public FileSignature Signature { get; set; } = FileSignature.NotSigned;
+
+    public int FolderAsked { get; private set; }
+
+    /// <summary>The files whose signature was looked at, with the publisher that was expected.</summary>
+    public IReadOnlyList<string> SignatureAsks => _signatureAsks;
+
+    public FolderProtection InspectFolder(string executablePath)
+    {
+        FolderAsked++;
+        return Folder;
+    }
+
+    public FileSignature InspectSignature(string executablePath, string expectedPublisher)
+    {
+        _signatureAsks.Add($"{executablePath}|{expectedPublisher}");
+        return Signature;
+    }
+}
+
 /// <summary>The startup list, in memory.</summary>
 internal sealed class FakeStartup : IStartupRegistration
 {

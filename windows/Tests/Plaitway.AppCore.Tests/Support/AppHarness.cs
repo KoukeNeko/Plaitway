@@ -49,9 +49,11 @@ internal sealed class AppHarness : IAsyncDisposable
         Startup = new FakeStartup();
         Text = TestText.En;
         Api = new DaemonClientApi(DaemonClient.Connect(daemon.Pipe, FastBackoff));
-        var locator = new HelperLocator(@"C:\Plaitway\app", _ => options.HasExecutable);
+        Calls = new RecordingDaemonApi(Api);
+        Trust = new FakeHelperTrust();
+        var locator = new HelperLocator(@"C:\Plaitway\app", _ => options.HasExecutable, Trust, searchesRepository: false);
         Installer = new HelperInstaller(Service, Launcher, locator);
-        Store = new ProfileStore(Api, Credentials, Ui, NullLogger<ProfileStore>.Instance);
+        Store = new ProfileStore(Calls, Credentials, Ui, NullLogger<ProfileStore>.Instance);
         Model = new AppModel(
             Store, Installer, Startup, Text, new AppEnvironment(options.AppVersion, options.IsOverridden), TimeProvider.System, NullLogger<AppModel>.Instance);
     }
@@ -71,6 +73,12 @@ internal sealed class AppHarness : IAsyncDisposable
     public UiText Text { get; }
 
     public DaemonClientApi Api { get; }
+
+    /// <summary>What the store asked the daemon.</summary>
+    public RecordingDaemonApi Calls { get; }
+
+    /// <summary>What Windows says about the helper file; trusted unless a test says otherwise.</summary>
+    public FakeHelperTrust Trust { get; }
 
     public HelperInstaller Installer { get; }
 

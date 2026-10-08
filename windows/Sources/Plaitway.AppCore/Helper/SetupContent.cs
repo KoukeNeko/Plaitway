@@ -50,7 +50,7 @@ public static class SetupPresentation
         SetupKind.Connecting => text.Connecting,
         SetupKind.NeedsInstall => text.HelperNotInstalled,
         SetupKind.Stopped => text.HelperStopped,
-        SetupKind.HelperMissing => text.HelperNotFound,
+        SetupKind.HelperMissing => setup.Distrust is null ? text.HelperNotFound : text.HelperNotTrusted,
         _ => text.HelperUnavailable,
     };
 
@@ -62,11 +62,15 @@ public static class SetupPresentation
         SetupKind.NeedsInstall => new SetupContent(
             StatusIcon.Idle, text.HelperNotInstalled, text.TheHelperManagesRoutesAndDNSWithAdministratorRightsWindowsAsksForConfirmationOnce, false, SetupAction.InstallHelper, null),
         SetupKind.Stopped => new SetupContent(StatusIcon.Idle, text.HelperStopped, null, false, SetupAction.StartHelper, null),
-        SetupKind.HelperMissing => new SetupContent(
-            StatusIcon.Unavailable, text.HelperNotFound, text.TheHelperFileIsMissingFromThisCopyOfPlaitwayInstallPlaitwayAgain, false, SetupAction.Retry, null),
+        SetupKind.HelperMissing => MissingHelper(setup, text),
         SetupKind.NotResponding => NotResponding(setup, text),
         _ => new SetupContent(StatusIcon.Unavailable, text.HelperUnavailable, text.StartPlaitwaydAndSetPLAITWAYSOCKET, false, SetupAction.Retry, null),
     };
+
+    private static SetupContent MissingHelper(DaemonSetup setup, UiText text) => setup.Distrust is { } distrust
+        ? new SetupContent(StatusIcon.Unavailable, text.HelperNotTrusted, distrust.Describe(text), false, SetupAction.Retry, null)
+        : new SetupContent(
+            StatusIcon.Unavailable, text.HelperNotFound, text.TheHelperFileIsMissingFromThisCopyOfPlaitwayInstallPlaitwayAgain, false, SetupAction.Retry, null);
 
     private static SetupContent NotResponding(DaemonSetup setup, UiText text)
     {

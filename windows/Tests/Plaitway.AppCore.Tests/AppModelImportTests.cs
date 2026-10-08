@@ -162,15 +162,11 @@ public sealed class AppModelImportTests(DaemonBinary binary)
         });
     }
 
-    // The fake backend takes any profile; the real parser is what refuses a file reference.
+    // The fake backend takes any profile; the real parser is what refuses a file reference. The real daemon is started
+    // without elevation and only parses here: it connects nothing, so it touches no route, DNS entry or adapter.
     [Fact]
     public async Task TheDaemonsReasonForRefusingAPkcs12ProfileIsShown()
     {
-        if (Environment.GetEnvironmentVariable("PLAITWAY_REAL_DAEMON_TESTS") != "1")
-        {
-            Assert.Skip("needs the daemon's real engines; set PLAITWAY_REAL_DAEMON_TESTS=1 where they exist (macOS only so far)");
-        }
-
         await using var app = await AppHarness.StartAsync(binary, new HarnessOptions { Fake = false });
         using var directory = TempDirectory.With(new Dictionary<string, string>
         {

@@ -246,4 +246,32 @@ public sealed class PresentationTests
         Assert.Contains("203.0.113.9/32 via 192.168.0.254 Ethernet: the gateway is not on the interface's subnet (installed by Plaitway)", report, StringComparison.Ordinal);
         Assert.Contains("Plaitway-p1 corp.example 10.20.0.1", report, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(0UL, "0 B")]
+    [InlineData(999UL, "999 B")]
+    [InlineData(1_000UL, "1.0 KB")]
+    [InlineData(1_500UL, "1.5 KB")]
+    [InlineData(9_949UL, "9.9 KB")]
+    [InlineData(9_950UL, "10 KB")]
+    [InlineData(99_949UL, "100 KB")]
+    [InlineData(999_499UL, "999 KB")]
+
+    // The label would read 1000 KB: it is already a megabyte, as in Explorer.
+    [InlineData(999_500UL, "1.0 MB")]
+    [InlineData(999_999UL, "1.0 MB")]
+    [InlineData(1_000_000UL, "1.0 MB")]
+    [InlineData(999_499_999UL, "999 MB")]
+    [InlineData(999_500_000UL, "1.0 GB")]
+    [InlineData(999_999_999UL, "1.0 GB")]
+    [InlineData(1_000_000_000UL, "1.0 GB")]
+    [InlineData(999_500_000_000UL, "1.0 TB")]
+    [InlineData(999_999_999_999UL, "1.0 TB")]
+    [InlineData(999_500_000_000_000UL, "1.0 PB")]
+    [InlineData(999_500_000_000_000_000UL, "1.0 EB")]
+    [InlineData(ulong.MaxValue, "18 EB")]
+    public void ByteCountsRollOverToTheNextUnitAtTheEdgeOfWhatTheLabelCanShow(ulong count, string expected)
+    {
+        Assert.Equal(expected, Formatting.Bytes(count, English));
+    }
 }
