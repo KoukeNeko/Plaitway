@@ -1,0 +1,111 @@
+name: Publish packages
+
+# Updates the Homebrew cask (macOS) in KoukeNeko/homebrew-tap and the Scoop manifest (Windows) in
+# KoukeNeko/scoop-bucket. The release workflow calls this after every stable tag; run it by hand to
+# backfill or repair a published release.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Published stable release tag, for example v0.2.0.
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: true
+      SCOOP_BUCKET_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published stable release tag, for example v0.2.0.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each entry is one commit, so files sharing a repository are rendered by one job
+          # instead of racing to push.
+          - package: homebrew
+            repo: KoukeNeko/homebrew-tap
+            token: HOMEBREW_TAP_TOKEN
+            files: scripts/render-homebrew-cask.sh:Casks/plaitway.rb
+          - package: scoop
+            repo: KoukeNeko/scoop-bucket
+            token: SCOOP_BUCKET_TOKEN
+            files: scripts/render-scoop-manifest.sh:bucket/plaitway.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          # The version may come from a manual run, so it is validated before it reaches any command.
+          case "$VERSION" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::version must look like v1.2.3" >&2; exit 1 ;;
+          esac
+          case "$VERSION" in
+            *-*) echo "::error::$VERSION is a pre-release; packages track stable releases only" >&2; exit 1 ;;
+          esac
+          if ! gh release view "$VERSION" --json isPrerelease --jq '.isPrerelease' | grep -qx false; then
+            echo "::error::$VERSION is not a published stable release" >&2
+            exit 1
+          fi
+          gh release download "$VERSION" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+      - name: Check repository access
+        env:
+          GH_TOKEN: ${{ secrets[matrix.token] }}
+          REPO: ${{ matrix.repo }}
+          TOKEN_NAME: ${{ matrix.token }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "::error::$TOKEN_NAME is not set" >&2; exit 1; }
+          if ! push="$(gh api "repos/$REPO" --jq '.permissions.push' 2>&1)"; then
+            echo "::error::$TOKEN_NAME cannot read $REPO. Check that the token grants access to it." >&2
+            exit 1
+          fi
+          if [ "$push" != "true" ]; then
+            echo "::error::$TOKEN_NAME can read $REPO but cannot push. Grant it Contents: Read and write." >&2
+            exit 1
+          fi
+      - name: Render
+        env:
+          VERSION: ${{ inputs.version }}
+          FILES: ${{ matrix.files }}
+        run: |
+          for entry in $FILES; do
+            script="${entry%%:*}" target="${entry#*:}"
+            mkdir -p "$RUNNER_TEMP/rendered/$(dirname "$target")"
+            "$script" "$VERSION" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/rendered/$target"
+            cat "$RUNNER_TEMP/rendered/$target"
+          done
+      - name: Push
+        env:
+          TOKEN: ${{ secrets[matrix.token] }}
+          REPO: ${{ matrix.repo }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          checkout="$RUNNER_TEMP/package-repo"
+          git clone --depth 1 "https://x-access-token:$TOKEN@github.com/$REPO.git" "$checkout" 2>/dev/null
+          cp -R "$RUNNER_TEMP/rendered/." "$checkout/"
+          cd "$checkout"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "$REPO already carries plaitway $VERSION."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "plaitway $VERSION"
+          git push
+      - name: Remove the checkout
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/package-repo"

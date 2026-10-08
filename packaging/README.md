@@ -188,3 +188,28 @@ a spare Mac or a macOS 15 VM.
 
 The development and the production build share the bundle identifier and the daemon label. Two copies of the app on one
 Mac, or a script install next to an app registration, compete for one launchd label.
+
+## Releasing
+
+`.github/workflows/release.yml` makes a release. Set `VERSION`, commit and push it, then push a tag that matches it:
+
+```bash
+git tag -s v0.3.0 -m "Plaitway 0.3.0"
+git push origin v0.3.0
+```
+
+The workflow runs the tests, builds and signs the app (`make app`), notarizes and staples it and the dmg
+(`notarize.sh`), checks the bundle (`make verify`), builds the Windows command line and helper for amd64 and
+arm64, creates the GitHub release with the zip, the dmg, the two Windows zips and `SHA256SUMS`, and then
+`packages.yml` updates `Casks/plaitway.rb` in `KoukeNeko/homebrew-tap` and `bucket/plaitway.json` in
+`KoukeNeko/scoop-bucket` from the release's checksums. Run by hand (Actions › Release › Run workflow) it builds and
+signs but publishes nothing and keeps the files as an artifact. Actions › Publish packages redoes the two package
+files of a release that is already published.
+
+| Secret | Used for |
+|---|---|
+| `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERT_PASSWORD` | the Developer ID Application certificate and its password; the first identity in the file signs |
+| `ASC_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | the App Store Connect API key that notarizes |
+| `HOMEBREW_TAP_TOKEN`, `SCOOP_BUCKET_TOKEN` | pushing to the tap and to the bucket; each needs Contents: Read and write on its repository |
+
+The Windows files are not signed: there is no Windows code-signing certificate among the secrets.

@@ -1,0 +1,196 @@
+name: Release
+
+# Pushing a tag vX.Y.Z, where X.Y.Z is the VERSION file, builds, signs and notarizes the macOS app,
+# builds the Windows command line and helper, publishes the GitHub release, and then updates the
+# Homebrew cask and the Scoop manifest (packages.yml). Run by hand it does everything up to
+# publishing and keeps the files as an artifact, which is how to try the pipeline.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A release in progress is not abandoned for a newer one: its files are half made and its tag exists.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      # The Xcode the app is released with, not whichever one the image happens to default to.
+      - name: Select Xcode 27.0
+        run: |
+          xcode_app=""
+          for app in /Applications/Xcode_27.0*.app; do
+            [ -d "$app" ] && xcode_app="$app"
+          done
+          [ -n "$xcode_app" ] || { echo "::error::Xcode 27.0 is not installed on this image" >&2; exit 1; }
+          sudo xcode-select --switch "$xcode_app/Contents/Developer"
+          xcodebuild -version
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # Before the signing key is installed, so that a failing test costs nothing and touches no secret.
+      - run: go test -count=1 ./...
+      - run: make test-packaging
+
+      # A temporary keychain holds the Developer ID certificate. packaging/lib.sh signs with the
+      # identity in PLAITWAY_SIGN_IDENTITY, and notarize.sh submits with the API key in
+      # PLAITWAY_NOTARY_KEY, PLAITWAY_NOTARY_KEY_ID and PLAITWAY_NOTARY_ISSUER.
+      - name: Install the signing certificate and the notarization key
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERT_PASSWORD ASC_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID; do
+            [ -n "${!name}" ] || { echo "::error::the secret $name is not set" >&2; exit 1; }
+          done
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          keychain_password="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          echo "$ASC_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          # Keep the existing keychains searchable; the list is split on purpose.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+          # By hash: two certificates can share the Developer ID name (packaging/lib.sh).
+          identities="$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ {print $2}')"
+          identity="$(head -n 1 <<<"$identities")"
+          if [ -z "$identity" ]; then
+            echo "::error::MACOS_CERTIFICATE_P12_BASE64 contains no Developer ID Application certificate" >&2
+            exit 1
+          fi
+          if [ "$(wc -l <<<"$identities" | tr -d ' ')" -gt 1 ]; then
+            echo "::warning::the certificate file holds more than one Developer ID Application identity; signing with $identity"
+          fi
+          {
+            echo "PLAITWAY_SIGN_IDENTITY=$identity"
+            echo "PLAITWAY_NOTARY_KEY=$RUNNER_TEMP/AuthKey.p8"
+            echo "PLAITWAY_NOTARY_KEY_ID=$APPLE_API_KEY_ID"
+            echo "PLAITWAY_NOTARY_ISSUER=$APPLE_API_ISSUER_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and sign the app
+        run: make app
+      - name: Notarize and staple, then rebuild the zip and dmg
+        run: packaging/notarize.sh
+      - name: Verify the bundle
+        run: make verify
+
+      - name: Remove the signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/AuthKey.p8"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: |
+            build/Plaitway-${{ env.VERSION }}.zip
+            build/Plaitway-${{ env.VERSION }}.dmg
+          if-no-files-found: error
+
+  # Go builds for Windows without a Windows machine. Nothing here is signed: there is no Windows
+  # code-signing certificate among the secrets.
+  windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          for arch in amd64 arm64; do
+            dir="Plaitway-$VERSION-windows-$arch"
+            mkdir "$dir"
+            for command in plaitway plaitwayd; do
+              CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go build -trimpath -buildvcs=false \
+                -ldflags "-s -w -X main.version=$VERSION" -o "$dir/$command.exe" "./cmd/$command"
+            done
+            cp LICENSE "$dir/"
+            (cd "$dir" && zip -q "../$dir.zip" -- *)
+          done
+          ls -l ./*.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: Plaitway-*-windows-*.zip
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      # The Homebrew and Scoop files, and Scoop's autoupdate, read their hashes from here.
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS
+      - name: Release notes
+        run: |
+          {
+            cat packaging/release-notes.md
+            printf '\n## Checksums (SHA-256)\n\n```\n'
+            cat dist/SHA256SUMS
+            printf '```\n'
+          } > "$RUNNER_TEMP/notes.md"
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Plaitway ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
+
+  packages:
+    needs: publish
+    permissions:
+      contents: read
+    uses: ./.github/workflows/packages.yml
+    with:
+      version: ${{ github.ref_name }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
