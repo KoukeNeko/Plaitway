@@ -414,6 +414,17 @@ struct StatusPresentationTests {
         #expect(Set(ProfileSection.allCases.map(\.label)).count == ProfileSection.allCases.count)
     }
 
+    /// The system spells nothing out as a word in English: "Zero kB/s".
+    @Test(arguments: ["en", "en_TW", "zh_Hant_TW", "ja_TW"])
+    func writesNothingAsADigit(language: String) {
+        let locale = Locale(identifier: language)
+        let digits = CharacterSet.decimalDigits
+        for text in [Formatting.bytes(0, locale: locale), Formatting.rate(0, locale: locale), Formatting.rate(0.4, locale: locale)] {
+            #expect(text.unicodeScalars.contains { digits.contains($0) }, "\(language): \(text)")
+            #expect(!text.localizedCaseInsensitiveContains("zero"), "\(language): \(text)")
+        }
+    }
+
     @Test func formatsARateAndLeavesTheLogTimeTheSameWidth() {
         #expect(Formatting.rate(1_500_000).contains("MB"))
         #expect(Formatting.rate(0).contains("/"), "a rate says per what")

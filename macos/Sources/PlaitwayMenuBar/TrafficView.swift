@@ -37,7 +37,7 @@ struct TrafficView: View {
                     name.foregroundStyle(.secondary)
                 }
                 .font(.caption)
-                Text(verbatim: rate.map(Formatting.rate) ?? "–")
+                Text(verbatim: rate.map { Formatting.rate($0) } ?? "–")
                     .font(.title3.weight(.semibold))
                     .monospacedDigit()
                 Text(verbatim: Formatting.bytes(total))

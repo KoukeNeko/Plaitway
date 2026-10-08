@@ -2,14 +2,19 @@ import Foundation
 import PlaitwayClient
 
 enum Formatting {
-    /// Decimal units, as Finder counts them.
-    static func bytes(_ count: UInt64) -> String {
-        Int64(clamping: count).formatted(.byteCount(style: .file))
+    /// Decimal units, as Finder counts them. Nothing is written as a digit: the system spells it out
+    /// as a word in English ("Zero kB"), which is no way to read a rate that is mostly nothing.
+    static func bytes(_ count: UInt64, locale: Locale = .current) -> String {
+        amount(Int64(clamping: count), locale: locale)
     }
 
-    static func rate(_ bytesPerSecond: Double) -> String {
-        let amount = Int64(bytesPerSecond.rounded()).formatted(.byteCount(style: .file))
-        return String(localized: "\(amount)/s", bundle: .module)
+    static func rate(_ bytesPerSecond: Double, locale: Locale = .current) -> String {
+        let text = amount(Int64(bytesPerSecond.rounded()), locale: locale)
+        return String(localized: "\(text)/s", bundle: .module)
+    }
+
+    private static func amount(_ count: Int64, locale: Locale) -> String {
+        count.formatted(.byteCount(style: .file, spellsOutZero: false).locale(locale))
     }
 
     /// "host:port (tcp)" for an endpoint of a profile.
