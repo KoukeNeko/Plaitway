@@ -217,8 +217,8 @@ removes it.
 - Profiles that use `pkcs12` or `secret` are refused, and so are directives
   that run programs or read files outside the profile
 
-Windows and Linux (Wails v3 windows on the same helper) are planned. Nothing
-of them is built yet.
+Windows and Linux (Wails v3 windows on the same helper) are planned. Of Windows
+only the helper and the command line client exist, see [Windows](#windows).
 
 ---
 
@@ -240,12 +240,15 @@ plaitway/
 ├── internal/
 │   ├── manager             Profile lifecycle, settings, on-demand, logs, status
 │   ├── profile             Profile store on disk and content checks
+│   ├── fsperm              Private files and directories: mode bits, and on
+│   │                       Windows an access list
 │   ├── ovpn                OpenVPN engine over the management interface
 │   ├── wg                  WireGuard engine on embedded wireguard-go
 │   ├── reconciler          The only code that changes routes and DNS
 │   ├── osnet               Adapter interfaces; macos/ (PF_ROUTE, scutil) and fake/
 │   ├── tunnel              The contracts between engines, adapters and Reconciler
-│   ├── transport, peercred Unix socket serving and the caller's identity
+│   ├── transport, peercred Unix socket or named pipe serving and the caller's
+│   │                       identity
 │   └── gen                 Generated Go code
 ├── proto/plaitway/v1       plaitway.proto, the only hand-written API definition
 └── packaging/, scripts/    The signed bundle, notarization, install scripts
@@ -331,7 +334,8 @@ could not do without a hand-written event type.
 
 ## Development
 
-Requirements: Go 1.27.1, Xcode 27 (Swift 6.4), macOS 15 or later.
+Requirements: Go 1.27.1, Xcode 27 (Swift 6.4), macOS 15 or later. The Go
+packages also build and test on Windows, see [Windows](#windows).
 
 ```bash
 make test      # Go tests, then the Swift tests against a fake daemon
@@ -381,6 +385,77 @@ Files on a machine: profiles and the route journal in
 `/Library/Application Support/Plaitway`, the helper's log in
 `/Library/Logs/Plaitway/plaitwayd.log` (readable by root only), the socket in
 `/var/run/plaitway`.
+
+## Windows
+
+`plaitwayd` and `plaitway` build and run on Windows. The daemon
+serves the in-memory backend (`-fake`) only; without `-fake` it exits with
+"real engines are only available on macOS". There is no Windows app.
+
+| | Windows |
+|---|---|
+| Control pipe | `\\.\pipe\plaitway`. `-socket` and `PLAITWAY_SOCKET` take another name under `\\.\pipe\`; the daemon and the client refuse any other value |
+| Privileged daemon | State in `%ProgramData%\Plaitway`, run directory in `%ProgramData%\Plaitway\run`, log in `%ProgramData%\Plaitway\Logs\plaitwayd.log` |
+| Development daemon | State in `plaitway-state` and run directory in `plaitway-run`, both below `%TEMP%`; stderr only |
+
+**Privilege is the elevation of the process token.** LocalSystem and an
+elevated administrator are privileged and use the `%ProgramData%` locations; an
+administrator's ordinary shell has a filtered token, is not privileged and gets
+the development locations. `%ProgramData%` is asked of the shell, not read from
+the environment.
+
+**Files are private by access list.** The state, run and log directories and
+the log file have a protected access list (it takes nothing from the parent;
+the entries of a directory pass to the files created in it) for SYSTEM and
+Administrators, plus the daemon's own user when the process is not elevated,
+so that a development daemon can use its directories. `-socket-mode` is
+accepted and ignored.
+
+**The pipe has its own access list.** It denies network logons first, gives
+SYSTEM, Administrators and the daemon's user full control, and gives
+interactive users read and write, without the right to create another instance
+of the pipe. Remote clients are rejected. The client connects at identification
+level and checks the owner of the pipe before it sends anything: SYSTEM,
+Administrators or the calling user, so that a pipe squatted by another user
+receives no request.
+
+**The caller is identified by the token of the pipe client, not by its pid.**
+The daemon reads the user SID, the Administrators group and the logon session
+from it; a client that connects anonymously is refused. The authorization
+follows the macOS one:
+
+| Level | Calls | Caller |
+|---|---|---|
+| Modify | Import, edit, delete and reorder profiles, read a profile's text, remove a route | Administrator: the Administrators group is enabled in the token, or deny-only, which is how an administrator's unelevated shell carries it |
+| Connect | Read state and logs, connect and disconnect, answer credential requests, resync | An administrator, or a caller in the active console session; a machine without one refuses non-administrators |
+
+**The command line differs in two places.** `plaitway edit` runs `$VISUAL`,
+else `$EDITOR`, else `notepad` (`vi` elsewhere). The variable is read as a
+Windows command line, where double quotes group and a backslash belongs to a
+path; a value that is the path of an existing file is not split, so an unquoted
+path with spaces works. `-socket` and `PLAITWAY_SOCKET` must start with
+`\\.\pipe\`.
+
+**Tests.** `go test ./...` runs on Windows without a tag; files for one system
+carry a `_windows` suffix or a `//go:build` line (`unix`, `!windows`). The
+engine tests that run a fake `openvpn`, and the tests of the Unix socket, run
+only on Unix. A test that needs what the session lacks (a console, permission
+to create symbolic links, a real `openvpn`) skips and says why.
+To run the Unix tests from a Windows machine, cross-compile a package's
+test binary and run it in WSL from the package directory:
+
+```powershell
+$env:GOOS = 'linux'; $env:GOARCH = 'amd64'
+go test -c -o bin\ovpn.linux.test .\internal\ovpn
+Remove-Item Env:GOOS, Env:GOARCH
+wsl --cd /mnt/e/dev/plaitway/internal/ovpn -- ../../bin/ovpn.linux.test
+```
+
+The tests of `cmd/plaitway` start `go build` for both programs. A WSL
+distribution without Go needs an executable named `go` first on `PATH` that
+copies Linux builds of `plaitway` and `plaitwayd` to the `-o` path it is given.
+The `rootintegration` tag (see [Development](#development)) is for macOS and
+Linux as root.
 
 ## Verified on real hardware, and what is not
 
@@ -454,8 +529,9 @@ menu and the command line work without it.
 - Credentials are always remembered in the login Keychain; there is no opt-out
 - The helper's log is rotated when it starts, not while it runs
 - A corrupt `profiles.json` stops the helper instead of being recovered
-- Windows named-pipe code compiles but has not been run and has no caller
-  identity check
+- Windows: the daemon runs the `-fake` backend only. The OpenVPN and
+  WireGuard engines, the route table, DNS, the network monitor, Windows service
+  integration and the check of the OpenVPN binary are not implemented
 
 <p>
   <img alt="Go" src="https://img.shields.io/badge/GO-1.27-00ADD8?style=for-the-badge&logo=go&logoColor=white">
