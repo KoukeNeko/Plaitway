@@ -18,10 +18,14 @@
     <DefaultLanguage>en-US</DefaultLanguage>
     <UseWinUI>true</UseWinUI>
     <!-- Unpackaged: no MSIX, no identity, started like any exe. Framework-dependent by default; publish with
-         -p:WindowsAppSDKSelfContained=true -p:SelfContained=true for a copy that carries its own runtime. -->
+         -p:PlaitwaySelfContained=true for a copy that carries its own runtime. SelfContained itself is not passed on the
+         command line: a global property would reach the localization tool that this project builds first, and the
+         publish would then find two builds of the tool. -->
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <SelfContained>false</SelfContained>
+    <WindowsAppSDKSelfContained Condition="'$(PlaitwaySelfContained)' == 'true'">true</WindowsAppSDKSelfContained>
+    <SelfContained Condition="'$(PlaitwaySelfContained)' == 'true'">true</SelfContained>
     <!-- The strings of the XAML and of the code come from the catalogs (Tools\Localization.targets). -->
     <GenerateResw>true</GenerateResw>
   </PropertyGroup>
