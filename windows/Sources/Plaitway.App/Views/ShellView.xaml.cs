@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Plaitway.AppCore;
 using Plaitway.AppCore.ViewModels;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
 namespace Plaitway.App.Views;
@@ -36,6 +38,55 @@ internal sealed partial class ShellView : UserControl
     {
         PageHost.Content = null;
         PageHost.Content = ViewModel.Page;
+    }
+
+    /// <summary>Files over the window: a drop imports them when the helper can store them. Other drags, such as the reordering of the sidebar, are not ours.</summary>
+    private void OnDragOver(object sender, DragEventArgs args)
+    {
+        if (!args.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        args.AcceptedOperation = ViewModel.CanAcceptDrop ? DataPackageOperation.Copy : DataPackageOperation.None;
+        args.DragUIOverride.IsCaptionVisible = false;
+        ViewModel.SetDropTargeted(true);
+        args.Handled = true;
+    }
+
+    private void OnDragLeave(object sender, DragEventArgs args) => ViewModel.SetDropTargeted(false);
+
+    private async void OnDrop(object sender, DragEventArgs args)
+    {
+        if (!args.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        args.Handled = true;
+        var deferral = args.GetDeferral();
+        try
+        {
+            await ViewModel.DropAsync(await DroppedItemsOf(args.DataView));
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    /// <summary>What was dropped. A source that promised files and cannot hand them over is one item without a path, which the import reports as not a file on this PC.</summary>
+    private static async Task<IReadOnlyList<DroppedItem>> DroppedItemsOf(DataPackageView data)
+    {
+        try
+        {
+            var items = await data.GetStorageItemsAsync();
+            return [.. items.Select(item => new DroppedItem(item.Name, item.Path))];
+        }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            return [new DroppedItem(string.Empty, null)];
+        }
     }
 
     /// <summary>

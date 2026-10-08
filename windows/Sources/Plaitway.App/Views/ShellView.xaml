@@ -26,7 +26,7 @@
                                 Empty="{StaticResource EmptyTemplate}" />
   </UserControl.Resources>
 
-  <Grid>
+  <Grid Background="Transparent" AllowDrop="True" DragEnter="OnDragOver" DragOver="OnDragOver" DragLeave="OnDragLeave" Drop="OnDrop">
     <!-- The helper is not ready and there are no profiles to keep in view: one thing to do. -->
     <local:SetupView ViewModel="{x:Bind ViewModel.Setup}" Visibility="{x:Bind controls:Bind.Visible(ViewModel.ShowsSetup), Mode=OneWay}" />
 
@@ -61,5 +61,9 @@
         </Grid>
       </Border>
     </Grid>
+
+    <!-- A drop imports: the outline the macOS window takes on. -->
+    <Border BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" BorderThickness="2" IsHitTestVisible="False"
+            Visibility="{x:Bind controls:Bind.Visible(ViewModel.ShowsDropHint), Mode=OneWay}" />
   </Grid>
 </UserControl>
