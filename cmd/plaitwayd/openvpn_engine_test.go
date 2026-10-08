@@ -33,18 +33,6 @@ func installDirs(t *testing.T, content string) (source, runDir string) {
 	return source, filepath.Join(dir, "run")
 }
 
-func TestOpenVPNIsUsedAsConfiguredWithoutABuildTimeHash(t *testing.T) {
-	source, runDir := installDirs(t, fakeOpenVPN)
-
-	got, err := trustedOpenVPN(source, runDir)
-	if err != nil || got != source {
-		t.Fatalf("trustedOpenVPN = %q, %v; want the configured path", got, err)
-	}
-	if _, err := os.Stat(runDir); err == nil {
-		t.Error("a development build touched the run directory")
-	}
-}
-
 // The OpenVPN backend of a daemon that cannot trust its binary says why, which
 // is what the profile's last_error and DaemonInfo show.
 func TestUntrustedOpenVPNMakesTheBackendUnavailableWithTheReason(t *testing.T) {

@@ -31,7 +31,9 @@ var version = "0.0.0-dev"
 // root, and the app bundle that holds openvpn can be changed by the user who
 // installed it, so a build that sets it runs only a copy of openvpn that has
 // this hash, made in the run directory. Without it (development builds)
-// openvpn runs from the configured path as it is.
+// openvpn runs from the configured path as it is. On Windows nothing is copied:
+// the engine checks the file where it is, always for its owner, access lists
+// and signature, and for this hash when the build has one.
 var openvpnSHA256 string
 
 const (
@@ -56,6 +58,12 @@ type locations struct {
 }
 
 func main() {
+	if code, handled := runSubcommand(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+	// Before anything loads a library or reads a path. Nil unless the service
+	// manager started this process.
+	runAsService := enterServiceMode()
 	cfg, level, err := parseFlags(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "plaitwayd:", err)
@@ -68,6 +76,13 @@ func main() {
 	}
 	defer closeLog()
 	log, daemonLog := newLogger(out, level)
+
+	if runAsService != nil {
+		if code := runAsService(log, daemonLog, cfg); code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -106,7 +121,7 @@ func parseFlags(args []string) (config, slog.Level, error) {
 	fs.StringVar(&mode, "socket-mode", "0600", "permissions of the Unix socket, octal; the production daemon passes 0666 and authorizes each call itself. Accepted and ignored on Windows, where the pipe has its own access list")
 	fs.StringVar(&cfg.stateDir, "state-dir", defaults.stateDir, "directory for the stored profiles, readable by its owner only (mode 0700 on Unix)")
 	fs.StringVar(&cfg.runDir, "run-dir", defaults.runDir, "directory for management sockets and generated configs")
-	fs.StringVar(&cfg.openvpn, "openvpn", bundledOpenVPN(), "path of the openvpn binary")
+	fs.StringVar(&cfg.openvpn, "openvpn", defaultOpenVPN(), "path of the openvpn binary")
 	fs.StringVar(&cfg.logFile, "log-file", defaults.logFile, "log file, in addition to stderr; empty for stderr only")
 	fs.StringVar(&levelArg, "log-level", "info", "debug, info, warn or error")
 	fs.BoolVar(&useFake, "fake", false, "use the in-memory backend instead of real tunnels")
@@ -182,16 +197,6 @@ func logOutput(path string) (w io.Writer, closeLog func(), err error) {
 		return os.Stderr, func() { f.Close() }, nil
 	}
 	return io.MultiWriter(os.Stderr, f), func() { f.Close() }, nil
-}
-
-// bundledOpenVPN is where the app bundle keeps openvpn:
-// Plaitway.app/Contents/Resources/bin/openvpn next to Contents/MacOS/plaitwayd.
-func bundledOpenVPN() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(exe), "..", "Resources", "bin", "openvpn")
 }
 
 // run listens, builds the daemon and serves until ctx ends.

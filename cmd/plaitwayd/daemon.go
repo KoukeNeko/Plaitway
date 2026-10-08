@@ -65,12 +65,27 @@ func newDaemonWithCredentials(log *slog.Logger, daemonLog *manager.LogBuffer, cf
 	if err != nil {
 		return nil, err
 	}
+	return assembleDaemon(log, daemonLog, cfg, pol, creds, engines{backends: backends, reconciler: rec, net: netMonitor})
+}
+
+// engines is what the daemon core sees of the host: the backends of the two
+// kinds of profile, the Reconciler that owns routes and DNS, and the network
+// monitor they share.
+type engines struct {
+	backends   []tunnel.Backend
+	reconciler tunnel.Reconciler
+	net        osnet.NetMonitor
+}
+
+// assembleDaemon builds the daemon on engines, which are the real ones, the
+// fake ones, or what a test puts in their place.
+func assembleDaemon(log *slog.Logger, daemonLog *manager.LogBuffer, cfg config, pol *policy, creds credentials.TransportCredentials, eng engines) (*daemon, error) {
 	mgr, err := manager.New(manager.Config{
 		Log:        log,
 		StateDir:   cfg.stateDir,
-		Backends:   backends,
-		Reconciler: rec,
-		Net:        netMonitor,
+		Backends:   eng.backends,
+		Reconciler: eng.reconciler,
+		Net:        eng.net,
 		DaemonLog:  daemonLog,
 		Version:    version,
 		// The fake engines need no privileges, so the fake daemon does not
