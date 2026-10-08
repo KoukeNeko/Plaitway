@@ -40,6 +40,10 @@ struct MainView: View {
                 }
                 DetailView()
             }
+            // The bar is drawn the same on every page. Left to the system it follows what is under
+            // it: a page that starts with a scroll view gets one, a page that starts with a strip
+            // of controls (Logs, Configuration) does not, and it changes as the pages are switched.
+            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
