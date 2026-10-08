@@ -1,0 +1,7 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Probe" Manufacturer="x" Version="1.0.0" UpgradeCode="11111111-2222-3333-4444-555555555555">
+    <Feature Id="Main"><ComponentGroupRef Id="G" /></Feature>
+  </Package>
+  <Fragment><ComponentGroup Id="G" Directory="INSTALLFOLDER"><Component><File Source="Package.wxs" /></Component></ComponentGroup></Fragment>
+  <Fragment><StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="Probe" /></StandardDirectory></Fragment>
+</Wix>

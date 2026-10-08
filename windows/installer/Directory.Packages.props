@@ -1,0 +1,15 @@
+<Project>
+
+  <!-- The installer's packages are pinned here and not in ..\Directory.Packages.props: they build the MSI and none of
+       them is part of the app. The version of WixToolset.Sdk is in the first line of Plaitway.Installer.wixproj and
+       must stay equal to the one of the extensions. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="WixToolset.UI.wixext" Version="5.0.2" />
+    <PackageVersion Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+</Project>

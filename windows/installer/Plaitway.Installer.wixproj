@@ -1,0 +1,31 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <!--
+    The MSI of Plaitway: per machine, one file per language (Cultures), one platform per build.
+    packaging\windows\build-installer.ps1 builds it; it stages the payload and passes the version and the folders.
+
+      InstallerPlatform   x64 (default) or arm64; the payload staged for it has to match
+      ProductVersion      the VERSION file, major.minor.patch
+      ProductCode         derived from the upgrade code, the version and the platform by the build script
+      PayloadDir          the staged files: plaitwayd.exe, plaitway.exe, wintun.dll, app\, licenses\
+  -->
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
+    <Platform>$(InstallerPlatform)</Platform>
+    <OutputName>Plaitway</OutputName>
+    <Cultures>en-US;zh-TW</Cultures>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildProjectDirectory)\payload</PayloadDir>
+    <IconFile Condition="'$(IconFile)' == ''">$(MSBuildProjectDirectory)\..\Sources\Plaitway.App\Assets\Plaitway.ico</IconFile>
+    <LicenseFile Condition="'$(LicenseFile)' == ''">$(PayloadDir)\License.rtf</LicenseFile>
+    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);ProductCode=$(ProductCode);PayloadDir=$(PayloadDir);IconFile=$(IconFile);LicenseFile=$(LicenseFile)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" />
+    <PackageReference Include="WixToolset.Util.wixext" />
+  </ItemGroup>
+
+</Project>

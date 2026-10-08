@@ -1,0 +1,6 @@
+<Project>
+
+  <!-- Deliberately empty: the settings of the app (nullable, analyzers, warnings as errors) are for C# and do not
+       belong to a WiX project, which has its own warning policy in Plaitway.Installer.wixproj. -->
+
+</Project>
