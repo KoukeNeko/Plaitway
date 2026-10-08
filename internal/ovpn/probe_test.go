@@ -125,7 +125,7 @@ func TestBackendProbeReportsAndRunsOnce(t *testing.T) {
 	dir := t.TempDir()
 	counter := filepath.Join(dir, "count")
 	path := writeStub(t, dir, "ovpn", stubBehavior{Output: "OpenVPN 2.7.7 x [LZO]\n", Exit: 1, Counter: counter})
-	b := Backend(Config{Binary: path, RunDir: t.TempDir()})
+	b := probeOnlyBackend(Config{Binary: path, RunDir: t.TempDir()})
 	if b.Kind != tunnel.KindOpenVPN {
 		t.Errorf("Kind = %v", b.Kind)
 	}
@@ -145,14 +145,14 @@ func TestBackendProbeReportsAndRunsOnce(t *testing.T) {
 
 func TestBackendProbeWithoutLZOSaysSo(t *testing.T) {
 	path := writeStub(t, t.TempDir(), "ovpn", stubBehavior{Output: "OpenVPN 2.6.12 x [LZ4]\n", Exit: 1})
-	info := Backend(Config{Binary: path, RunDir: t.TempDir()}).Probe()
+	info := probeOnlyBackend(Config{Binary: path, RunDir: t.TempDir()}).Probe()
 	if !info.Available || info.Version != "2.6.12 (no LZO)" {
 		t.Errorf("Probe = %+v", info)
 	}
 }
 
 func TestBackendProbeMissingBinary(t *testing.T) {
-	info := Backend(Config{Binary: "/nonexistent/openvpn", RunDir: t.TempDir()}).Probe()
+	info := probeOnlyBackend(Config{Binary: "/nonexistent/openvpn", RunDir: t.TempDir()}).Probe()
 	if info.Available || info.Detail != "openvpn not found at /nonexistent/openvpn" || info.Version != "" {
 		t.Errorf("Probe = %+v", info)
 	}
@@ -164,6 +164,7 @@ func TestBackendProbeLooksAgainWhileTheBinaryIsUnusable(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "openvpn"+exeSuffix())
 	b := newBackend(Config{Binary: path, RunDir: t.TempDir()})
+	b.inspect = probeOnly
 	b.reprobe = 500 * time.Millisecond
 
 	if b.info().available {
@@ -184,4 +185,18 @@ func TestBackendProbeLooksAgainWhileTheBinaryIsUnusable(t *testing.T) {
 	if !b.info().available {
 		t.Error("a usable answer was dropped")
 	}
+}
+
+// probeOnly asks the binary what it is and nothing else: the tests of the probe are
+// not about the trust the daemon puts in a binary, which is the business of
+// inspectBinary on each OS.
+func probeOnly(cfg Config, timeout time.Duration) binaryInfo {
+	return probeBinary(cfg.Binary, timeout)
+}
+
+// probeOnlyBackend is a backend whose probe is probeOnly.
+func probeOnlyBackend(cfg Config) tunnel.Backend {
+	b := newBackend(cfg)
+	b.inspect = probeOnly
+	return b.tunnelBackend()
 }

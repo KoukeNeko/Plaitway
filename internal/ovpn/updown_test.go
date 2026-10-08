@@ -71,6 +71,9 @@ func TestParseUpEnvASUS(t *testing.T) {
 		Addresses: []netip.Prefix{netip.MustParsePrefix("10.8.0.6/32")},
 		Routes:    []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")},
 		TrustedIP: netip.MustParseAddr("203.0.113.88"),
+		Peer:      netip.MustParseAddr("10.8.0.5"),
+		Gateway:   netip.MustParseAddr("10.8.0.5"),
+		MTU:       1500,
 	}
 	if !reflect.DeepEqual(up, want) {
 		t.Errorf("upInfo = %+v\nwant     %+v", up, want)
@@ -128,6 +131,8 @@ trusted_ip6=2001:db8::10
 		DNS:        addrs("10.20.0.1", "10.20.0.2", "2001:db8:5::53"),
 		Domains:    []string{"corp.example", "eng.corp.example"},
 		TrustedIP:  netip.MustParseAddr("2001:db8::10"),
+		Gateway:    netip.MustParseAddr("10.8.0.1"),
+		GatewayV6:  netip.MustParseAddr("fd00:8::1"),
 	}
 	if !reflect.DeepEqual(up, want) {
 		t.Errorf("upInfo = %+v\nwant     %+v", up, want)
@@ -484,6 +489,8 @@ func TestRealTranscriptPushedConfiguration(t *testing.T) {
 		DNS:        addrs("10.8.0.1"),
 		Domains:    []string{"corp.example"},
 		TrustedIP:  netip.MustParseAddr("127.0.0.1"),
+		Gateway:    netip.MustParseAddr("10.8.0.1"),
+		MTU:        1500,
 	}
 	if !reflect.DeepEqual(up, want) {
 		t.Errorf("upInfo = %+v\nwant     %+v", up, want)

@@ -1,11 +1,17 @@
 // Package ovpn is the OpenVPN engine: it validates untrusted .ovpn profiles and
 // supervises the official openvpn binary as a child process, controlling it
-// through the management interface on a Unix socket.
+// through the management interface: a Unix socket where there is one, and on
+// Windows, where openvpn cannot listen on one, a password protected port on
+// loopback (channel.go).
 //
 // Division of work with the daemon: openvpn only creates the tunnel interface
-// and its address. It never touches routes (--route-noexec) or DNS; it reports
-// what the profile and the server ask for, and the engine hands that to the
-// Reconciler as an Intent.
+// and reports its address. It never touches routes (--route-noexec) or DNS; it
+// reports what the profile and the server ask for, and the engine hands that to
+// the Reconciler as an Intent. On Windows openvpn cannot even make the interface:
+// the engine makes a TAP-Windows6 adapter for it with tapctl, sets its addresses
+// through the IP Helper API, and runs openvpn in a job object that ends it with
+// the daemon (device_windows.go, process_windows.go). The binary is run only
+// after the checks of trust_windows.go.
 //
 // Profiles are untrusted input to a root process. Parse is the only way in:
 // it rejects profiles that name files, removes directives that run programs
@@ -17,7 +23,6 @@
 package ovpn
 
 import (
-	"io"
 	"log/slog"
 
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
@@ -25,13 +30,19 @@ import (
 
 // Config is the daemon's wiring of the OpenVPN backend.
 type Config struct {
-	// Binary is the path of the openvpn executable.
+	// Binary is the path of the openvpn executable. On Windows it must be an
+	// absolute path (see VerifyBinary).
 	Binary string
-	// RunDir holds the generated configs and management sockets. It is created
-	// with mode 0700 when missing. Each engine works in its own 0700
-	// subdirectory, because openvpn creates its management socket with mode
-	// 0777 and the directory is what keeps other users out.
+	// RunDir holds the generated configs and management sockets (on Windows the
+	// management password). It is created private when missing: mode 0700, or on
+	// Windows an access list of SYSTEM and Administrators. Each engine works in its
+	// own private subdirectory, because openvpn creates its management socket with
+	// mode 0777 and the directory is what keeps other users out.
 	RunDir string
+	// BinarySHA256 (hex), when not empty, is the hash the binary must have. It is
+	// for Windows, where the engine verifies the binary where it is: see
+	// VerifyBinary. On macOS the daemon checks a copy before it gives the path.
+	BinarySHA256 string
 	// Log receives the backend's own diagnostics. openvpn's output goes to
 	// Deps.Log of each engine instead.
 	Log *slog.Logger
@@ -39,10 +50,10 @@ type Config struct {
 
 // Backend returns the OpenVPN implementation of tunnel.Backend.
 func Backend(cfg Config) tunnel.Backend {
-	if cfg.Log == nil {
-		cfg.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
-	b := newBackend(cfg)
+	return newBackend(cfg).tunnelBackend()
+}
+
+func (b *backend) tunnelBackend() tunnel.Backend {
 	return tunnel.Backend{
 		Kind:  tunnel.KindOpenVPN,
 		Parse: Parse,

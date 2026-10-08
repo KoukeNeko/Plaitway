@@ -5,24 +5,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
-const (
-	configFileName = "profile.ovpn"
-	socketFileName = "m.sock"
-	// maxSocketPath is the longest Unix socket path macOS accepts (sun_path is
-	// 104 bytes including the terminating NUL).
-	maxSocketPath = 103
-)
-
-// childEnv is the whole environment of the openvpn child. It runs
-// /sbin/ifconfig by absolute path; nothing from the daemon's environment is
-// needed, and none is passed on.
-func childEnv() []string { return []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin"} }
+const configFileName = "profile.ovpn"
 
 // buildArgs is the openvpn command line. The stored profile comes first and
 // the daemon's options follow, so that they win wherever the profile sets the
-// same option.
+// same option, except where a filter must be first: leadingOptions come before
+// the profile. management opens the management interface (see mgmtChannel) and
+// device picks the tunnel interface (see deviceProvider); trailingOptions are
+// the rest of what the OS needs.
 //
 //   - management with hold and query-passwords: the engine releases the hold
 //     once it is connected and answers credential prompts itself, so no
@@ -39,10 +32,8 @@ func childEnv() []string { return []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin"}
 //   - dns-updown disable: since 2.7 openvpn runs a helper script, whose path
 //     is fixed when openvpn is built and which runs even at script-security 1,
 //     whenever DNS options are set. The Reconciler owns DNS.
-func buildArgs(bin binaryInfo, configPath, socketPath string) []string {
-	args := []string{
-		"--config", configPath,
-		"--management", socketPath, "unix",
+func buildArgs(bin binaryInfo, configPath string, management, device []string) []string {
+	args := slices.Concat(leadingOptions(), []string{"--config", configPath}, management, []string{
 		"--management-hold",
 		"--management-query-passwords",
 		"--management-up-down",
@@ -51,7 +42,7 @@ func buildArgs(bin binaryInfo, configPath, socketPath string) []string {
 		"--auth-retry", "interact",
 		"--script-security", "1",
 		"--verb", "4",
-	}
+	})
 	if !bin.persistKeyIsDeprecated() {
 		args = append(args, "--persist-key")
 	}
@@ -61,28 +52,33 @@ func buildArgs(bin binaryInfo, configPath, socketPath string) []string {
 	if bin.supportsDisableDCO() {
 		args = append(args, "--disable-dco")
 	}
-	return args
+	return slices.Concat(args, trailingOptions(), device)
 }
 
-// workspacePaths names the engine's private directory and the files in it. The
-// directory name is derived from the owner id with a hash, so that an id with
-// path characters or a great length can never reach the file system.
-func workspacePaths(runDir string, owner string) (dir, config, socket string, err error) {
+// workspaceFiles names the engine's private directory and the profile in it.
+// The directory name is derived from the owner id with a hash, so that an id
+// with path characters or a great length can never reach the file system.
+func workspaceFiles(runDir string, owner string) (dir, config string) {
 	sum := sha256.Sum256([]byte(owner))
 	dir = filepath.Join(runDir, fmt.Sprintf("ovpn-%x", sum[:6]))
-	config = filepath.Join(dir, configFileName)
-	socket = filepath.Join(dir, socketFileName)
-	if len(socket) > maxSocketPath {
-		return "", "", "", fmt.Errorf("management socket path %q is too long (%d bytes, at most %d)", socket, len(socket), maxSocketPath)
+	return dir, filepath.Join(dir, configFileName)
+}
+
+// workspacePaths is workspaceFiles with the management socket of the Unix
+// channel.
+func workspacePaths(runDir string, owner string) (dir, config, socket string, err error) {
+	dir, config = workspaceFiles(runDir, owner)
+	socket, err = unixSocketPath(dir)
+	if err != nil {
+		return "", "", "", err
 	}
 	return dir, config, socket, nil
 }
 
-// prepareWorkspace creates the engine's directory with mode 0700 and writes
-// the profile into it with mode 0600. openvpn creates its management socket
-// with mode 0777, so the directory is what keeps other users away from it.
+// prepareWorkspace creates the engine's private directory and writes the
+// profile into it, then whatever the management channel needs there.
 func (e *engine) prepareWorkspace() error {
-	if err := os.MkdirAll(e.cfg.RunDir, 0o700); err != nil {
+	if err := makeRunDir(e.cfg.RunDir); err != nil {
 		return fmt.Errorf("create run directory: %w", err)
 	}
 	// A crashed predecessor may have left its directory. RemoveAll does not
@@ -90,12 +86,23 @@ func (e *engine) prepareWorkspace() error {
 	if err := os.RemoveAll(e.dir); err != nil {
 		return fmt.Errorf("remove stale %s: %w", e.dir, err)
 	}
-	if err := os.Mkdir(e.dir, 0o700); err != nil {
-		return fmt.Errorf("create %s: %w", e.dir, err)
+	if err := makePrivateDir(e.dir); err != nil {
+		return err
 	}
-	if err := os.Chmod(e.dir, 0o700); err != nil {
-		return fmt.Errorf("set mode of %s: %w", e.dir, err)
+	if err := e.writeProfile(); err != nil {
+		return err
 	}
+	if err := e.channel.prepare(); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	e.secrets = append(e.secrets, e.channel.secrets()...)
+	e.mu.Unlock()
+	return nil
+}
+
+// writeProfile writes the profile; it must not exist yet.
+func (e *engine) writeProfile() error {
 	f, err := os.OpenFile(e.configPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create profile file: %w", err)

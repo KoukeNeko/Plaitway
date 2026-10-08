@@ -38,6 +38,8 @@ type profile struct {
 	// filters are the profile's pull-filter lines: the options the server
 	// pushes are subject to them.
 	filters []pullFilter
+	// device is the profile's "dev": tun, tap, or null for none.
+	device string
 }
 
 // Parse validates an untrusted profile. It rejects the whole profile, with an
@@ -249,6 +251,7 @@ func (pr *parser) check(it item, name string, sc scope) error {
 		if len(args) != 1 || !validDeviceName(args[0]) {
 			return fmt.Errorf("needs a device name such as tun")
 		}
+		pr.device = args[0]
 		if strings.HasPrefix(args[0], "tap") {
 			pr.warn(it.line, "dev", "kept: macOS has no tap device, so the profile cannot connect")
 		}

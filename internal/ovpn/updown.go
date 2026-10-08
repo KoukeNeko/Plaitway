@@ -29,6 +29,16 @@ type upInfo struct {
 	// PulledDNS holds the "dns" options the server pushed. They are not in the
 	// environment: the engine takes them from openvpn's log.
 	PulledDNS dnsOptions
+	// Peer is the far end of a point-to-point tunnel address (topology net30 or
+	// p2p), which has no netmask; invalid for topology subnet.
+	Peer netip.Addr
+	// Gateway and GatewayV6 are the tunnel's own next hops: the address of the far
+	// end that the adapter answers for (openvpn's route_vpn_gateway, or the far end
+	// of the point-to-point address when it names none, and route_ipv6_gateway).
+	// Invalid when openvpn named none.
+	Gateway, GatewayV6 netip.Addr
+	// MTU is the tunnel MTU openvpn works with, 0 when it did not say.
+	MTU int
 }
 
 // parseUpEnv reads the environment of >UPDOWN:UP. Malformed entries are skipped
@@ -42,7 +52,7 @@ func parseUpEnv(env map[string]string) (upInfo, []string, error) {
 	note := func(format string, args ...any) { notes = append(notes, fmt.Sprintf(format, args...)) }
 
 	info.Iface = env["dev"]
-	if !validDeviceName(info.Iface) {
+	if !validTunnelDevice(info.Iface) {
 		return upInfo{}, nil, fmt.Errorf("openvpn reported an invalid tunnel device %q", truncate(info.Iface, 40))
 	}
 
@@ -54,6 +64,14 @@ func parseUpEnv(env map[string]string) (upInfo, []string, error) {
 			}
 		}
 		info.Addresses = append(info.Addresses, netip.PrefixFrom(local, ones))
+	}
+	if peer, err := netip.ParseAddr(env["ifconfig_remote"]); err == nil && peer.Is4() {
+		info.Peer = peer
+	}
+	info.Gateway = firstGateway(netip.Addr.Is4, env["route_vpn_gateway"], env["ifconfig_remote"])
+	info.GatewayV6 = firstGateway(netip.Addr.Is6, env["route_ipv6_gateway_1"], env["ifconfig_ipv6_remote"])
+	if mtu, err := strconv.Atoi(env["tun_mtu"]); err == nil && mtu > 0 {
+		info.MTU = mtu
 	}
 	if local, err := netip.ParseAddr(env["ifconfig_ipv6_local"]); err == nil && local.Is6() {
 		bitsN, err := strconv.Atoi(env["ifconfig_ipv6_netbits"])
@@ -102,25 +120,8 @@ func parseUpEnv(env map[string]string) (upInfo, []string, error) {
 		if !ok {
 			break
 		}
-		fields := strings.Fields(opt)
-		if len(fields) != 3 || fields[0] != "dhcp-option" {
-			continue
-		}
-		switch fields[1] {
-		case "DNS", "DNS6":
-			addr, err := netip.ParseAddr(fields[2])
-			if err != nil || addr.Zone() != "" || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() {
-				note("DNS server %q ignored", truncate(fields[2], 60))
-				continue
-			}
-			info.DNS = appendUnique(info.DNS, addr)
-		case "DOMAIN", "DOMAIN-SEARCH":
-			domain, ok := cleanDomain(fields[2])
-			if !ok {
-				note("domain %q ignored", truncate(fields[2], 60))
-				continue
-			}
-			info.Domains = appendUnique(info.Domains, domain)
+		if n := info.addDHCPOption(opt); n != "" {
+			notes = append(notes, n)
 		}
 	}
 
@@ -131,6 +132,33 @@ func parseUpEnv(env map[string]string) (upInfo, []string, error) {
 		}
 	}
 	return info, notes, nil
+}
+
+// addDHCPOption reads one "dhcp-option DNS 10.8.0.1" or "dhcp-option DOMAIN
+// corp.example" text, as the environment of the up event and the log of a
+// pushed reply give it, and takes the DNS server or the domain into info. Any
+// other option is not for the Reconciler. The note says why a value was
+// ignored, or is empty.
+func (info *upInfo) addDHCPOption(opt string) (note string) {
+	fields := strings.Fields(opt)
+	if len(fields) != 3 || fields[0] != "dhcp-option" {
+		return ""
+	}
+	switch fields[1] {
+	case "DNS", "DNS6":
+		addr, err := netip.ParseAddr(fields[2])
+		if err != nil || addr.Zone() != "" || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() {
+			return fmt.Sprintf("DNS server %q ignored", truncate(fields[2], 60))
+		}
+		info.DNS = appendUnique(info.DNS, addr)
+	case "DOMAIN", "DOMAIN-SEARCH":
+		domain, ok := cleanDomain(fields[2])
+		if !ok {
+			return fmt.Sprintf("domain %q ignored", truncate(fields[2], 60))
+		}
+		info.Domains = appendUnique(info.Domains, domain)
+	}
+	return ""
 }
 
 func envRoute(network, netmask string) (netip.Prefix, error) {
@@ -149,6 +177,20 @@ func envRoute(network, netmask string) (netip.Prefix, error) {
 		}
 	}
 	return netip.PrefixFrom(addr, ones).Masked(), nil
+}
+
+// firstGateway is the first of the reported addresses that can be a next hop of
+// the family isFamily tells. openvpn writes the unspecified address where it has
+// none.
+func firstGateway(isFamily func(netip.Addr) bool, reported ...string) netip.Addr {
+	for _, text := range reported {
+		addr, err := netip.ParseAddr(text)
+		if err != nil || !isFamily(addr) || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() {
+			continue
+		}
+		return addr.WithZone("")
+	}
+	return netip.Addr{}
 }
 
 func truthy(s string) bool { return s != "" && s != "0" }
@@ -208,6 +250,10 @@ func upIntent(spec tunnel.Spec, prof *profile, up upInfo, endpoints []netip.Addr
 		UpSince:   upSince,
 		Endpoints: endpoints,
 		Routes:    routes,
+		// An Ethernet-like adapter (tap-windows6) answers only for the tunnel's
+		// own next hop, one for each family, so the Reconciler needs both.
+		Gateway:   up.Gateway,
+		GatewayV6: up.GatewayV6,
 	}
 	if up.TrustedIP.IsValid() {
 		intent.Endpoints = appendUnique(slices.Clone(endpoints), up.TrustedIP)

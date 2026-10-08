@@ -4,33 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
 
-func TestBuildArgsGolden(t *testing.T) {
-	const config, socket = "/var/run/plaitway/ovpn-0123456789ab/profile.ovpn", "/var/run/plaitway/ovpn-0123456789ab/m.sock"
-	tests := []struct {
-		golden string
-		bin    binaryInfo
-	}{
-		{"args-2.7.golden", binaryInfo{available: true, major: 2, minor: 7}},
-		{"args-2.6.golden", binaryInfo{available: true, major: 2, minor: 6}},
-		{"args-2.5.golden", binaryInfo{available: true, major: 2, minor: 5}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.golden, func(t *testing.T) {
-			got := strings.Join(buildArgs(tt.bin, config, socket), "\n") + "\n"
-			checkGolden(t, tt.golden, []byte(got))
-		})
-	}
-}
-
-// The requirements of the command line, independent of the golden text.
+// The requirements of the command line, independent of the golden text, on
+// every OS; generate_unix_test.go and generate_windows_test.go hold the golden
+// text of their own.
 func TestBuildArgsContract(t *testing.T) {
-	args := buildArgs(binaryInfo{available: true, major: 2, minor: 7}, "/c/profile.ovpn", "/c/m.sock")
+	args := buildArgs(binaryInfo{available: true, major: 2, minor: 7}, "/c/profile.ovpn", unixManagementOptions("/c/m.sock"), nil)
 	has := func(flag string) bool {
 		for _, a := range args {
 			if a == flag {
@@ -50,8 +35,9 @@ func TestBuildArgsContract(t *testing.T) {
 	if has("--persist-key") {
 		t.Error("2.7 ignores --persist-key with a deprecation notice; it must not be passed")
 	}
-	if args[0] != "--config" || args[1] != "/c/profile.ovpn" {
-		t.Errorf("the profile must come first so the daemon's options override it: %v", args)
+	configAt := slices.Index(args, "--config")
+	if configAt != len(leadingOptions()) || args[configAt+1] != "/c/profile.ovpn" {
+		t.Errorf("the profile must come first, after only the options that must precede it, so the daemon's options override it: %v", args)
 	}
 	for i, a := range args {
 		if a == "--management" && (args[i+1] != "/c/m.sock" || args[i+2] != "unix") {
@@ -66,7 +52,7 @@ func TestBuildArgsContract(t *testing.T) {
 			}
 		}
 	}
-	older := buildArgs(binaryInfo{available: true, major: 2, minor: 5}, "/c/p", "/c/m")
+	older := buildArgs(binaryInfo{available: true, major: 2, minor: 5}, "/c/p", unixManagementOptions("/c/m"), nil)
 	var persistKey, disableDCO bool
 	for _, a := range older {
 		persistKey = persistKey || a == "--persist-key"
@@ -120,7 +106,7 @@ func TestWorkspacePaths(t *testing.T) {
 
 func newTestEngine(t *testing.T, runDir string, content string) *engine {
 	t.Helper()
-	b := Backend(Config{Binary: "/nonexistent/openvpn", RunDir: runDir})
+	b := probeOnlyBackend(Config{Binary: "/nonexistent/openvpn", RunDir: runDir})
 	eng, err := b.New(tunnel.Spec{Owner: "office", Content: []byte(content)}, tunnel.Deps{Network: &fakeNetwork{}})
 	if err != nil {
 		t.Fatal(err)
@@ -153,16 +139,17 @@ func TestPrepareWorkspaceReplacesLeftovers(t *testing.T) {
 	e := newTestEngine(t, runDir, minimalProfile)
 
 	t.Run("a stale directory with a socket", func(t *testing.T) {
+		staleSocket := filepath.Join(e.dir, socketFileName)
 		if err := os.MkdirAll(e.dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(e.socketPath, []byte("stale"), 0o666); err != nil {
+		if err := os.WriteFile(staleSocket, []byte("stale"), 0o666); err != nil {
 			t.Fatal(err)
 		}
 		if err := e.prepareWorkspace(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(e.socketPath); !os.IsNotExist(err) {
+		if _, err := os.Stat(staleSocket); !os.IsNotExist(err) {
 			t.Error("the stale socket survived")
 		}
 		e.removeWorkspace()

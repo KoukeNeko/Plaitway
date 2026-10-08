@@ -1,8 +1,7 @@
-//go:build unix
-
 package ovpn
 
 import (
+	"cmp"
 	"bufio"
 	"context"
 	"fmt"
@@ -21,15 +20,13 @@ import (
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
 
-// The engine tests run it against a fake "openvpn": a shell script that
-// re-executes the test binary, which then plays openvpn. It creates the
-// management socket like openvpn does, speaks the protocol with the transcripts
-// OpenVPN 2.7 writes, and records what it receives in OVPN_FAKE_DIR. Its
-// behaviour is set with OVPN_FAKE_* environment variables, written into the
-// script because the engine gives the child a bare environment.
-//
-// It is Unix only: the engine reaches openvpn through a Unix socket and a
-// shell script, and how the Windows engine will do it is not decided yet.
+// The engine tests run against a fake "openvpn": a copy of the test binary (see
+// writeStub) that plays openvpn. It opens the management interface like openvpn
+// does, on a Unix socket or, as on Windows, a password protected loopback port
+// announced on stdout; speaks the protocol with the transcripts OpenVPN 2.7
+// writes; and records what it receives in OVPN_FAKE_DIR. Its behaviour is set
+// with OVPN_FAKE_* settings kept next to the copy, because the engine gives the
+// child a bare environment.
 
 func init() { fakeOpenVPNMain = runFakeOpenVPN }
 
@@ -70,24 +67,20 @@ func runFakeOpenVPN() int {
 	}
 	record("pid", fmt.Sprint(os.Getpid()))
 	record("argv", strings.Join(args, "\n"))
-	var config, socket string
+	var config string
+	var management []string // what follows --management: a socket and "unix", or an address, a port and a password file
 	for i, a := range args {
 		switch a {
 		case "--config":
 			config = args[i+1]
 		case "--management":
-			socket = args[i+1]
+			management = args[i+1 : i+4]
 		}
 	}
-	if info, err := os.Stat(config); err == nil {
-		record("config-mode", fmt.Sprintf("%o", info.Mode().Perm()))
-		if data, err := os.ReadFile(config); err == nil {
-			os.WriteFile(filepath.Join(dir, "config.copy"), data, 0o600)
-		}
+	if data, err := os.ReadFile(config); err == nil {
+		os.WriteFile(filepath.Join(dir, "config.copy"), data, 0o600)
 	}
-	if info, err := os.Stat(filepath.Dir(socket)); err == nil {
-		record("dir-mode", fmt.Sprintf("%o", info.Mode().Perm()))
-	}
+	recordWorkspaceAccess(record, config)
 
 	if os.Getenv("OVPN_FAKE_CRASH") == "early" {
 		fmt.Fprintln(os.Stderr, "Options error: Unrecognized option or missing or extra parameter(s) in config:1: frobnicate (2.7.7)")
@@ -106,18 +99,18 @@ func runFakeOpenVPN() int {
 		signal.Ignore(syscall.SIGTERM)
 	}
 
-	ln, err := net.Listen("unix", socket)
+	conn, cleanup, err := acceptManagement(management, record)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "fake: listen:", err)
+		fmt.Fprintln(os.Stderr, "fake:", err)
 		return 2
 	}
-	os.Chmod(socket, 0o777) // openvpn creates it world-accessible
-	defer os.Remove(socket)
-	conn, err := ln.Accept()
-	if err != nil {
-		return 2
+	defer cleanup()
+	var password string // of the management interface, which openvpn echoes in one of its errors
+	if management[1] != "unix" {
+		stored, _ := os.ReadFile(management[2])
+		password = strings.TrimSpace(string(stored))
 	}
-	f := &fakeOpenVPN{conn: conn, record: record, holds: make(chan struct{}, 64), creds: make(chan [2]string, 8),
+	f := &fakeOpenVPN{conn: conn, record: record, password: password, holds: make(chan struct{}, 64), creds: make(chan [2]string, 8),
 		usr1: make(chan struct{}, 8), term: make(chan struct{}, 8)}
 	return f.run()
 }
@@ -126,6 +119,7 @@ type fakeOpenVPN struct {
 	conn   net.Conn
 	record func(name, text string)
 	wmu    sync.Mutex
+	password string
 
 	holds chan struct{} // one entry per "hold release" received
 	creds chan [2]string
@@ -164,6 +158,12 @@ func (f *fakeOpenVPN) readCommands() {
 		if os.Getenv("OVPN_FAKE_ECHO_SECRETS") != "" {
 			// What some openvpn builds do: echo the command into the log.
 			f.send(fmt.Sprintf(">LOG:%d,D,MANAGEMENT: CMD '%s'", time.Now().Unix(), line))
+		}
+		if refused := os.Getenv("OVPN_FAKE_REFUSE"); refused != "" && fields[0] == refused {
+			// What openvpn for Windows did once when the command followed the
+			// password too closely: it took the password for the command.
+			f.send(fmt.Sprintf("ERROR: unknown command [%s], enter 'help' for more options", cmp.Or(f.password, "x")))
+			continue
 		}
 		switch fields[0] {
 		case "state", "bytecount", "log":
@@ -392,6 +392,17 @@ type harnessOpts struct {
 	realProbe bool
 	// binary runs this executable instead of the fake.
 	binary string
+	// device replaces the stand-in that does nothing.
+	device deviceProvider
+	// realTrust leaves the checks of the binary and the way the engine gets its
+	// tunnel interface as the daemon has them: the binary must be one the daemon
+	// would run, and a profile that opens a device gets an adapter. For the tests
+	// that run as administrator.
+	realTrust bool
+	// loopback makes the engine use the management port on loopback instead of
+	// the OS default, so that systems with a socket test it as well. The address
+	// of the peer is not checked there.
+	loopback bool
 }
 
 const asusLikeProfile = `client
@@ -417,30 +428,21 @@ ZmFrZQ==
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
 	t.Helper()
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
 	h := &harness{t: t, dir: shortTempDir(t), net: &fakeNetwork{}, collect: make(chan struct{})}
 	h.runDir = filepath.Join(shortTempDir(t), "run")
 
 	if o.binary != "" {
 		o.realProbe = true
 	}
-	var env strings.Builder
 	// The race runtime sleeps a second at exit unless told otherwise, which
 	// would make every Stop look slow.
-	env.WriteString("GORACE=atexit_sleep_ms=0 OVPN_FAKE=1 OVPN_FAKE_DIR=" + shellQuote(h.dir) + " ")
+	fakeEnv := map[string]string{"GORACE": "atexit_sleep_ms=0", "OVPN_FAKE": "1", "OVPN_FAKE_DIR": h.dir}
 	for k, v := range o.env {
-		fmt.Fprintf(&env, "%s=%s ", k, shellQuote(v))
+		fakeEnv[k] = v
 	}
 	h.binary = o.binary
 	if h.binary == "" {
-		h.binary = filepath.Join(h.dir, "openvpn")
-		script := "#!/bin/sh\n" + env.String() + "exec " + shellQuote(self) + " \"$@\"\n"
-		if err := os.WriteFile(h.binary, []byte(script), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		h.binary = writeStub(t, h.dir, "openvpn", stubBehavior{FakeEnv: fakeEnv})
 	}
 
 	profile := o.profile
@@ -458,12 +460,28 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		h.mu.Unlock()
 	}}
 	logger := slog.New(slog.NewTextHandler(testLogWriter{t}, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	b := Backend(Config{Binary: h.binary, RunDir: h.runDir, Log: logger})
-	eng, err := b.New(spec, deps)
+	// The fake and the binaries under test are not where the daemon would trust
+	// one, and the tests do not make adapters (a profile that opens a device is
+	// given a stand-in).
+	b := newBackend(Config{Binary: h.binary, RunDir: h.runDir, Log: logger})
+	if !o.realTrust {
+		b.inspect = probeOnly
+		b.trustBinary = func() (func(), error) { return func() {}, nil }
+	}
+	eng, err := b.newEngine(spec, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.eng = eng.(*engine)
+	switch {
+	case o.device != nil:
+		h.eng.device = o.device
+	case !o.realTrust:
+		h.eng.device = openvpnOwnedDevice{}
+	}
+	if o.loopback {
+		h.eng.channel = newTCPChannel(h.eng.dir, nil)
+	}
 	h.eng.stopGrace = 3 * time.Second
 	h.eng.dialTimeout = 5 * time.Second
 	if !o.realProbe {
@@ -514,7 +532,7 @@ func (h *harness) waitFor(what string, pred func(tunnel.Status) bool) tunnel.Sta
 		}
 		h.mu.Unlock()
 		if time.Now().After(deadline) {
-			h.t.Fatalf("timed out waiting for %s; statuses: %s", what, h.dumpStatuses())
+			h.t.Fatalf("timed out waiting for %s; statuses: %s\nlast log lines:\n%s\nlast output lines:\n%s", what, h.dumpStatuses(), h.logTail(25), strings.Join(h.eng.ring.tail(25), "\n"))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -537,7 +555,7 @@ func (h *harness) waitForNew(what string, pred func(tunnel.Status) bool) tunnel.
 		}
 		h.mu.Unlock()
 		if time.Now().After(deadline) {
-			h.t.Fatalf("timed out waiting for %s; statuses: %s", what, h.dumpStatuses())
+			h.t.Fatalf("timed out waiting for %s; statuses: %s\nlast log lines:\n%s\nlast output lines:\n%s", what, h.dumpStatuses(), h.logTail(25), strings.Join(h.eng.ring.tail(25), "\n"))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -566,6 +584,12 @@ func (h *harness) seen(pred func(tunnel.Status) bool) bool {
 		}
 	}
 	return false
+}
+
+// logTail is the last n lines of the log, for the report of a test that gave up.
+func (h *harness) logTail(n int) string {
+	lines := strings.Split(strings.TrimSpace(h.logText()), "\n")
+	return strings.Join(lines[max(0, len(lines)-n):], "\n")
 }
 
 func (h *harness) logText() string {
@@ -651,4 +675,70 @@ func (w testLogWriter) Write(p []byte) (int, error) {
 // shellQuote quotes s for /bin/sh, whatever it contains.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// acceptManagement opens the management interface the way the command line
+// asks and returns the first connection, after the password check when there is
+// one.
+func acceptManagement(management []string, record func(name, text string)) (net.Conn, func(), error) {
+	if management[1] == "unix" {
+		return acceptUnix(management[0])
+	}
+	return acceptLoopback(management[0], management[1], management[2], record)
+}
+
+func acceptUnix(socket string) (net.Conn, func(), error) {
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listen: %w", err)
+	}
+	os.Chmod(socket, 0o777) // openvpn creates it world-accessible
+	cleanup := func() { ln.Close(); os.Remove(socket) }
+	conn, err := ln.Accept()
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return conn, cleanup, nil
+}
+
+// acceptLoopback is openvpn's TCP management interface with a password file: it
+// says where it listens on stdout, asks for the password on connect, and does
+// not talk to a client that gives another.
+func acceptLoopback(host, port, passwordFile string, record func(name, text string)) (net.Conn, func(), error) {
+	password, err := os.ReadFile(passwordFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the password file: %w", err)
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, port))
+	if err != nil {
+		return nil, nil, fmt.Errorf("listen: %w", err)
+	}
+	fmt.Printf("2026-10-07 12:00:00 MANAGEMENT: TCP Socket listening on [AF_INET]%s\n", ln.Addr())
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			ln.Close()
+			return nil, nil, err
+		}
+		if checkPassword(conn, strings.TrimSpace(string(password)), record) {
+			return conn, func() { ln.Close() }, nil
+		}
+		conn.Close()
+	}
+}
+
+func checkPassword(conn net.Conn, want string, record func(name, text string)) bool {
+	fmt.Fprint(conn, "ENTER PASSWORD:")
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(line) != want {
+		record("bad-password", "refused")
+		fmt.Fprint(conn, "ERROR: bad password\r\n")
+		return false
+	}
+	fmt.Fprint(conn, "SUCCESS: password is correct\r\n")
+	return true
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -30,6 +32,9 @@ type binaryInfo struct {
 	major     int
 	minor     int
 	lzo       bool
+	// driver is the Windows driver the engine runs the tunnel on
+	// (windowsDriverName); empty elsewhere.
+	driver string
 }
 
 // supportsDisableDCO: --disable-dco was added with data channel offload in 2.6.
@@ -49,13 +54,25 @@ func (i binaryInfo) atLeast(major, minor int) bool {
 type backend struct {
 	cfg     Config
 	reprobe time.Duration
+	// inspect asks the binary what it is, and refuses one the daemon cannot
+	// trust; trustBinary does the second again right before a start. Tests
+	// replace them.
+	inspect     func(cfg Config, timeout time.Duration) binaryInfo
+	trustBinary func() (release func(), err error)
 
 	mu       sync.Mutex
 	probe    binaryInfo
 	probedAt time.Time
 }
 
-func newBackend(cfg Config) *backend { return &backend{cfg: cfg, reprobe: reprobeAfter} }
+func newBackend(cfg Config) *backend {
+	if cfg.Log == nil {
+		cfg.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	b := &backend{cfg: cfg, reprobe: reprobeAfter, inspect: inspectBinary}
+	b.trustBinary = func() (func(), error) { return trustBinary(b.cfg) }
+	return b
+}
 
 // info runs the probe the first time it is needed and remembers a usable
 // answer. One that says the binary is unusable is only kept for a few seconds:
@@ -67,7 +84,7 @@ func (b *backend) info() binaryInfo {
 	if b.probe.available || (!b.probedAt.IsZero() && time.Since(b.probedAt) < b.reprobe) {
 		return b.probe
 	}
-	b.probe = probeBinary(b.cfg.Binary, probeTimeout)
+	b.probe = b.inspect(b.cfg, probeTimeout)
 	b.probedAt = time.Now()
 	return b.probe
 }
@@ -78,6 +95,9 @@ func (b *backend) probeInfo() tunnel.EngineInfo {
 		return tunnel.EngineInfo{Detail: i.detail}
 	}
 	version := i.version
+	if i.driver != "" {
+		version += " (" + i.driver + ")"
+	}
 	if !i.lzo {
 		version += " (no LZO)"
 	}
@@ -93,6 +113,7 @@ func probeBinary(path string, timeout time.Duration) binaryInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "--version")
+	prepareProbe(cmd)
 	cmd.WaitDelay = time.Second // a wrapper script's children must not hold the pipe open
 	// openvpn --version exits with status 1 after printing; the output decides.
 	out, err := cmd.CombinedOutput()

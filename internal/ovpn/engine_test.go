@@ -1,5 +1,3 @@
-//go:build unix
-
 package ovpn
 
 import (
@@ -88,6 +86,7 @@ func TestEngineComesUpAndStops(t *testing.T) {
 		UpSince:   gotUp.UpSince,
 		Endpoints: []netip.Addr{netip.MustParseAddr("192.0.2.1")},
 		Routes:    []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")},
+		Gateway:   netip.MustParseAddr("10.8.0.5"), // route_vpn_gateway of the fake's environment
 	}
 	if !reflect.DeepEqual(gotUp, wantUp) || gotUp.UpSince.IsZero() {
 		t.Errorf("up intent = %+v, want %+v", gotUp, wantUp)
@@ -104,12 +103,7 @@ func TestEngineComesUpAndStops(t *testing.T) {
 			t.Errorf("argv lacks %s: %v", flag, argv)
 		}
 	}
-	if got := h.readRecording("config-mode"); strings.TrimSpace(got) != "600" {
-		t.Errorf("config mode = %q, want 600", got)
-	}
-	if got := h.readRecording("dir-mode"); strings.TrimSpace(got) != "700" {
-		t.Errorf("workspace mode = %q, want 700", got)
-	}
+	requirePrivateWorkspace(t, h)
 	if got := h.readRecording("config.copy"); got != asusLikeProfileCanonical(t) {
 		t.Errorf("openvpn was given\n%s\nwant\n%s", got, asusLikeProfileCanonical(t))
 	}
@@ -629,7 +623,7 @@ func TestEngineNoManagementSocket(t *testing.T) {
 	})
 	h.start()
 	failed := h.waitFor("Failed", h.stateIs(tunnel.StateFailed))
-	if !strings.Contains(failed.Err, "management socket") {
+	if !strings.Contains(failed.Err, "management") {
 		t.Errorf("Err = %q", failed.Err)
 	}
 	<-h.collect
@@ -1153,6 +1147,14 @@ func TestEngineSoftAuthFailureKeepsTheCredentials(t *testing.T) {
 func TestEngineGivesPushedDNSOptionsToTheReconciler(t *testing.T) {
 	const push = "route-gateway 10.8.0.1,dns server 1 address 10.8.0.1,dns server 1 resolve-domains corp.example," +
 		"dns server 2 address 10.8.0.99,dns search-domains lan.example,dhcp-option DNS 10.8.0.77,ifconfig 10.8.0.6 255.255.255.0"
+	// The fake does not put the old dhcp-option in the environment of the up event,
+	// and the real openvpn does on Unix. Where the engine reads the pushed options
+	// from the log, as on Windows, it has the old option either way: the profile's
+	// filter for dns options does not name it.
+	var pushedDHCPDNS []tunnel.DNSIntent
+	if readsDHCPOptionsFromLog {
+		pushedDHCPDNS = []tunnel.DNSIntent{{Servers: addrs("10.8.0.77")}}
+	}
 	tests := []struct {
 		name    string
 		profile string
@@ -1174,7 +1176,7 @@ func TestEngineGivesPushedDNSOptionsToTheReconciler(t *testing.T) {
 		{
 			name:    "all dns options are pull-filtered, and openvpn's own dhcp-option remains",
 			profile: minimalProfile + "pull-filter ignore \"dns \"\n",
-			want:    nil, // the fake does not put dhcp-option into the environment; the real binary does
+			want:    pushedDHCPDNS,
 		},
 	}
 	for _, tt := range tests {

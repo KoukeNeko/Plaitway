@@ -1,8 +1,7 @@
-//go:build unix
-
 package ovpn
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -11,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,17 +22,22 @@ import (
 // These tests run the real openvpn binary and need no root: both ends use
 // "--dev null", which opens no interface. They are skipped when the binary is
 // absent. The binary is looked up in build/openvpn/bin or in
-// $PLAITWAY_OPENVPN.
+// $PLAITWAY_OPENVPN, and on Windows in the Program Files of an OpenVPN
+// installation. Nothing of the daemon's trust applies: the binary runs as the
+// user who runs the tests, and an adapter is never opened (the device is null).
 
 func realBinary(t *testing.T) string {
 	t.Helper()
 	path := os.Getenv("PLAITWAY_OPENVPN")
 	if path == "" {
-		abs, err := filepath.Abs(filepath.Join("..", "..", "build", "openvpn", "bin", "openvpn"))
+		abs, err := filepath.Abs(filepath.Join("..", "..", "build", "openvpn", "bin", "openvpn"+exeSuffix()))
 		if err != nil {
 			t.Fatal(err)
 		}
 		path = abs
+		if _, err := os.Stat(path); err != nil {
+			path = installedBinary()
+		}
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Skipf("real openvpn binary not found at %s", path)
@@ -40,6 +46,15 @@ func realBinary(t *testing.T) string {
 		t.Skipf("real openvpn binary unusable: %s", info.detail)
 	}
 	return path
+}
+
+// installedBinary is where an OpenVPN installation puts the program; empty where
+// there is no such place.
+func installedBinary() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	return filepath.Join(os.Getenv("ProgramFiles"), "OpenVPN", "bin", "openvpn.exe")
 }
 
 func freeTCPPort(t *testing.T) int {
@@ -58,6 +73,9 @@ type serverOpts struct {
 	// password, when set, makes the server demand user "alice" with it, through
 	// an auth-user-pass-verify script.
 	password string
+	// network is the network of the tunnel the server hands out, a /24; 10.8.0.0
+	// when empty.
+	network string
 }
 
 // loopbackServer is a real openvpn server on 127.0.0.1 with a throw-away PKI.
@@ -78,7 +96,7 @@ func startLoopbackServer(t *testing.T, bin string, p *pki, o serverOpts) *loopba
 	srv := &loopbackServer{port: freeTCPPort(t), log: filepath.Join(dir, "server.log")}
 	args := []string{
 		"--mode", "server", "--tls-server", "--dev", "null",
-		"--server", "10.8.0.0", "255.255.255.0", "--topology", "subnet", "--keepalive", "10", "30",
+		"--server", cmp.Or(o.network, "10.8.0.0"), "255.255.255.0", "--topology", "subnet", "--keepalive", "10", "30",
 		"--local", "127.0.0.1", "--port", fmt.Sprint(srv.port), "--proto", "tcp-server",
 		"--ca", filepath.Join(dir, "ca.crt"), "--cert", filepath.Join(dir, "server.crt"), "--key", filepath.Join(dir, "server.key"),
 		"--dh", "none", "--verb", "3", "--cd", dir,
@@ -89,11 +107,7 @@ func startLoopbackServer(t *testing.T, bin string, p *pki, o serverOpts) *loopba
 		args = append(args, "--push", push)
 	}
 	if o.password != "" {
-		script := filepath.Join(dir, "auth.sh")
-		body := fmt.Sprintf("#!/bin/sh\nuser=$(sed -n 1p \"$1\")\npass=$(sed -n 2p \"$1\")\n[ \"$user\" = alice ] && [ \"$pass\" = %s ] && exit 0\nexit 1\n", shellQuote(o.password))
-		if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
-			t.Fatal(err)
-		}
+		script := writeStub(t, dir, "auth", stubBehavior{VerifyUser: "alice", VerifyPassword: o.password})
 		args = append(args, "--script-security", "2", "--auth-user-pass-verify", script, "via-file")
 	}
 
@@ -178,19 +192,33 @@ func TestRealBinaryAcceptsASUSProfile(t *testing.T) {
 		t.Fatalf("Parse warnings: %+v", parsed.Warnings)
 	}
 	dir := shortTempDir(t)
-	config, socket := filepath.Join(dir, "profile.ovpn"), filepath.Join(dir, "m.sock")
+	config := filepath.Join(dir, "profile.ovpn")
 	if err := os.WriteFile(config, parsed.Content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// The daemon's own command line, with the profile's verbosity of 3.
-	args := append(buildArgs(probeBinary(bin, 10*time.Second), config, socket), "--verb", "3")
-	cmd := exec.Command(bin, args...)
-	logPath := filepath.Join(dir, "openvpn.log")
-	logFile, err := os.Create(logPath)
+	channel, err := newMgmtChannel(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd.Stdout, cmd.Stderr = logFile, logFile
+	if err := channel.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	// The daemon's own command line, with the profile's verbosity of 3. The
+	// Windows engine passes the adapter it made; this test makes none, and
+	// takes no interface whatever the profile says.
+	args := append(buildArgs(probeBinary(bin, 10*time.Second), config, channel.options(), nil), "--verb", "3")
+	if runtime.GOOS == "windows" {
+		args = append(args, "--dev", "null")
+	}
+	cmd := exec.Command(bin, args...)
+	cmd.Env = childEnv()
+	var output lockedBuffer
+	sink := &lineSink{emit: func(_ tunnel.LogLevel, line string) {
+		channel.output(line)
+		output.WriteString(line + "\n")
+	}}
+	sinkErr := &lineSink{emit: func(_ tunnel.LogLevel, line string) { output.WriteString("ERR: " + line + "\n") }}
+	cmd.Stdout, cmd.Stderr = sink, sinkErr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -199,15 +227,13 @@ func TestRealBinaryAcceptsASUSProfile(t *testing.T) {
 	defer func() {
 		cmd.Process.Kill()
 		<-exited
-		logFile.Close()
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	conn, err := dialMgmt(ctx, socket, exited)
+	conn, err := channel.dial(ctx, exited, cmd.Process.Pid)
 	if err != nil {
-		out, _ := os.ReadFile(logPath)
-		t.Fatalf("%v\nopenvpn said:\n%s", err, out)
+		t.Fatalf("%v\nopenvpn said:\n%s", err, output.String())
 	}
 	defer conn.Close()
 
@@ -236,20 +262,17 @@ func TestRealBinaryAcceptsASUSProfile(t *testing.T) {
 			case stateEvent:
 				sawConnect = sawConnect || ev.Name == "TCP_CONNECT"
 			case fatalEvent:
-				out, _ := os.ReadFile(logPath)
-				t.Fatalf("openvpn gave up: %s\n%s", ev.Msg, out)
+				t.Fatalf("openvpn gave up: %s\n%s", ev.Msg, output.String())
 			}
 		case <-exited:
-			out, _ := os.ReadFile(logPath)
-			t.Fatalf("openvpn exited early:\n%s", out)
+			t.Fatalf("openvpn exited early:\n%s", output.String())
 		case <-deadline:
-			out, _ := os.ReadFile(logPath)
-			t.Fatalf("no password prompt or connection attempt (prompt %v, connect %v):\n%s", sawPrompt, sawConnect, out)
+			t.Fatalf("no password prompt or connection attempt (prompt %v, connect %v):\n%s", sawPrompt, sawConnect, output.String())
 		}
 	}
-	out, _ := os.ReadFile(logPath)
+	out := output.String()
 	for _, bad := range []string{"Options error", "Unrecognized option", "Cannot load", "Cannot open"} {
-		if strings.Contains(string(out), bad) {
+		if strings.Contains(out, bad) {
 			t.Errorf("openvpn complained (%q):\n%s", bad, out)
 		}
 	}
@@ -318,6 +341,8 @@ func TestRealBinarySplitTunnelEndToEnd(t *testing.T) {
 		// The profile's own route and the pushed one; the filtered redirect and
 		// DNS are absent.
 		Routes: mustPrefixes("192.168.1.0/24", "10.20.0.0/16"),
+		// The server's own tunnel address, pushed as route-gateway.
+		Gateway: netip.MustParseAddr("10.8.0.1"),
 	}
 	if !reflect.DeepEqual(upIntent, wantIntent) {
 		t.Errorf("Up intent =\n%+v\nwant\n%+v", upIntent, wantIntent)
@@ -528,11 +553,12 @@ func TestRealBinaryUnreachableServerIsNotHammered(t *testing.T) {
 	h.start()
 
 	stuck := h.waitFor("the reason", func(s tunnel.Status) bool { return s.Err != "" })
-	if want := fmt.Sprintf("cannot reach 127.0.0.1:%d: connection refused", port); stuck.State != tunnel.StateConnecting || stuck.Err != want {
+	want, retries := closedPortOutcome(port)
+	if stuck.State != tunnel.StateConnecting || stuck.Err != want {
 		t.Errorf("status = %+v, want Connecting with %q", stuck, want)
 	}
 	time.Sleep(4 * time.Second)
-	if n := strings.Count(h.logText(), "TCP: connect to"); n < 2 || n > 10 {
+	if n := strings.Count(h.logText(), "TCP: connect to"); retries && (n < 2 || n > 10) {
 		t.Errorf("openvpn tried to connect %d times in about 6 seconds, want a few", n)
 	}
 	if last := lastStatus(h); last.State != tunnel.StateConnecting {
@@ -593,4 +619,23 @@ func TestRealBinaryPushedNewStyleDNS(t *testing.T) {
 			h.requireProcessGone()
 		})
 	}
+}
+
+// lockedBuffer collects the output of a process that is written from its own
+// goroutines.
+type lockedBuffer struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+func (b *lockedBuffer) WriteString(s string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.text.WriteString(s)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.text.String()
 }

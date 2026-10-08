@@ -5,8 +5,29 @@ package ovpn
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// The golden text of the command line on a system where the management
+// interface is a Unix socket and openvpn owns its tunnel interface.
+func TestBuildArgsGolden(t *testing.T) {
+	const config, socket = "/var/run/plaitway/ovpn-0123456789ab/profile.ovpn", "/var/run/plaitway/ovpn-0123456789ab/m.sock"
+	tests := []struct {
+		golden string
+		bin    binaryInfo
+	}{
+		{"args-2.7.golden", binaryInfo{available: true, major: 2, minor: 7}},
+		{"args-2.6.golden", binaryInfo{available: true, major: 2, minor: 6}},
+		{"args-2.5.golden", binaryInfo{available: true, major: 2, minor: 5}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.golden, func(t *testing.T) {
+			got := strings.Join(buildArgs(tt.bin, config, unixManagementOptions(socket), nil), "\n") + "\n"
+			checkGolden(t, tt.golden, []byte(got))
+		})
+	}
+}
 
 // The modes are what keeps other users away from the management socket, which
 // openvpn creates world-accessible. Windows has no mode bits to check.

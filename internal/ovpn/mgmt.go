@@ -21,8 +21,14 @@ import (
 // here, so replies are matched to commands in order.
 
 const (
-	mgmtDialInterval  = 20 * time.Millisecond
-	mgmtWriteTimeout  = 5 * time.Second
+	mgmtDialInterval = 20 * time.Millisecond
+	mgmtWriteTimeout = 5 * time.Second
+	// mgmtCommandGap and mgmtReplyTimeout are for a connection that sends one
+	// command at a time (see mgmtConn). 10 ms was enough in every one of the
+	// trials against openvpn 2.7.1 for Windows; 50 ms leaves room for a slower
+	// machine.
+	mgmtCommandGap    = 50 * time.Millisecond
+	mgmtReplyTimeout  = 10 * time.Second
 	maxMgmtLineBytes  = 1 << 20
 	maxUpDownEnvLines = 8192
 )
@@ -220,12 +226,36 @@ func credentialCommand(verb, typ, value string) (string, error) {
 var errMgmtWrite = errors.New("management connection closed")
 
 // mgmtConn is the client side of one management connection.
+//
+// Commands normally go out as they are sent, in a pipeline, and the replies
+// are matched to them in order. openvpn for Windows loses commands that follow
+// a reply too closely: of four commands sent one after the other, all four were
+// answered in one run of five when each followed the last reply at once, and in
+// every run when each waited ten milliseconds. It also logs the earlier command
+// again where the lost one should be. With a gap the connection therefore keeps
+// one command in flight and sends the next only once the reply is in and the
+// gap has passed.
 type mgmtConn struct {
 	conn net.Conn
+	// gap, when not zero, is the least time between a reply and the next
+	// command, and turns the pipeline into one command at a time.
+	gap time.Duration
+	// replyTimeout bounds the wait for the reply to the command in flight;
+	// only used with a gap.
+	replyTimeout time.Duration
 
-	mu      sync.Mutex
-	pending []string // names of commands still waiting for their reply line
+	mu         sync.Mutex
+	pending    []string  // names of commands written and waiting for their reply line
+	queue      []command // with a gap: commands not written yet
+	repliedAt  time.Time
+	nextTimer  *time.Timer // with a gap: sends the next command when the gap has passed
+	replyTimer *time.Timer // with a gap: gives up on the reply to the command in flight
+	sent       int         // commands written so far; tells a reply timer which command it is for
+	failure    error       // why the connection was closed by the engine itself
+	closed     bool
 }
+
+type command struct{ name, line string }
 
 // dialMgmt connects to the management socket openvpn creates, retrying until
 // it exists. abort closes when the child has exited, so a child that died
@@ -248,23 +278,94 @@ func dialMgmt(ctx context.Context, socket string, abort <-chan struct{}) (*mgmtC
 }
 
 // Send writes one command. name labels it for error attribution and must not
-// contain anything secret; line is the complete command.
+// contain anything secret; line is the complete command. With a gap the
+// command may be written later, and a failure to write it then ends the
+// connection, which the reader reports as the end of the stream.
 func (c *mgmtConn) Send(name, line string) error {
 	if strings.ContainsAny(line, "\r\n") {
 		return errors.New("management command contains a line break")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.failure != nil {
+		return fmt.Errorf("send %s: %w: %v", name, errMgmtWrite, c.failure)
+	}
+	if c.gap == 0 {
+		return c.writeLocked(name, line)
+	}
+	c.queue = append(c.queue, command{name: name, line: line})
+	return c.dispatchLocked()
+}
+
+func (c *mgmtConn) writeLocked(name, line string) error {
 	if err := c.conn.SetWriteDeadline(time.Now().Add(mgmtWriteTimeout)); err != nil {
 		return fmt.Errorf("send %s: %w: %v", name, errMgmtWrite, err)
 	}
 	c.pending = append(c.pending, name)
+	c.sent++
 	if _, err := c.conn.Write([]byte(line + "\n")); err != nil {
 		return fmt.Errorf("send %s: %w: %v", name, errMgmtWrite, err)
 	}
 	return nil
 }
 
+// dispatchLocked writes the next queued command if none is in flight and the
+// gap since the last reply has passed, and otherwise sees to it that this is
+// tried again.
+func (c *mgmtConn) dispatchLocked() error {
+	if c.closed || len(c.pending) > 0 || len(c.queue) == 0 {
+		return nil
+	}
+	if wait := time.Until(c.repliedAt.Add(c.gap)); wait > 0 {
+		if c.nextTimer == nil {
+			c.nextTimer = time.AfterFunc(wait, c.onNextTimer)
+		} else {
+			c.nextTimer.Reset(wait)
+		}
+		return nil
+	}
+	next := c.queue[0]
+	c.queue = c.queue[1:]
+	if err := c.writeLocked(next.name, next.line); err != nil {
+		return err
+	}
+	c.armReplyTimerLocked(next.name)
+	return nil
+}
+
+func (c *mgmtConn) onNextTimer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.dispatchLocked(); err != nil {
+		c.failLocked(err)
+	}
+}
+
+func (c *mgmtConn) armReplyTimerLocked(name string) {
+	if c.replyTimer != nil {
+		c.replyTimer.Stop()
+	}
+	sent := c.sent
+	c.replyTimer = time.AfterFunc(c.replyTimeout, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.sent == sent && len(c.pending) > 0 {
+			c.failLocked(fmt.Errorf("openvpn did not answer %q within %s", name, c.replyTimeout))
+		}
+	})
+}
+
+// failLocked ends the connection because of something the engine found: the
+// reader then sees the stream end.
+func (c *mgmtConn) failLocked(err error) {
+	if c.failure == nil {
+		c.failure = err
+	}
+	c.conn.Close()
+}
+
+// popPending takes the name of the command a reply line answers, and with a gap
+// starts the wait for the next one.
 func (c *mgmtConn) popPending() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -273,10 +374,39 @@ func (c *mgmtConn) popPending() string {
 	}
 	name := c.pending[0]
 	c.pending = c.pending[1:]
+	if c.gap != 0 {
+		c.repliedAt = time.Now()
+		if c.replyTimer != nil {
+			c.replyTimer.Stop()
+		}
+		if err := c.dispatchLocked(); err != nil {
+			c.failLocked(err)
+		}
+	}
 	return name
 }
 
-func (c *mgmtConn) Close() error { return c.conn.Close() }
+// whyClosed says why the engine closed the connection itself, or nil.
+func (c *mgmtConn) whyClosed() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.failure
+}
+
+// paced says whether the connection sends one command at a time.
+func (c *mgmtConn) paced() bool { return c.gap != 0 }
+
+func (c *mgmtConn) Close() error {
+	c.mu.Lock()
+	c.closed = true
+	for _, t := range []*time.Timer{c.nextTimer, c.replyTimer} {
+		if t != nil {
+			t.Stop()
+		}
+	}
+	c.mu.Unlock()
+	return c.conn.Close()
+}
 
 // readLoop reads until the connection ends, passing every event to emit, which
 // returns false to stop reading. A clean end of the stream returns nil.
@@ -310,6 +440,9 @@ func (c *mgmtConn) readLoop(emit func(mgmtEvent) bool) error {
 		if !emit(ev) {
 			return nil
 		}
+	}
+	if err := c.whyClosed(); err != nil {
+		return err
 	}
 	return sc.Err()
 }

@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
@@ -72,13 +71,16 @@ type session struct {
 	upSince   time.Time
 	lastFatal string
 
+	startReleased bool // the release of the start-up hold was sent and its notification has not come
+
 	holding  bool          // openvpn waits for a hold release between two connection attempts
 	holdWait time.Duration // how long it asked the engine to wait before releasing
 
 	tokenHeld bool // openvpn holds a session token the server pushed
 
-	pushedDNS dnsOptions // the dns options of the last PUSH_REPLY
-	pushMore  bool       // that reply is continued in the next message
+	pushedDNS  dnsOptions // the dns options of the last PUSH_REPLY
+	pushedDHCP []string   // the dhcp-options of the last PUSH_REPLY, where they are read from it
+	pushMore   bool       // that reply is continued in the next message
 
 	vpnState   string      // the name of the last >STATE
 	cause      string      // the latest concrete reason the connection is not coming up
@@ -90,20 +92,29 @@ type session struct {
 
 // child is the openvpn process.
 type child struct {
-	cmd  *exec.Cmd
-	done chan struct{} // closed after the process exited and its output was read
-	err  error         // the result of Wait; valid once done is closed
+	cmd   *exec.Cmd
+	guard processGuard
+	done  chan struct{} // closed after the process exited and its output was read
+	err   error         // the result of Wait; valid once done is closed
 }
+
+// kill ends the process and everything it started, at once.
+func (c *child) kill() { _ = c.guard.kill(c.cmd) }
 
 type engine struct {
 	cfg  Config
 	log  *slog.Logger
 	info func() binaryInfo
-	spec tunnel.Spec
-	deps tunnel.Deps
-	prof *profile
+	// trust confirms that the binary is the one the daemon trusts and keeps it
+	// so until release is called, around the start of the process.
+	trust func() (release func(), err error)
+	spec  tunnel.Spec
+	deps  tunnel.Deps
+	prof  *profile
 
-	dir, configPath, socketPath string
+	dir, configPath string
+	channel         mgmtChannel
+	device          deviceProvider
 
 	// Tests change these before Start.
 	stopGrace     time.Duration
@@ -150,24 +161,28 @@ func (b *backend) newEngine(spec tunnel.Spec, deps tunnel.Deps) (tunnel.Engine, 
 	if err != nil {
 		return nil, fmt.Errorf("openvpn: stored profile is not acceptable: %w", err)
 	}
-	dir, config, socket, err := workspacePaths(b.cfg.RunDir, string(spec.Owner))
+	dir, config := workspaceFiles(b.cfg.RunDir, string(spec.Owner))
+	channel, err := newMgmtChannel(dir)
 	if err != nil {
 		return nil, fmt.Errorf("openvpn: %w", err)
 	}
 	if deps.Log == nil {
 		deps.Log = func(tunnel.LogLevel, string) {}
 	}
+	log := b.cfg.Log.With("owner", string(spec.Owner))
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &engine{
 		cfg:           b.cfg,
-		log:           b.cfg.Log.With("owner", string(spec.Owner)),
+		log:           log,
 		info:          b.info,
+		trust:         b.trustBinary,
 		spec:          spec,
 		deps:          deps,
 		prof:          prof,
 		dir:           dir,
 		configPath:    config,
-		socketPath:    socket,
+		channel:       channel,
+		device:        newDeviceProvider(b.cfg, spec.Owner, prof, log),
 		stopGrace:     stopGrace,
 		dialTimeout:   dialTimeout,
 		upReportGrace: upReportGrace,
@@ -251,7 +266,7 @@ func (e *engine) Stop(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		if c := e.child.Load(); c != nil {
-			_ = c.cmd.Process.Kill()
+			c.kill()
 		}
 		<-e.done
 		return ctx.Err()
@@ -489,6 +504,7 @@ func (e *engine) scrub(text string) string {
 // connection is not up: once it is, the same lines arrive as >LOG with their
 // level.
 func (e *engine) onOutput(level tunnel.LogLevel, line string) {
+	e.channel.output(line)
 	line = e.scrub(line)
 	e.ring.add(line)
 	if !e.mgmtLive.Load() {
@@ -575,8 +591,10 @@ func (e *engine) run(bin binaryInfo) {
 	e.finish(failure)
 }
 
-// finish reports the outcome, removes the workspace and the owner's routes and
-// closes the Status channel. failure is nil after a requested Stop.
+// finish reports the outcome, removes the workspace, the owner's routes and the
+// interface, and closes the Status channel. failure is nil after a requested
+// Stop. The interface goes after the routes: the Reconciler takes the routes
+// that lead to it away first.
 func (e *engine) finish(failure error) {
 	if failure != nil && !e.stopRequested() {
 		reason := e.scrub(failure.Error()) // before update: both take e.mu
@@ -590,6 +608,7 @@ func (e *engine) finish(failure error) {
 	e.cancel()
 	e.removeWorkspace()
 	e.deps.Network.Withdraw(e.spec.Owner)
+	e.device.release()
 	if !e.statusIsFailed() {
 		e.update(func(s *tunnel.Status) {
 			s.State = tunnel.StateDisconnected
@@ -622,6 +641,16 @@ func (e *engine) supervise(bin binaryInfo) error {
 	e.s.endpoints = endpoints
 	if err := e.announce(); err != nil {
 		return err
+	}
+	if e.stopRequested() {
+		return nil
+	}
+
+	if err := e.device.acquire(e.runCtx); err != nil {
+		if e.stopRequested() {
+			return nil
+		}
+		return fmt.Errorf("prepare the tunnel interface: %w", err)
 	}
 	if e.stopRequested() {
 		return nil
@@ -715,8 +744,15 @@ func (e *engine) resolveEndpoints(timeout time.Duration) ([]netip.Addr, error) {
 }
 
 func (e *engine) spawn(bin binaryInfo) (*child, error) {
-	cmd := exec.Command(e.cfg.Binary, buildArgs(bin, e.configPath, e.socketPath)...)
+	release, err := e.trust()
+	if err != nil {
+		return nil, fmt.Errorf("openvpn is not trusted: %w", err)
+	}
+	defer release()
+
+	cmd := exec.Command(e.cfg.Binary, buildArgs(bin, e.configPath, e.channel.options(), e.device.options())...)
 	cmd.Env = childEnv()
+	prepareCommand(cmd, e.dir)
 	stdout := &lineSink{emit: e.onOutput}
 	stderr := &lineSink{emit: e.onOutput}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
@@ -724,23 +760,37 @@ func (e *engine) spawn(bin binaryInfo) (*child, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start openvpn: %w", err)
 	}
-	c := &child{cmd: cmd, done: make(chan struct{})}
+	guard, err := guardProcess(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("start openvpn: %w", err)
+	}
+	c := &child{cmd: cmd, guard: guard, done: make(chan struct{})}
 	e.child.Store(c)
 	e.log.Info("openvpn started", "pid", cmd.Process.Pid)
 	go func() {
 		c.err = cmd.Wait()
 		stdout.flush()
 		stderr.flush()
+		c.guard.close()
 		close(c.done)
 	}()
 	return c, nil
 }
 
 // terminate stops the child: SIGTERM through the management interface (or
-// directly when there is none), then a kill after the grace period.
+// directly when there is none), then a kill after the grace period. Where the
+// OS has no direct way to ask, and the management interface is out of reach,
+// the kill comes at once.
 func (e *engine) terminate(c *child, conn *mgmtConn) {
 	if conn == nil || conn.Send("signal", "signal SIGTERM") != nil {
-		_ = c.cmd.Process.Signal(syscall.SIGTERM)
+		if errors.Is(signalExit(c.cmd), errNoExitSignal) {
+			e.log.Warn("openvpn cannot be asked to exit; killing it")
+			c.kill()
+			<-c.done
+			return
+		}
 	}
 	select {
 	case <-c.done:
@@ -748,7 +798,7 @@ func (e *engine) terminate(c *child, conn *mgmtConn) {
 	case <-time.After(e.stopGrace):
 	}
 	e.log.Warn("openvpn ignored SIGTERM; killing it")
-	_ = c.cmd.Process.Kill()
+	c.kill()
 	<-c.done
 }
 
@@ -756,7 +806,7 @@ func (e *engine) terminate(c *child, conn *mgmtConn) {
 // nil after a requested Stop and the reason otherwise.
 func (e *engine) monitor(c *child) error {
 	ctx, cancel := context.WithTimeout(e.runCtx, e.dialTimeout)
-	conn, err := dialMgmt(ctx, e.socketPath, c.done)
+	conn, err := e.channel.dial(ctx, c.done, c.cmd.Process.Pid)
 	cancel()
 	if err != nil {
 		if e.stopRequested() {
@@ -848,6 +898,7 @@ func (e *engine) monitor(c *child) error {
 			}
 			break
 		}
+		e.s.startReleased = e.s.startReleased || cmd[0] == "hold"
 	}
 	e.takeRebind() // openvpn has just started; there is nothing to restart
 
@@ -894,6 +945,9 @@ func (e *engine) monitor(c *child) error {
 			return nil
 		case <-lostTimer:
 			e.terminate(c, nil)
+			if why := conn.whyClosed(); why != nil {
+				return fmt.Errorf("lost the management connection to openvpn: %w", why)
+			}
 			return errors.New("lost the management connection to openvpn")
 		case <-upTimer:
 			e.terminate(c, conn)
@@ -1060,7 +1114,7 @@ func (e *engine) handle(ev mgmtEvent, conn *mgmtConn) error {
 	case infoEvent:
 		e.logLine(tunnel.LogInfo, ev.Msg)
 	case commandError:
-		e.onCommandError(ev)
+		return e.onCommandError(ev)
 	case otherEvent:
 		e.log.Debug("management line ignored", "line", e.scrub(truncate(ev.Line, 200)))
 	}
@@ -1074,6 +1128,13 @@ func (e *engine) handle(ev mgmtEvent, conn *mgmtConn) error {
 // refuses, so the monitor loop releases it after the wait.
 func (e *engine) onHold(ev holdEvent, conn *mgmtConn) error {
 	if ev.Wait <= 0 {
+		if e.s.startReleased && conn.paced() {
+			// The release sent at the start answers this notification. A second one
+			// would wait for a reply that openvpn does not give while it asks for
+			// credentials, and keep every command after it from being sent.
+			e.s.startReleased = false
+			return nil
+		}
 		return e.releaseHold(conn)
 	}
 	e.s.holding = true
@@ -1105,11 +1166,19 @@ func (e *engine) onPushReply(reply pushReply) {
 	s := &e.s
 	if !s.pushMore {
 		s.pushedDNS = dnsOptions{} // a new reply; the one before is for an earlier connection
+		s.pushedDHCP = nil
 	}
 	s.pushMore = reply.more
 	for _, opt := range reply.options {
 		args := strings.Fields(opt)
-		if len(args) == 0 || args[0] != "dns" || e.prof.filtered(opt) {
+		if len(args) == 0 || e.prof.filtered(opt) {
+			continue
+		}
+		if readsDHCPOptionsFromLog && args[0] == "dhcp-option" {
+			s.pushedDHCP = append(s.pushedDHCP, opt)
+			continue
+		}
+		if args[0] != "dns" {
 			continue
 		}
 		if err := s.pushedDNS.add(args[1:]); err != nil {
@@ -1284,8 +1353,13 @@ func (e *engine) softAuthFailure(ev passwordFailed) bool {
 	return true
 }
 
-func (e *engine) onCommandError(ev commandError) {
+// onCommandError handles openvpn refusing a command. The ones the engine cannot do
+// without end the session: with no state notices it cannot tell what openvpn is
+// doing, and with the hold not released openvpn does nothing.
+func (e *engine) onCommandError(ev commandError) error {
 	switch ev.Cmd {
+	case "state", "log", "hold":
+		return fmt.Errorf("openvpn refused the command %q: %s", ev.Cmd, ev.Msg)
 	case "username", "password":
 		// openvpn refused the credential itself, for example for its length.
 		kind := tunnel.CredentialUserPassword
@@ -1301,6 +1375,7 @@ func (e *engine) onCommandError(ev commandError) {
 	default:
 		e.logLine(tunnel.LogWarn, fmt.Sprintf("management command %q failed: %s", ev.Cmd, ev.Msg))
 	}
+	return nil
 }
 
 // --- tunnel up and down ---
@@ -1316,13 +1391,25 @@ func (e *engine) onUpDown(ev upDownEvent) error {
 }
 
 func (e *engine) onTunnelUp(env map[string]string) error {
+	if name := e.device.name(); name != "" {
+		// The interface is the engine's own; what openvpn calls it is not needed.
+		env["dev"] = name
+	}
 	up, notes, err := parseUpEnv(env)
 	if err != nil {
 		return err
 	}
 	up.PulledDNS = e.s.pushedDNS
+	for _, opt := range e.s.pushedDHCP {
+		if note := up.addDHCPOption(opt); note != "" {
+			notes = append(notes, note)
+		}
+	}
 	for _, n := range notes {
 		e.logLine(tunnel.LogWarn, n)
+	}
+	if err := e.device.configure(e.runCtx, up); err != nil {
+		return fmt.Errorf("configure the tunnel interface: %w", err)
 	}
 	if e.s.upSince.IsZero() {
 		e.s.upSince = time.Now()
