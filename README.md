@@ -216,7 +216,9 @@ removes it.
   inline or beside the file; a username and password, and a key passphrase,
   are asked for when the profile needs them
 - **WireGuard** profiles in wg-quick format (`.conf`), IPv4 and IPv6, with
-  `Table = off` honoured
+  `Table = off` honoured. An address with a `/0` prefix, such as the
+  `192.168.50.0/0` that ASUS routers write for their LAN, is the default route
+  as far as WireGuard is concerned, and the import says so
 - Profiles that use `pkcs12` or `secret` are refused, and so are directives
   that run programs or read files outside the profile
 

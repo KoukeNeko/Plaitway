@@ -24,6 +24,11 @@ type plan struct {
 // on as 0.0.0.0/0 and ::/0; the Reconciler splits it.
 func (p *profile) plan(mode tunnel.Mode) plan {
 	var pl plan
+	// The warnings of Parse are on screen when the profile is imported or saved; these stay in the
+	// status of a connected profile, where the page of an old profile shows them.
+	for _, w := range p.warnings {
+		pl.warnings = append(pl.warnings, w.Directive+": "+w.Message)
+	}
 	if p.noRoutes {
 		if mode == tunnel.ModeFull {
 			pl.warnings = append(pl.warnings, "Full tunnel ignored: Table = off")

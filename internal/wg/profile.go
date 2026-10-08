@@ -60,6 +60,9 @@ type profile struct {
 	// excludePrivate is the user's option, not part of the profile text: the
 	// private ranges are left out of every peer's AllowedIPs.
 	excludePrivate bool
+
+	// warnings are what the text says one thing in and means another in.
+	warnings []tunnel.Warning
 }
 
 type peerConfig struct {
@@ -87,7 +90,7 @@ func Parse(content []byte) (tunnel.Parsed, error) {
 	if err != nil {
 		return tunnel.Parsed{}, err
 	}
-	return tunnel.Parsed{Summary: summary, Content: slices.Clone(content)}, nil
+	return tunnel.Parsed{Summary: summary, Warnings: p.warnings, Content: slices.Clone(content)}, nil
 }
 
 func parseProfile(content []byte) (*profile, error) {
@@ -143,7 +146,9 @@ func parseProfile(content []byte) (*profile, error) {
 		case "interface":
 			err = p.setInterface(key, value)
 		case "peer":
-			err = cur.set(key, value)
+			err = cur.set(key, value, func(directive, message string) {
+				p.warnings = append(p.warnings, tunnel.Warning{Line: n, Directive: directive, Message: message})
+			})
 		default:
 			err = errors.New("directive outside a section")
 		}
@@ -235,7 +240,9 @@ func (p *profile) setInterface(key, value string) error {
 	return nil
 }
 
-func (p *peerConfig) set(key, value string) error {
+// set stores one directive of a [Peer] section; warn is told what it accepted but reads differently
+// from how it was written.
+func (p *peerConfig) set(key, value string, warn func(directive, message string)) error {
 	switch key {
 	case "publickey":
 		k, ok := parseKey(value)
@@ -254,6 +261,11 @@ func (p *peerConfig) set(key, value string) error {
 			prefix, ok := parseAddress(item)
 			if !ok {
 				return errors.New("AllowedIPs must be IP addresses with an optional prefix length")
+			}
+			// A /0 keeps no bit of the address: ASUS routers write 192.168.50.0/0 for the LAN, and
+			// it is the whole address space, which turns a tunnel to one network into a full tunnel.
+			if prefix.Bits() == 0 && !prefix.Addr().IsUnspecified() {
+				warn("AllowedIPs", fmt.Sprintf("%s is read as %s, so all traffic goes through the tunnel; a longer prefix, such as /24, limits it to one network", prefix, prefix.Masked()))
 			}
 			p.allowedIPs = append(p.allowedIPs, prefix.Masked())
 		}

@@ -365,3 +365,56 @@ func TestParseErrorsNeverHoldProfileValues(t *testing.T) {
 		})
 	}
 }
+
+// ASUS routers write "192.168.50.0/0" where the LAN is meant. WireGuard masks that to 0.0.0.0/0,
+// which turns a tunnel to one network into a tunnel for everything.
+func TestParseWarnsOfAnAddressWithAZeroPrefixLength(t *testing.T) {
+	const head = "[Interface]\nPrivateKey = KEYA\nAddress = 10.6.0.2/32\n\n[Peer]\nPublicKey = KEYB\n"
+	tests := []struct {
+		name     string
+		allowed  string
+		wantLine int // 0: no warning
+		wantText string
+	}{
+		{"an IPv4 address with /0", "192.168.50.0/0", 7, "192.168.50.0/0 is read as 0.0.0.0/0"},
+		{"one of several", "10.6.0.0/24, 192.168.50.0/0", 7, "192.168.50.0/0 is read as 0.0.0.0/0"},
+		{"an IPv6 address with /0", "fd00::1/0", 7, "fd00::1/0 is read as ::/0"},
+		{"the IPv4 default", "0.0.0.0/0", 0, ""},
+		{"the IPv6 default", "::/0", 0, ""},
+		{"a network", "192.168.50.0/24", 0, ""},
+		{"a host address with a prefix length, which WireGuard masks as wg-quick does", "10.0.0.5/24", 0, ""},
+		{"an address without a length", "192.168.50.7", 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := Parse([]byte(fill(head + "AllowedIPs = " + tt.allowed + "\n")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantLine == 0 {
+				if len(parsed.Warnings) != 0 {
+					t.Fatalf("warnings = %+v, want none", parsed.Warnings)
+				}
+				return
+			}
+			if len(parsed.Warnings) != 1 {
+				t.Fatalf("warnings = %+v, want one", parsed.Warnings)
+			}
+			w := parsed.Warnings[0]
+			if w.Line != tt.wantLine || w.Directive != "AllowedIPs" || !strings.Contains(w.Message, tt.wantText) {
+				t.Errorf("warning = %+v, want line %d, AllowedIPs, a message with %q", w, tt.wantLine, tt.wantText)
+			}
+		})
+	}
+}
+
+func TestPlanRepeatsTheWarningsOfParse(t *testing.T) {
+	p, err := parseProfile([]byte(fill("[Interface]\nPrivateKey = KEYA\n[Peer]\nPublicKey = KEYB\nAllowedIPs = 192.168.50.0/0\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := p.plan(tunnel.ModeAuto).warnings
+	if len(got) != 1 || !strings.HasPrefix(got[0], "AllowedIPs: 192.168.50.0/0 is read as 0.0.0.0/0") {
+		t.Errorf("warnings = %q, want the warning of Parse, led by its directive", got)
+	}
+}
