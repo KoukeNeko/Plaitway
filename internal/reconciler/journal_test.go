@@ -113,6 +113,72 @@ func TestJournalCompactsWhileRunning(t *testing.T) {
 	}
 }
 
+// A daemon that restarts after compaction ran must find every record that was
+// not finished, and the compaction must not leave the journal unwritable.
+func TestJournalSurvivesCompactionAndRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "journal")
+	j := testJournal(t, path)
+	j.compactAfter = 4
+	for i := range 10 {
+		key := fmt.Sprintf("10.0.0.%d/32", i)
+		for _, state := range []string{statePending, stateApplied} {
+			if err := j.append(routeRecord(key, state)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if i%2 == 0 {
+			if err := j.append(routeRecord(key, stateRemoved)); err != nil {
+				t.Fatalf("append after compaction: %v", err)
+			}
+		}
+	}
+	j.close()
+
+	again := testJournal(t, path)
+	var got []string
+	for _, rec := range again.unresolved() {
+		got = append(got, rec.Key+" "+rec.State)
+	}
+	want := "10.0.0.1/32 applied|10.0.0.3/32 applied|10.0.0.5/32 applied|10.0.0.7/32 applied|10.0.0.9/32 applied"
+	if strings.Join(got, "|") != want {
+		t.Errorf("unresolved after restart:\n got %v\nwant %v", got, want)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("the temporary file was left behind: %v", err)
+	}
+}
+
+// Windows refuses to delete or replace a file that is open, so the journal must
+// not hold its file once it is closed.
+func TestJournalReleasesItsFileWhenClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal")
+	j := testJournal(t, path)
+	if err := j.append(routeRecord("1.1.1.1/32", statePending)); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Errorf("the closed journal is still held: %v", err)
+	}
+}
+
+// The same holds for a Reconciler that Run has ended: the daemon that starts
+// next has to be able to replace the file.
+func TestStoppedReconcilerReleasesItsJournal(t *testing.T) {
+	e := newEnv(t)
+	e.bothTunnels()
+	stop := e.run()
+	e.announce(wgIntent())
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(e.journal); err != nil {
+		t.Errorf("the stopped Reconciler still holds its journal: %v", err)
+	}
+}
+
 func TestJournalViewIsBounded(t *testing.T) {
 	j := testJournal(t, filepath.Join(t.TempDir(), "journal"))
 	for i := range journalView + 50 {

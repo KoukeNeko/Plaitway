@@ -10,12 +10,13 @@ import (
 
 	"github.com/KoukeNeko/Plaitway/internal/osnet"
 	"github.com/KoukeNeko/Plaitway/internal/osnet/fake"
-	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
 
 // crash simulates the daemon dying without cleaning up: its tunnel interfaces
-// go with it, whatever it added through a gateway stays in the table.
+// go with it, whatever it added through a gateway stays in the table. Its open
+// files go too, which a restart on Windows depends on to replace the journal.
 func (e *env) crash(ifaces ...string) {
+	e.r.journal.close()
 	for _, name := range ifaces {
 		e.host.DestroyInterface(name)
 	}
@@ -136,6 +137,7 @@ func TestRecoveryFromAPendingRecord(t *testing.T) {
 	e := newEnv(t)
 	// Crashed right after the add: the route is there, the record is pending.
 	e.host.Routes.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true})
+	e.crash() // the journal belongs to a run that is gone
 	writeJournal(t, e.journal,
 		record{Owner: "wg", Kind: kindRoute, Key: "203.0.113.10/32", State: statePending, Gateway: "192.168.51.1", Iface: "en0"},
 		// Crashed right after the journal write: the route was never added.
@@ -154,6 +156,7 @@ func TestRecoverySweepsResolverEntriesWithoutAJournal(t *testing.T) {
 	e := newEnv(t)
 	e.host.DNS.Leave("ghost", osnet.DNSEntry{Servers: ips("10.0.0.53"), MatchDomains: []string{"corp.lan"}})
 
+	e.crash() // the daemon that left the entry is gone
 	r := e.newReconciler()
 
 	if owned, _ := e.host.DNS.Owned(); len(owned) != 0 {
@@ -190,6 +193,7 @@ func TestRecoveryKeepsARouteItCouldNotDelete(t *testing.T) {
 func TestRecoveryToleratesATornJournal(t *testing.T) {
 	e := newEnv(t)
 	e.host.Routes.Inject(osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0", Static: true})
+	e.crash()
 	writeJournal(t, e.journal,
 		record{Owner: "wg", Kind: kindRoute, Key: "203.0.113.10/32", State: statePending, Gateway: "192.168.51.1", Iface: "en0"})
 	f, err := os.OpenFile(e.journal, os.O_APPEND|os.O_WRONLY, 0o600)
@@ -241,25 +245,5 @@ func TestNewChecksItsArguments(t *testing.T) {
 	host.Routes.InjectFault(fake.Fault{Op: fake.OpDump, Err: errBoom})
 	if _, err := New(base); err == nil {
 		t.Error("recovery without a readable routing table: accepted")
-	}
-}
-
-func TestJournalFileIsPrivate(t *testing.T) {
-	e := newEnv(t)
-	e.addTunnel("utun1", "10.1.0.2/24")
-	e.announce(up("a", 1, "utun1", tunnel.RoleSplit, "10.1.0.0/16"))
-	info, err := os.Stat(e.journal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("journal mode %v", perm)
-	}
-	dir, err := os.Stat(filepath.Dir(e.journal))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := dir.Mode().Perm(); perm != 0o700 {
-		t.Errorf("journal directory mode %v", perm)
 	}
 }

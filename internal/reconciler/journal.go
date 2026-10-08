@@ -175,22 +175,23 @@ func (j *journal) rewrite() error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("closing journal: %w", err)
 	}
-	if err := os.Rename(tmp, j.path); err != nil {
+	if err := j.replaceFile(tmp); err != nil {
 		return fmt.Errorf("replacing journal: %w", err)
-	}
-	if dir, err := os.Open(filepath.Dir(j.path)); err == nil {
-		dir.Sync() // the rename itself; best effort, not every filesystem allows it
-		dir.Close()
 	}
 	if j.file != nil {
 		j.file.Close()
 	}
-	j.file, err = os.OpenFile(j.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
-	if err != nil {
+	if err := j.openForAppend(); err != nil {
 		return fmt.Errorf("reopening journal: %w", err)
 	}
 	j.appended = 0
 	return nil
+}
+
+func (j *journal) openForAppend() error {
+	var err error
+	j.file, err = os.OpenFile(j.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	return err
 }
 
 func (j *journal) view() []tunnel.JournalRecord { return slices.Clone(j.recent) }

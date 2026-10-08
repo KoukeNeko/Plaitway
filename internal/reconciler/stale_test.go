@@ -173,6 +173,8 @@ func TestSweepSurvivesAResolverThatCannotBeListed(t *testing.T) {
 	e.host.DNS.Leave("ghost", osnet.DNSEntry{Servers: ips("10.0.0.53"), MatchDomains: []string{"corp.lan"}})
 	e.host.DNS.Fail("owned", errBoom, 1)
 
+	e.crash() // the daemon that left the entry is gone
+
 	r := e.newReconciler() // logs the failure, starts anyway
 
 	if err := r.Resync(); err != nil {

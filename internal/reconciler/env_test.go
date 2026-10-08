@@ -85,6 +85,9 @@ func (e *env) newReconciler(opts ...func(*Config)) *Reconciler {
 	if err != nil {
 		e.t.Fatalf("New: %v", err)
 	}
+	// A test that never ends its Reconciler must not keep the journal open:
+	// Windows refuses to delete the test's directory under an open file.
+	e.t.Cleanup(func() { r.journal.close() })
 	return r
 }
 
