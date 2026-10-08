@@ -157,6 +157,23 @@ struct SectionPicker<Section: Hashable & CaseIterable>: View where Section.AllCa
     }
 }
 
+/// What a page can do, in a strip under its switcher. These are not toolbar items: a window
+/// toolbar that gains and loses items as the page changes is built again as a whole, the
+/// buttons that stay in it included.
+struct PageBar<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) { content }
+                .buttonStyle(.bordered)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            Divider()
+        }
+    }
+}
+
 struct ToolbarGap: ToolbarContent {
     var body: some ToolbarContent {
         if #available(macOS 26, *) {

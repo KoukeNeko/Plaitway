@@ -26,14 +26,9 @@ struct DiagnosticsView: View {
             switch page {
             // The reading is polled only while it is on screen: on the helper log page
             // every GetDiagnostics call would show up in the log being read.
-            case .overview: overview.task { await diagnostics.run(store: model.store) }
-            case .daemonLog: LogView(profileID: "")
-            }
-        }
-        .navigationTitle(Text("Diagnostics", bundle: .module))
-        .toolbar {
-            if page == .overview {
-                ToolbarItemGroup(placement: .primaryAction) {
+            case .overview:
+                PageBar {
+                    Spacer()
                     Button { copyReport() } label: {
                         Label { Text("Copy Report", bundle: .module) } icon: { Image(systemName: "doc.on.doc") }
                     }
@@ -49,8 +44,11 @@ struct DiagnosticsView: View {
                     .disabled(isResyncing)
                     .accessibilityIdentifier("diagnostics.resync")
                 }
+                overview.task { await diagnostics.run(store: model.store) }
+            case .daemonLog: LogView(profileID: "")
             }
         }
+        .navigationTitle(Text("Diagnostics", bundle: .module))
         .confirmationDialog(
             Text("Remove route \(staleRoutePrefix)?", bundle: .module),
             isPresented: Binding(get: { staleToRemove != nil }, set: { if !$0 { staleToRemove = nil } }),

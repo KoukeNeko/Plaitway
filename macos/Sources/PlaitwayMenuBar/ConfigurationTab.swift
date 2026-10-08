@@ -11,6 +11,23 @@ struct ConfigurationTab: View {
         @Bindable var editor = model.editor(for: profile)
 
         VStack(spacing: 0) {
+            PageBar {
+                Button { editor.revert() } label: { Text("Revert", bundle: .module) }
+                    .disabled(!editor.isDirty)
+                    .accessibilityIdentifier("configuration.revert")
+                Button { editor.toggleSecrets() } label: {
+                    Label {
+                        Text(editor.showsSecrets ? "Hide Secrets" : "Show Secrets", bundle: .module)
+                    } icon: {
+                        Image(systemName: editor.showsSecrets ? "eye.slash" : "eye")
+                    }
+                }
+                .help(Text(editor.showsSecrets ? "Hide Secrets" : "Show Secrets", bundle: .module))
+                .disabled(editor.phase != .ready)
+                .accessibilityIdentifier("configuration.secrets")
+                Spacer()
+                SaveButton(profile: profile, editor: editor)
+            }
             switch editor.phase {
             case .loading:
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -27,26 +44,6 @@ struct ConfigurationTab: View {
         .task(id: profile.id) { await editor.load(from: model.store) }
         .onDisappear { editor.hideSecrets() }
         .onChange(of: profile.status.connectedSince) { editor.noteRestart() }
-        .toolbar {
-            ToolbarItemGroup {
-                Button { editor.revert() } label: { Text("Revert", bundle: .module) }
-                    .disabled(!editor.isDirty)
-                    .accessibilityIdentifier("configuration.revert")
-                Button { editor.toggleSecrets() } label: {
-                    Label {
-                        Text(editor.showsSecrets ? "Hide Secrets" : "Show Secrets", bundle: .module)
-                    } icon: {
-                        Image(systemName: editor.showsSecrets ? "eye.slash" : "eye")
-                    }
-                }
-                .help(Text(editor.showsSecrets ? "Hide Secrets" : "Show Secrets", bundle: .module))
-                .disabled(editor.phase != .ready)
-                .accessibilityIdentifier("configuration.secrets")
-            }
-            ToolbarItem {
-                SaveButton(profile: profile, editor: editor)
-            }
-        }
     }
 }
 

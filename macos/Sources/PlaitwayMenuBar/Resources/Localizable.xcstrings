@@ -201,6 +201,16 @@
         }
       }
     },
+    "Clear" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除"
+          }
+        }
+      }
+    },
     "Close" : {
       "localizations" : {
         "zh-Hant" : {

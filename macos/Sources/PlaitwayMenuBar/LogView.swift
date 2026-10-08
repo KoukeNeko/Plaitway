@@ -39,66 +39,81 @@ struct LogView: View {
 
     var body: some View {
         let lines = visibleLines
-        Group {
-            if lines.isEmpty {
-                if query.isEmpty {
-                    ContentUnavailableView {
-                        Label { Text("No Log Lines", bundle: .module) } icon: { Image(systemName: "text.alignleft") }
-                    }
-                } else {
-                    ContentUnavailableView.search(text: query)
+        VStack(spacing: 0) {
+            PageBar {
+                TextField(text: $query, prompt: Text("Search Logs", bundle: .module)) {
+                    Text("Search Logs", bundle: .module)
                 }
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(lines) { entry in
-                            LogRow(entry: entry)
+                .textFieldStyle(.roundedBorder)
+                .focused($isSearching)
+                .onExitCommand { query = "" }
+                .overlay(alignment: .trailing) {
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                         }
+                        .buttonStyle(.borderless)
+                        .padding(.trailing, 6)
+                        .accessibilityLabel(Text("Clear", bundle: .module))
                     }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .scrollPosition($position)
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 8
-                } action: { _, atEnd in
-                    isAtEnd = atEnd
-                }
-                .onChange(of: lines.last?.id) { _, _ in
-                    if isAtEnd { position.scrollTo(edge: .bottom) }
-                }
-            }
-        }
-        .searchable(text: $query, placement: .toolbar, prompt: Text("Search Logs", bundle: .module))
-        .searchFocused($isSearching)
-        .onChange(of: model.searchRequest) { isSearching = true }
-        .toolbar {
-            ToolbarItem {
+                .accessibilityIdentifier("logs.search")
                 Picker(selection: $filter) {
                     ForEach(LogFilter.allCases, id: \.self) { filter in filter.title.tag(filter) }
                 } label: {
                     Text("Level", bundle: .module)
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
+                .fixedSize()
                 .accessibilityIdentifier("logs.level")
-            }
-            ToolbarItem {
                 Button { position.scrollTo(edge: .bottom) } label: {
                     Label { Text("Latest", bundle: .module) } icon: { Image(systemName: "arrow.down.to.line") }
+                        .labelStyle(.iconOnly)
                 }
                 .help(Text("Latest", bundle: .module))
                 .disabled(isAtEnd)
                 .accessibilityIdentifier("logs.latest")
-            }
-            ToolbarItem {
                 Button { copy(lines) } label: {
                     Label { Text("Copy", bundle: .module) } icon: { Image(systemName: "doc.on.doc") }
+                        .labelStyle(.iconOnly)
                 }
                 .help(Text("Copy", bundle: .module))
                 .disabled(lines.isEmpty)
                 .accessibilityIdentifier("logs.copy")
             }
+            Group {
+                if lines.isEmpty {
+                    if query.isEmpty {
+                        ContentUnavailableView {
+                            Label { Text("No Log Lines", bundle: .module) } icon: { Image(systemName: "text.alignleft") }
+                        }
+                    } else {
+                        ContentUnavailableView.search(text: query)
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(lines) { entry in
+                                LogRow(entry: entry)
+                            }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .scrollPosition($position)
+                    .onScrollGeometryChange(for: Bool.self) { geometry in
+                        geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 8
+                    } action: { _, atEnd in
+                        isAtEnd = atEnd
+                    }
+                    .onChange(of: lines.last?.id) { _, _ in
+                        if isAtEnd { position.scrollTo(edge: .bottom) }
+                    }
+                }
+            }
         }
+        .onChange(of: model.searchRequest) { isSearching = true }
         .task(id: profileID) { await tail.run(store: model.store, profileID: profileID) }
     }
 
