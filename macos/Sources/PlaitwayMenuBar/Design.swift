@@ -162,7 +162,7 @@ struct SectionPicker: NSViewRepresentable {
                 if let section = Array(ProfileSection.allCases)[safe: index] { model.profileSection = section }
             case .diagnostics:
                 if let page = Array(DiagnosticsPage.allCases)[safe: index] { model.diagnosticsPage = page }
-            case nil:
+            case .settings, nil:
                 break
             }
         }

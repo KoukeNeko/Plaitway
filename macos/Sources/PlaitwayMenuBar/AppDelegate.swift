@@ -225,7 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc func openSettings() {
-        windows.showSettings()
+        windows.show()
+        model.selection = .settings
     }
 
     @objc func importProfile() {

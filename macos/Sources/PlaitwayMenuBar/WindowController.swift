@@ -1,19 +1,16 @@
 import AppKit
 import SwiftUI
 
-/// The management window and the settings window. The app has no Dock icon while both are
-/// closed; an open window makes it a regular app, so that it has a menu bar and can be found
-/// with Command-Tab. Closing a window releases it with its views: the tasks they own (the
-/// diagnostics poll, the log streams) would otherwise keep calling the daemon for as long as
-/// the app runs.
+/// The management window. The app has no Dock icon while it is closed; an open window makes it a
+/// regular app, so that it has a menu bar and can be found with Command-Tab. Closing the window
+/// releases it with its views: the tasks they own (the diagnostics poll, the log streams) would
+/// otherwise keep calling the daemon for as long as the app runs.
 @MainActor
 final class WindowController: NSObject, NSWindowDelegate {
     private static let mainFrameName = "PlaitwayMainWindow"
-    private static let settingsFrameName = "PlaitwaySettingsWindow"
 
     private let model: AppModel
     private var mainWindow: NSWindow?
-    private var settingsWindow: NSWindow?
 
     /// The management window is open.
     var isVisible: Bool { mainWindow?.isVisible ?? false }
@@ -27,11 +24,6 @@ final class WindowController: NSObject, NSWindowDelegate {
     func show() {
         if mainWindow == nil { mainWindow = makeMainWindow() }
         bringForward(mainWindow)
-    }
-
-    func showSettings() {
-        if settingsWindow == nil { settingsWindow = makeSettingsWindow() }
-        bringForward(settingsWindow)
     }
 
     private func bringForward(_ window: NSWindow?) {
@@ -55,12 +47,8 @@ final class WindowController: NSObject, NSWindowDelegate {
             if closing === mainWindow, !closing.isVisible {
                 closing.contentViewController = nil
                 mainWindow = nil
-            } else if closing === settingsWindow, !closing.isVisible {
-                closing.contentViewController = nil
-                settingsWindow = nil
             }
-            // The Dock icon stays while the other window is open.
-            if mainWindow?.isVisible != true, settingsWindow?.isVisible != true {
+            if mainWindow?.isVisible != true {
                 NSApp.setActivationPolicy(.accessory)
             }
         }
@@ -79,17 +67,6 @@ final class WindowController: NSObject, NSWindowDelegate {
         window.setContentSize(NSSize(width: 1040, height: 660))
         if !window.setFrameUsingName(Self.mainFrameName) { window.center() }
         window.setFrameAutosaveName(Self.mainFrameName)
-        return window
-    }
-
-    private func makeSettingsWindow() -> NSWindow {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView().environment(model)))
-        window.title = String(localized: "Settings", bundle: .module)
-        window.styleMask = [.titled, .closable]
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-        if !window.setFrameUsingName(Self.settingsFrameName) { window.center() }
-        window.setFrameAutosaveName(Self.settingsFrameName)
         return window
     }
 }

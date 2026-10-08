@@ -57,7 +57,8 @@ Menu bar
 └── Quit Plaitway
 ```
 
-The window is a sidebar of profiles and **Diagnostics**, as tall as the window.
+The window is a sidebar, as tall as the window: the profiles at the top and
+**Diagnostics** and **Settings** (the app's own, and the helper's) at the bottom.
 The page switcher and **+** (import) are at the right of the toolbar;
 **Connect** or **Disconnect**, and **Retry** for a profile that failed, are in a
 bar at the bottom. Each profile has five pages, also in the **View** menu (⌘1

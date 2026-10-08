@@ -46,10 +46,14 @@ struct MainView: View {
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                SectionPicker(model: model, identifier: "toolbar.sections")
+            // A page without pages (Settings, an empty window) has no switcher, and not an empty
+            // glass capsule in its place.
+            if model.hasPages {
+                ToolbarItem(placement: .primaryAction) {
+                    SectionPicker(model: model, identifier: "toolbar.sections")
+                }
+                ToolbarGap()
             }
-            ToolbarGap()
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     ImportPanel.choose { urls in Task { await model.importFiles(urls) } }
@@ -70,39 +74,72 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var model = model
 
-        List(selection: $model.selection) {
-            if !model.store.profiles.isEmpty {
-                Section {
-                    ForEach(model.store.profiles, id: \.id) { profile in
-                        ProfileRow(profile: profile)
-                            .tag(SidebarItem.profile(profile.id))
-                            .contextMenu { ProfileContextMenu(profile: profile) }
+        VStack(spacing: 0) {
+            List(selection: $model.selection) {
+                if !model.store.profiles.isEmpty {
+                    Section {
+                        ForEach(model.store.profiles, id: \.id) { profile in
+                            ProfileRow(profile: profile)
+                                .tag(SidebarItem.profile(profile.id))
+                                .contextMenu { ProfileContextMenu(profile: profile) }
+                        }
+                        .onMove { source, destination in
+                            Task { await model.move(fromOffsets: source, toOffset: destination) }
+                        }
+                    } header: {
+                        Text("Profiles", bundle: .module)
                     }
-                    .onMove { source, destination in
-                        Task { await model.move(fromOffsets: source, toOffset: destination) }
-                    }
-                } header: {
-                    Text("Profiles", bundle: .module)
                 }
             }
+            .listStyle(.sidebar)
+            .accessibilityIdentifier("sidebar")
 
-            Section {
-                HStack(spacing: 10) {
-                    // The same column as the shields above it.
-                    Image(systemName: "stethoscope")
-                        .font(.system(size: 18))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 30)
-                        .accessibilityHidden(true)
-                    Text("Diagnostics", bundle: .module)
-                }
-                .padding(.vertical, 3)
+            SidebarFooter()
+        }
+    }
+}
+
+/// Diagnostics and Settings, below the profiles whatever their number. A list of its own, so that
+/// the selection looks as it does above; the two lists share one selection, and a value that is
+/// not a row of a list is no row of it selected.
+private struct SidebarFooter: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+
+        List(selection: $model.selection) {
+            SidebarRow(symbol: "stethoscope", title: "Diagnostics")
                 .tag(SidebarItem.diagnostics)
-                    .accessibilityIdentifier("sidebar.diagnostics")
-            }
+                .accessibilityIdentifier("sidebar.diagnostics")
+            SidebarRow(symbol: "gearshape", title: "Settings")
+                .tag(SidebarItem.settings)
+                .accessibilityIdentifier("sidebar.settings")
         }
         .listStyle(.sidebar)
-        .accessibilityIdentifier("sidebar")
+        .scrollDisabled(true)
+        .frame(height: Self.height)
+    }
+
+    /// Two rows of a sidebar and the room the list keeps around them.
+    private static let height: CGFloat = 80
+}
+
+/// A row of the footer: a symbol in the column of the shields above, and a name.
+private struct SidebarRow: View {
+    let symbol: String
+    let title: LocalizedStringKey
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 18))
+                .foregroundStyle(.secondary)
+                .frame(width: 30)
+                .accessibilityHidden(true)
+            Text(title, bundle: .module)
+        }
+        .padding(.vertical, 3)
     }
 }
 
@@ -165,6 +202,8 @@ struct DetailView: View {
             }
         case .diagnostics:
             DiagnosticsView()
+        case .settings:
+            SettingsView()
         case nil:
             EmptyProfilesView()
         }

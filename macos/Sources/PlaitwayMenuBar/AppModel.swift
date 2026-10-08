@@ -7,6 +7,7 @@ import SwiftUI
 enum SidebarItem: Hashable {
     case profile(String)
     case diagnostics
+    case settings
 }
 
 /// Something a command did not manage, for an alert.
@@ -216,6 +217,11 @@ final class AppModel {
     /// Profile text was changed in an editor and not saved.
     var hasUnsavedEdits: Bool {
         editors.values.contains { $0.isDirty }
+    }
+
+    /// Whether what is selected has pages to switch between: a profile and Diagnostics have, Settings has not.
+    var hasPages: Bool {
+        selectedProfile != nil || selection == .diagnostics
     }
 
     var selectedProfile: Profile? {
@@ -464,7 +470,7 @@ final class AppModel {
         let existing = Set(store.profiles.map(\.id))
         editors = editors.filter { existing.contains($0.key) }
         switch selection {
-        case .diagnostics:
+        case .diagnostics, .settings:
             return
         case .profile(let id) where store.profiles.contains(where: { $0.id == id }):
             return

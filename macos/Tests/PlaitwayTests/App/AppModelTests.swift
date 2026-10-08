@@ -208,6 +208,9 @@ struct AppModelTests {
             model.selection = .diagnostics
             model.reconcileSelection()
             #expect(model.selection == .diagnostics)
+            model.selection = .settings
+            model.reconcileSelection()
+            #expect(model.selection == .settings)
             model.selection = nil
             model.reconcileSelection()
             #expect(model.selection == .profile(a), "something is selected as soon as there is something")

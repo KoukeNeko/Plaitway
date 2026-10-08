@@ -140,7 +140,7 @@ Remove everything, in this order:
 
 1. In Plaitway, delete the profiles you do not want to keep. This also deletes their saved credentials from the
    Keychain.
-2. Uninstall Helper (General). The daemon removes its routes and DNS entries and macOS removes the registration.
+2. Uninstall Helper (Settings). The daemon removes its routes and DNS entries and macOS removes the registration.
    Installed by the script instead: `sudo scripts/dev-uninstall-daemon.sh`.
 3. Quit Plaitway and move `Plaitway.app` to the Trash. Trashing the app before step 2 can leave a root daemon
    registered with no app to stop it.

@@ -14,11 +14,10 @@ extension DaemonRegistration {
     }
 }
 
-/// The app's own settings and the helper, in the window that Settings… (⌘,) opens.
+/// The app's own settings and the helper: the Settings page of the window, which Settings… (⌘,)
+/// opens. Reinstalling is confirmed by the window itself, as the version banner asks from every page.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    /// The window's own: the main window presents the one the version banner asks for.
-    @State private var isConfirmingReinstall = false
 
     var body: some View {
         Form {
@@ -51,7 +50,7 @@ struct SettingsView: View {
                 }
                 if canManageHelper {
                     HStack {
-                        Button { isConfirmingReinstall = true } label: { Text("Reinstall Helper", bundle: .module) }
+                        Button { model.isConfirmingReinstall = true } label: { Text("Reinstall Helper", bundle: .module) }
                             .accessibilityIdentifier("general.reinstall")
                         Button(role: .destructive) { model.isConfirmingUninstall = true } label: {
                             Text("Uninstall Helper…", bundle: .module)
@@ -65,24 +64,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
-        .modifier(AlertPresenter())
+        .navigationTitle(Text("Settings", bundle: .module))
         .onAppear {
             model.installer.refresh()
             model.loginItem.refresh()
-        }
-        .confirmationDialog(
-            Text("Reinstall helper?", bundle: .module),
-            isPresented: $isConfirmingReinstall,
-            titleVisibility: .visible
-        ) {
-            Button(role: .destructive) {
-                Task { await model.reinstallHelper() }
-            } label: { Text("Reinstall", bundle: .module) }
-            Button(role: .cancel) { } label: { Text("Cancel", bundle: .module) }
-        } message: {
-            Text("Connected profiles disconnect.", bundle: .module)
         }
         .confirmationDialog(
             Text("Uninstall helper?", bundle: .module),
