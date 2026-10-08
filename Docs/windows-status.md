@@ -16,6 +16,13 @@ State of the branch `windows-phase3` on 2026-10-09. The machine of the verificat
 | The service: registration, the pipe served as SYSTEM, stop, restart after a crash, uninstall | `-Include Service -TestMachine` | 4 of 4 |
 | C# client library and app model | `dotnet test` from `windows/` | Client 898 of 900 (2 need a daemon with real engines), AppCore 344 of 344 |
 | The MSI of both languages | `build-installer.ps1`, then `Test-Installer.ps1` (tables, the order of the Helper actions, the unpacked files, the signature of `wintun.dll`) | pass |
+| Installing the MSI for real, on the development PC (the PC had no Plaitway, no `%ProgramData%\Plaitway`, and a restore timer was armed) | install, `plaitwayd status`, `plaitway status` through the pipe, `layoutcheck`, repair (also of a deleted `wintun.dll` and with the service stopped), the zh-TW package over the en-US one, removal with `PLAITWAY_PURGE_DATA=1` | pass; the service is LocalSystem, automatic, restarts on failure; after the removal nothing is left |
+
+The first two attempts to install failed and rolled back cleanly, which found three defects that the read-only checks could not:
+the launch condition used `WindowsBuild`, which the installer reports as 9600 on Windows 11 (now read from the registry); the
+quotes of the Helper command lines reached `WixQuietExec` as the text `&quot;`; and `MajorUpgrade` gave the upgrade a language, so
+the zh-TW package sat next to the en-US one in one folder (now an explicit upgrade without a language). `Test-Installer.ps1` checks
+the last two.
 
 Every elevated group ran with a restore timer (`packaging/windows/dev/NetworkGuard.ps1`) armed first and with a snapshot of
 routes, DNS rules, adapters, services, firewall rules and drivers before and after; no group left a difference except the
@@ -39,11 +46,10 @@ restarts after a crash.
 
 | What | What it needs |
 |---|---|
-| Installing, repairing, upgrading and removing the MSI with its service | A virtual machine restored to a clean snapshot: [windows/installer/INSTALL-TEST.md](../windows/installer/INSTALL-TEST.md). The PC of the development has to stay without `PlaitwayHelper` for the other tests |
+| What of the MSI is still untried: the rollback of a failed install, the block of a downgrade, `PLAITWAY_FORCE_UNINSTALL`, a removal while a tunnel is up, starting the app from the Start menu entry, an install over a machine that has the service from `plaitwayd install` | A virtual machine restored to a clean snapshot: [windows/installer/INSTALL-TEST.md](../windows/installer/INSTALL-TEST.md) |
 | The `OpenVpn` group of the elevated tests (3 tests: the engine on a tap-windows6 adapter against a loopback server) | An OpenVPN installation with nothing connected, or a decision to run next to the owner's connection (`-IAcceptOpenVpnInterruption`). The PC of the verification had a connected OpenVPN, so the group was not run |
 | An IPv6 gateway on a tap-windows6 adapter (unknown 4) | A test that pushes IPv6 from the loopback server |
 | Dropping profile files on the window | The drop is wired in `ShellView`; a drag from Explorer has not been tried |
-| The app asking the user's consent to run `plaitwayd.exe install` from an installed copy | A machine with the MSI installed |
 | The UI tests (`Plaitway.App.UiTests`) | They open the window on the screen of whoever runs them; not run since the drop and the trust check were wired |
 | Windows 10, arm64 | Machines |
 

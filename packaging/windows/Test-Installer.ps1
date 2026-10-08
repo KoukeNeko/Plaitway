@@ -103,6 +103,15 @@ function Test-Database($Handle, [string] $Culture) {
     $inScript = @($actions | Where-Object { ([int] $_[1] -band $deferredTypeBit) -ne 0 })
     Assert-That (@($actions).Count -eq 7 -and $inScript.Count -eq 7) 'the seven Helper actions are deferred or rollback (they run as SYSTEM)'
 
+    # Found by installing: an upgrade with a language only replaces a product of that language, and a quote written as an entity
+    # reaches WixQuietExec as the text &quot;.
+    $upgradeRows = Invoke-MsiQuery $Handle 'SELECT `Language` FROM `Upgrade`'
+    Assert-That (@($upgradeRows | Where-Object { $_[0] -ne '' }).Count -eq 0) 'the upgrade replaces a product in any language'
+    $commandLines = @($customActions | Where-Object { $_[0] -like 'SetHelper*Data' })
+    $targets = Invoke-MsiQuery $Handle 'SELECT `Action`, `Target` FROM `CustomAction`'
+    $badCommandLines = @($targets | Where-Object { $_[0] -like 'SetHelper*Data' -and ($_[1] -notmatch '^"' -or $_[1] -match '&quot;') })
+    Assert-That ($commandLines.Count -eq 7 -and $badCommandLines.Count -eq 0) 'the seven command lines of the Helper actions begin with a quote and hold no entity'
+
     $shortcuts = Invoke-MsiQuery $Handle 'SELECT `Name` FROM `Shortcut`'
     Assert-That (@($shortcuts).Count -eq 1) 'one shortcut: the Start menu entry'
 }

@@ -181,13 +181,20 @@ function Write-Licenses([string] $Destination, [string] $PublishedApp) {
     Invoke-Native 'go' @('run', './packaging/notices', '-windows', '-publish', $PublishedApp, '-goarch', $GoMachine, '-o', (Join-Path $licenses 'THIRD_PARTY_NOTICES.md'))
 }
 
-# One hash over the relative names and contents of the payload, in a fixed order.
-function Get-PayloadFingerprint([string] $Directory) {
-    $files = Get-ChildItem -LiteralPath $Directory -Recurse -File | Sort-Object { $_.FullName.ToLowerInvariant() }
-    $lines = foreach ($file in $files) {
+function Get-FileHashLines([string] $Directory, [string[]] $Include) {
+    $files = Get-ChildItem -LiteralPath $Directory -Recurse -File -Include $Include |
+        Where-Object { $_.FullName -notmatch '\\(obj|bin)\\' } | Sort-Object { $_.FullName.ToLowerInvariant() }
+    foreach ($file in $files) {
         $relative = $file.FullName.Substring($Directory.Length).TrimStart('\').ToLowerInvariant()
         '{0} {1}' -f $relative, (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
     }
+}
+
+# One hash over the relative names and contents of the payload and of the sources of the package, in a fixed order: a
+# change of either is another ProductCode, so that the new package replaces the installed one as an upgrade.
+function Get-PayloadFingerprint([string] $Directory) {
+    $installerSources = Join-Path $RepositoryRoot 'windows\installer'
+    $lines = @(Get-FileHashLines $Directory @('*')) + @(Get-FileHashLines $installerSources @('*.wxs', '*.wxl', '*.wixproj'))
     $bytes = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))
     return [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes)).Replace('-', '')
 }
