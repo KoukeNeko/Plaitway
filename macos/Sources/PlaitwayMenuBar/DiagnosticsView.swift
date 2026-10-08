@@ -2,28 +2,26 @@ import AppKit
 import PlaitwayClient
 import SwiftUI
 
-struct DiagnosticsView: View {
-    private enum Page: CaseIterable, Hashable {
-        case overview, daemonLog
+enum DiagnosticsPage: PageSet {
+    case overview, daemonLog
 
-        var label: String {
-            switch self {
-            case .overview: String(localized: "Overview", bundle: .module)
-            case .daemonLog: String(localized: "Helper log", bundle: .module)
-            }
+    var label: String {
+        switch self {
+        case .overview: String(localized: "Overview", bundle: .module)
+        case .daemonLog: String(localized: "Helper log", bundle: .module)
         }
     }
+}
 
+struct DiagnosticsView: View {
     @Environment(AppModel.self) private var model
     @State private var diagnostics = DiagnosticsModel()
-    @State private var page: Page = .overview
     @State private var isResyncing = false
     @State private var staleToRemove: StaleRoute?
 
     var body: some View {
         VStack(spacing: 0) {
-            SectionPicker(selection: $page, label: \.label)
-            switch page {
+            switch model.diagnosticsPage {
             // The reading is polled only while it is on screen: on the helper log page
             // every GetDiagnostics call would show up in the log being read.
             case .overview:

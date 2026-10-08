@@ -30,7 +30,7 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 300)
         } detail: {
             VStack(spacing: 0) {
                 if case .versionMismatch(let daemon, let app) = model.setup {
@@ -42,16 +42,10 @@ struct MainView: View {
             }
         }
         .toolbar {
-            if let profile = model.selectedProfile {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    if profile.state == .failed {
-                        Button { model.setEnabled(true, profileID: profile.id) } label: { Text("Retry", bundle: .module) }
-                            .accessibilityIdentifier("profile.retry")
-                    }
-                    ConnectButton(profile: profile)
-                }
-                ToolbarGap()
+            ToolbarItem(placement: .primaryAction) {
+                SectionPicker(model: model, identifier: "toolbar.sections")
             }
+            ToolbarGap()
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     ImportPanel.choose { urls in Task { await model.importFiles(urls) } }

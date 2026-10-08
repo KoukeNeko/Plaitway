@@ -1,3 +1,4 @@
+import AppKit
 import PlaitwayClient
 import SwiftUI
 
@@ -119,47 +120,97 @@ struct StatusLabel: View {
     }
 }
 
-// macOS 26 and later draw the window's bars in glass; the app still runs on 15, where the same
-// code has to give a plain bar.
-
-extension View {
-    /// The section switcher of a page: a tab control on macOS 27, a segmented one before.
-    @ViewBuilder
-    func sectionPickerStyle() -> some View {
-        if #available(macOS 27, *) {
-            pickerStyle(.tabs)
-        } else {
-            pickerStyle(.segmented)
-        }
-    }
+/// The pages of a profile, or of Diagnostics: one of them is shown at a time.
+protocol PageSet: Hashable, CaseIterable {
+    var label: String { get }
 }
 
-/// The switcher between the pages of a profile or of Diagnostics, at the top of the page. It
-/// is not in the toolbar: five names do not fit beside the title and the actions of a window
-/// that is only 860 points wide, and the toolbar would move it into its overflow menu.
-struct SectionPicker<Section: Hashable & CaseIterable>: View where Section.AllCases: RandomAccessCollection {
-    @Binding var selection: Section
-    let label: (Section) -> String
+/// The page switcher at the right of the toolbar, as the view switcher of a Finder window is: the
+/// pages of the profile that is selected, or of Diagnostics, and nothing for an empty window.
+///
+/// It is AppKit's control and follows the model itself. A toolbar item whose content is chosen by
+/// SwiftUI is replaced by the toolbar when that content changes, and the toolbar is then seen to
+/// be built again with every page that is chosen; this item never changes.
+struct SectionPicker: NSViewRepresentable {
+    let model: AppModel
+    let identifier: String
 
-    var body: some View {
-        Picker(selection: $selection) {
-            ForEach(Array(Section.allCases), id: \.self) { section in
-                Text(verbatim: label(section)).tag(section)
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(labels: [], trackingMode: .selectOne, target: context.coordinator, action: #selector(Coordinator.changed))
+        control.segmentDistribution = .fit
+        control.setAccessibilityIdentifier(identifier)
+        context.coordinator.control = control
+        context.coordinator.follow()
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {}
+
+    @MainActor
+    final class Coordinator: NSObject {
+        let model: AppModel
+        weak var control: NSSegmentedControl?
+
+        init(model: AppModel) { self.model = model }
+
+        @objc func changed(_ sender: NSSegmentedControl) {
+            let index = sender.selectedSegment
+            switch model.selection {
+            case .profile:
+                if let section = Array(ProfileSection.allCases)[safe: index] { model.profileSection = section }
+            case .diagnostics:
+                if let page = Array(DiagnosticsPage.allCases)[safe: index] { model.diagnosticsPage = page }
+            case nil:
+                break
             }
-        } label: {
-            Text("Section", bundle: .module)
         }
-        .labelsHidden()
-        .sectionPickerStyle()
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
+
+        /// Shows the pages and the one that is open, and again each time the model changes them.
+        func follow() {
+            guard let control else { return }
+            let labels: [String]
+            let current: Int?
+            if model.selectedProfile != nil {
+                labels = ProfileSection.allCases.map(\.label)
+                current = Array(ProfileSection.allCases).firstIndex(of: model.profileSection)
+            } else if model.selection == .diagnostics {
+                labels = DiagnosticsPage.allCases.map(\.label)
+                current = Array(DiagnosticsPage.allCases).firstIndex(of: model.diagnosticsPage)
+            } else {
+                labels = []
+                current = nil
+            }
+            if control.segmentCount != labels.count {
+                control.segmentCount = labels.count
+            }
+            for (index, label) in labels.enumerated() where control.label(forSegment: index) != label {
+                control.setLabel(label, forSegment: index)
+            }
+            control.isHidden = labels.isEmpty
+            control.selectedSegment = current ?? -1
+            withObservationTracking {
+                _ = model.selection
+                _ = model.selectedProfile != nil
+                _ = model.profileSection
+                _ = model.diagnosticsPage
+            } onChange: { [weak self] in
+                Task { @MainActor in self?.follow() }
+            }
+        }
     }
 }
 
-/// What a page can do, in a strip under its switcher. These are not toolbar items: a window
-/// toolbar that gains and loses items as the page changes is built again as a whole, the
-/// buttons that stay in it included.
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
+/// What a page can do, in a strip at its top. These are not toolbar items: a window toolbar that
+/// gains and loses items as the page changes is built again as a whole, the buttons that stay in
+/// it included.
 struct PageBar<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -168,7 +219,7 @@ struct PageBar<Content: View>: View {
             HStack(spacing: 8) { content }
                 .buttonStyle(.bordered)
                 .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                .padding(.vertical, 8)
             Divider()
         }
     }

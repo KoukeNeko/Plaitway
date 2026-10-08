@@ -2,7 +2,7 @@ import AppKit
 import PlaitwayClient
 import SwiftUI
 
-enum ProfileSection: CaseIterable, Hashable {
+enum ProfileSection: PageSet {
     case overview, routes, logs, configuration, settings
 
     var label: String {
@@ -21,25 +21,43 @@ struct ProfileDetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        @Bindable var model = model
-
-        VStack(spacing: 0) {
-            SectionPicker(selection: $model.profileSection, label: \.label)
-                .accessibilityIdentifier("profile.tabs")
-            Group {
-                switch model.profileSection {
-                case .overview: OverviewTab(profile: profile, showRoutes: { model.profileSection = .routes })
-                case .routes: RoutesTab(profile: profile)
-                case .logs: LogView(profileID: profile.id)
-                case .configuration: ConfigurationTab(profile: profile)
-                case .settings: SettingsTab(profile: profile)
-                }
+        Group {
+            switch model.profileSection {
+            case .overview: OverviewTab(profile: profile, showRoutes: { model.profileSection = .routes })
+            case .routes: RoutesTab(profile: profile)
+            case .logs: LogView(profileID: profile.id)
+            case .configuration: ConfigurationTab(profile: profile)
+            case .settings: SettingsTab(profile: profile)
             }
-            // A profile of its own: typed text and the log stream do not carry over.
-            .id(profile.id)
         }
+        // A profile of its own: typed text and the log stream do not carry over.
+        .id(profile.id)
+        .safeAreaInset(edge: .bottom, spacing: 0) { ProfileActionBar(profile: profile) }
         .navigationTitle(Text(verbatim: profile.name))
         .navigationSubtitle(Text(verbatim: "\(profile.kind.label) · \(profile.state.label)"))
+    }
+}
+
+/// What can be done with the profile as a whole, at the bottom of each of its pages.
+private struct ProfileActionBar: View {
+    let profile: Profile
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 8) {
+                Spacer()
+                if profile.state == .failed {
+                    Button { model.setEnabled(true, profileID: profile.id) } label: { Text("Retry", bundle: .module) }
+                        .accessibilityIdentifier("profile.retry")
+                }
+                ConnectButton(profile: profile)
+            }
+            .controlSize(.large)
+            .padding(12)
+        }
+        .background(.bar)
     }
 }
 

@@ -93,6 +93,7 @@ final class AppModel {
     var selection: SidebarItem?
     /// The page of a profile that is open; it stays when another profile is selected.
     var profileSection: ProfileSection = .overview
+    var diagnosticsPage: DiagnosticsPage = .overview
     /// Counts Command-F: the log on screen moves the focus to its search field.
     var searchRequest = 0
     /// The menu bar item is the user's to hide: here, in System Settings and by dragging it out.

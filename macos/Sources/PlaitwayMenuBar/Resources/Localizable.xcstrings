@@ -1621,16 +1621,6 @@
         }
       }
     },
-    "Section" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "區段"
-          }
-        }
-      }
-    },
     "Select All" : {
       "localizations" : {
         "zh-Hant" : {

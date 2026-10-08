@@ -75,7 +75,8 @@ final class WindowController: NSObject, NSWindowDelegate {
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.setContentSize(NSSize(width: 960, height: 620))
+        window.contentMinSize = NSSize(width: 960, height: 480)
+        window.setContentSize(NSSize(width: 1040, height: 660))
         if !window.setFrameUsingName(Self.mainFrameName) { window.center() }
         window.setFrameAutosaveName(Self.mainFrameName)
         return window
