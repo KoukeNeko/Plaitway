@@ -188,6 +188,9 @@ func addrStrings(addrs []netip.Addr) []string {
 // are not the profile's routes and stay out; Diagnostics lists them. A tunnel
 // that is up but has none of its routes and DNS installed also says so in its
 // warnings, because nothing else on the profile shows that it carries nothing.
+// A route that another program's route outranks (RouteReport.Overridden) warns
+// on its own, whatever else of the profile is installed: the traffic it was for
+// goes through the other program.
 func tunnelStatusToProto(st tunnel.Status, id string, report *tunnel.Report) *pb.TunnelStatus {
 	out := &pb.TunnelStatus{
 		InterfaceName: st.Iface,
@@ -201,14 +204,23 @@ func tunnelStatusToProto(st tunnel.Status, id string, report *tunnel.Report) *pb
 		out.ConnectedSince = timestamppb.New(st.Since)
 	}
 	owner := tunnel.OwnerID(id)
+	var inTable []*pb.RouteStatus // the routes that count for notInstalledWarnings
+	var overridden []tunnel.RouteReport
 	for _, r := range report.Routes {
-		if r.Owner == owner && r.Kind != tunnel.RouteBypass {
-			out.Routes = append(out.Routes, &pb.RouteStatus{
-				Prefix:     r.Prefix.String(),
-				State:      routeStateToProto(r.State),
-				Detail:     r.Detail,
-				ShadowedBy: string(r.ShadowedBy),
-			})
+		if r.Owner != owner || r.Kind == tunnel.RouteBypass {
+			continue
+		}
+		route := &pb.RouteStatus{
+			Prefix:     r.Prefix.String(),
+			State:      routeStateToProto(r.State),
+			Detail:     r.Detail,
+			ShadowedBy: string(r.ShadowedBy),
+		}
+		out.Routes = append(out.Routes, route)
+		if r.Overridden {
+			overridden = append(overridden, r)
+		} else {
+			inTable = append(inTable, route)
 		}
 	}
 	for _, d := range report.DNS {
@@ -226,21 +238,54 @@ func tunnelStatusToProto(st tunnel.Status, id string, report *tunnel.Report) *pb
 	// another program holding the server's address is the usual cause), and
 	// this is the only place the profile says so.
 	for _, r := range report.Routes {
-		if r.Owner == owner && r.Kind == tunnel.RouteBypass && isNotInstalled(routeStateToProto(r.State)) {
-			out.Warnings = append(out.Warnings, withReason("Route to "+r.Prefix.Addr().String()+" not installed", r.Detail))
+		if r.Owner == owner && r.Kind == tunnel.RouteBypass {
+			out.Warnings = append(out.Warnings, bypassWarnings(r)...)
 		}
 	}
 	if st.State == tunnel.StateUp {
-		out.Warnings = append(out.Warnings, notInstalledWarnings(out.Routes, out.Dns)...)
+		out.Warnings = append(out.Warnings, notInstalledWarnings(inTable, out.Dns)...)
 	}
+	out.Warnings = append(out.Warnings, overriddenWarnings(overridden)...)
 	return out
+}
+
+// bypassWarnings says what is wrong with the route that keeps the server
+// reachable, or nothing when it is in use.
+func bypassWarnings(r tunnel.RouteReport) []string {
+	target := "Route to " + r.Prefix.Addr().String()
+	switch {
+	case r.Overridden:
+		return []string{withReason(target+" not in use", r.Detail)}
+	case isNotInstalled(routeStateToProto(r.State)):
+		return []string{withReason(target+" not installed", r.Detail)}
+	}
+	return nil
+}
+
+// overriddenWarnings says that routes of the profile are in the table but not in
+// use, with the reason of the first. The reason names the route of the other
+// program.
+func overriddenWarnings(overridden []tunnel.RouteReport) []string {
+	if len(overridden) == 0 {
+		return nil
+	}
+	return []string{withReason(routeCount(len(overridden), "not in use"), overridden[0].Detail)}
+}
+
+// routeCount is "1 route not installed" or "2 routes not installed".
+func routeCount(n int, what string) string {
+	if n == 1 {
+		return "1 route " + what
+	}
+	return fmt.Sprintf("%d routes %s", n, what)
 }
 
 // notInstalledWarnings explains why nothing of what a tunnel asked for is in
 // place: every route and DNS entry is blocked, failed or pending. It says
 // nothing when something is installed, and nothing when a route is shadowed,
 // which is the normal state of a tunnel that stands by for one of higher
-// priority.
+// priority. The routes it is given are the ones that are not overridden: those
+// are in place and have their own warning.
 func notInstalledWarnings(routes []*pb.RouteStatus, dns []*pb.DnsStatus) []string {
 	var routeReason, dnsReason string
 	for _, r := range routes {
@@ -257,11 +302,7 @@ func notInstalledWarnings(routes []*pb.RouteStatus, dns []*pb.DnsStatus) []strin
 	}
 	var out []string
 	if n := len(routes); n > 0 {
-		text := fmt.Sprintf("%d routes not installed", n)
-		if n == 1 {
-			text = "1 route not installed"
-		}
-		out = append(out, withReason(text, routeReason))
+		out = append(out, withReason(routeCount(n, "not installed"), routeReason))
 	}
 	if len(dns) > 0 {
 		out = append(out, withReason("DNS not installed", dnsReason))

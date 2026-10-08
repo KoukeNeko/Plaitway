@@ -207,6 +207,9 @@ type Reconciler struct {
 	// overridden says, by destination, why a route we installed is not the one in
 	// use (markOverridden), so that a change is logged once.
 	overridden map[netip.Prefix]string
+	// unlisted holds the foreign routes whose interface the network state did not
+	// list at the last pass (markOverridden).
+	unlisted map[routeKey]bool
 
 	desired         Desired
 	routeReports    []tunnel.RouteReport

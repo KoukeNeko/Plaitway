@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -202,11 +203,7 @@ func testGatewayChangeWhileUp(t *testing.T, k keyingCase) {
 	e.announce(tapIntent("10.8.0.1"))
 
 	for _, gateway := range []string{"10.8.0.2", "", "10.8.0.1"} {
-		before := e.host.Routes.Ops()
-		inUse := make(map[netip.Prefix]int, len(tunnelRoutes))
-		for _, dst := range tunnelRoutes {
-			inUse[dst] = routesTo(e, dst)
-		}
+		gaps := watchForGaps(e, tunnelRoutes)
 
 		e.announce(tapIntent(gateway))
 
@@ -223,27 +220,55 @@ func testGatewayChangeWhileUp(t *testing.T, k keyingCase) {
 			"8000::/1 dev utun11",
 		)
 		if !k.windows() {
-			if after := e.host.Routes.Ops(); len(after) != len(before) {
-				t.Errorf("a gateway means nothing on macOS, yet the table was written: %v", e.opLines()[len(before):])
+			if after := e.host.Routes.Ops(); len(after) != gaps.opsBefore {
+				t.Errorf("a gateway means nothing on macOS, yet the table was written: %v", e.opLines()[gaps.opsBefore:])
 			}
 			continue
 		}
-		for _, op := range e.host.Routes.Ops()[len(before):] {
-			if op.Err != nil || !slices.Contains(tunnelRoutes, op.Route.Dst) {
-				continue
-			}
-			switch op.Kind {
-			case fake.OpAdd:
-				inUse[op.Route.Dst]++
-			case fake.OpDelete:
-				if inUse[op.Removed.Dst]--; inUse[op.Removed.Dst] == 0 {
-					t.Errorf("gateway %q: no route to %s between deleting the old one and adding the new one", gateway, op.Removed.Dst)
-				}
-			}
-		}
+		gaps.check(t)
 		for _, rec := range e.unresolved() {
 			if slices.Contains(tunnelRoutes, pfx(rec.Key)) && rec.Gateway != gateway {
 				t.Errorf("journal still lists %s via %q after the change to %q", rec.Key, rec.Gateway, gateway)
+			}
+		}
+	}
+}
+
+// gapWatch follows the operations on the table from the moment it is created and
+// reports a destination that was left without any route, however briefly.
+type gapWatch struct {
+	e         *env
+	opsBefore int
+	inUse     map[netip.Prefix]int
+}
+
+func watchForGaps(e *env, dsts []netip.Prefix) gapWatch {
+	w := gapWatch{e: e, opsBefore: len(e.host.Routes.Ops()), inUse: make(map[netip.Prefix]int, len(dsts))}
+	for _, dst := range dsts {
+		w.inUse[dst] = routesTo(e, dst)
+	}
+	return w
+}
+
+// check replays the operations since the watch began.
+func (w gapWatch) check(t *testing.T) {
+	t.Helper()
+	inUse := maps.Clone(w.inUse)
+	for _, op := range w.e.host.Routes.Ops()[w.opsBefore:] {
+		if op.Err != nil {
+			continue
+		}
+		switch op.Kind {
+		case fake.OpAdd:
+			if _, watched := inUse[op.Route.Dst]; watched {
+				inUse[op.Route.Dst]++
+			}
+		case fake.OpDelete:
+			if _, watched := inUse[op.Removed.Dst]; !watched {
+				continue
+			}
+			if inUse[op.Removed.Dst]--; inUse[op.Removed.Dst] == 0 {
+				t.Errorf("no route to %s after deleting the old one without a new one in the table", op.Removed.Dst)
 			}
 		}
 	}
@@ -370,4 +395,218 @@ func TestTunnelHostRouteThroughTheGatewayIsNotStale(t *testing.T) {
 	}
 	e.r.Withdraw("ovpn")
 	e.checkTable()
+}
+
+// journalLines is what a restart would find in the journal, one line per route
+// as the table lists it, without the interface.
+func (e *env) journalLines() []string {
+	e.t.Helper()
+	var out []string
+	for _, rec := range e.unresolved() {
+		line := rec.Key
+		if rec.Gateway != "" {
+			line += " via " + rec.Gateway
+		}
+		out = append(out, line)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// checkTableHolds is checkTable for a table whose order the test does not
+// care about.
+func (e *env) checkTableHolds(parts ...[]string) {
+	e.t.Helper()
+	got, want := slices.Clone(e.table()), slices.Concat(parts...)
+	slices.Sort(got)
+	slices.Sort(want)
+	checkLines(e.t, "routing table", got, want)
+}
+
+// tableWithoutInterfaces is the table in the form of journalLines.
+func tableWithoutInterfaces(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i], _, _ = strings.Cut(line, " dev ")
+	}
+	slices.Sort(out)
+	return out
+}
+
+// A route that is replaced by one through another next hop goes only when its
+// replacement is in the table. When the tunnel reconnects with another gateway
+// and a replacement cannot be added, the old route stays: it still leads into the
+// tunnel, where deleting it would send 8.8.8.8 out of the physical default route
+// while the tunnel reports itself up.
+func TestReplacedRoutesStayUntilTheirReplacementIsInTheTable(t *testing.T) {
+	const keptNote = "; the previous route via 10.8.0.1 is kept"
+	physical := []string{"198.51.100.7/32 via 192.168.51.1 dev en0", "::/1 dev utun11", "8000::/1 dev utun11"}
+	tests := []struct {
+		name    string
+		failing []string // destinations whose add fails
+		err     error
+		table   []string // after the pass that failed
+		state   tunnel.RouteState
+		detail  string
+	}{
+		{"one half", []string{"0.0.0.0/1"}, errBoom,
+			[]string{"0.0.0.0/1 via 10.8.0.1 dev utun11", "128.0.0.0/1 via 10.8.0.2 dev utun11", "10.20.0.0/16 via 10.8.0.2 dev utun11"},
+			tunnel.RouteFailed, "boom"},
+		{"the other half", []string{"128.0.0.0/1"}, errBoom,
+			[]string{"0.0.0.0/1 via 10.8.0.2 dev utun11", "128.0.0.0/1 via 10.8.0.1 dev utun11", "10.20.0.0/16 via 10.8.0.2 dev utun11"},
+			tunnel.RouteFailed, "boom"},
+		{"both halves", []string{"0.0.0.0/1", "128.0.0.0/1"}, errBoom,
+			[]string{"0.0.0.0/1 via 10.8.0.1 dev utun11", "128.0.0.0/1 via 10.8.0.1 dev utun11", "10.20.0.0/16 via 10.8.0.2 dev utun11"},
+			tunnel.RouteFailed, "boom"},
+		{"every route", []string{"0.0.0.0/1", "128.0.0.0/1", "10.20.0.0/16"}, errBoom,
+			[]string{"0.0.0.0/1 via 10.8.0.1 dev utun11", "128.0.0.0/1 via 10.8.0.1 dev utun11", "10.20.0.0/16 via 10.8.0.1 dev utun11"},
+			tunnel.RouteFailed, "boom"},
+		{"network unreachable", []string{"0.0.0.0/1", "128.0.0.0/1", "10.20.0.0/16"}, osnet.ErrUnreachable,
+			[]string{"0.0.0.0/1 via 10.8.0.1 dev utun11", "128.0.0.0/1 via 10.8.0.1 dev utun11", "10.20.0.0/16 via 10.8.0.1 dev utun11"},
+			tunnel.RoutePending, "network unreachable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t, windowsCase)
+			e.addTap()
+			e.announce(tapIntent("10.8.0.1"))
+			gaps := watchForGaps(e, []netip.Prefix{pfx("0.0.0.0/1"), pfx("128.0.0.0/1"), pfx("10.20.0.0/16")})
+			for _, dst := range tt.failing {
+				e.host.Routes.InjectFault(fake.Fault{Op: fake.OpAdd, Dst: pfx(dst), Err: tt.err})
+			}
+
+			e.announce(tapIntent("10.8.0.2"))
+
+			e.checkTableHolds(physical, tt.table)
+			gaps.check(t)
+			if rt := e.lookup("8.8.8.8"); rt.Iface != "utun11" {
+				t.Errorf("8.8.8.8 leaves through %+v, want the tunnel", rt)
+			}
+			for _, dst := range []string{"0.0.0.0/1", "128.0.0.0/1", "10.20.0.0/16"} {
+				rr := e.routeReport(dst, "ovpn")
+				if !slices.Contains(tt.failing, dst) {
+					if rr.State != tunnel.RouteInstalled {
+						t.Errorf("%s: %+v, want installed", dst, rr)
+					}
+					continue
+				}
+				if rr.State != tt.state || rr.Detail != tt.detail+keptNote {
+					t.Errorf("%s: %+v, want %v with %q", dst, rr, tt.state, tt.detail+keptNote)
+				}
+			}
+			if got, want := e.journalLines(), tableWithoutInterfaces(e.table()); !slices.Equal(got, want) {
+				t.Errorf("journal %v, want the routes in the table %v", got, want)
+			}
+			if !e.r.dirty {
+				t.Error("nothing is scheduled to finish the replacement")
+			}
+
+			e.change(osnet.ChangeRoute) // the add works now
+
+			e.checkTableHolds(physical,
+				[]string{"0.0.0.0/1 via 10.8.0.2 dev utun11", "128.0.0.0/1 via 10.8.0.2 dev utun11", "10.20.0.0/16 via 10.8.0.2 dev utun11"})
+			gaps.check(t)
+			if got, want := e.journalLines(), tableWithoutInterfaces(e.table()); !slices.Equal(got, want) {
+				t.Errorf("journal after the retry %v, want %v", got, want)
+			}
+			if rr := e.routeReport("0.0.0.0/1", "ovpn"); rr.State != tunnel.RouteInstalled || rr.Detail != "" {
+				t.Errorf("0.0.0.0/1 after the retry: %+v", rr)
+			}
+		})
+	}
+}
+
+// An old route that cannot be deleted after its replacement is in stays ours, in
+// the journal as well, and goes in the next pass.
+func TestReplacedRouteThatCannotBeDeletedIsDeletedLater(t *testing.T) {
+	e := newEnv(t, windowsCase)
+	e.addTap()
+	e.announce(tapIntent("10.8.0.1"))
+	e.host.Routes.InjectFault(fake.Fault{Op: fake.OpDelete, Dst: pfx("0.0.0.0/1"), Err: errBoom})
+
+	e.announce(tapIntent("10.8.0.2"))
+
+	if rr := e.routeReport("0.0.0.0/1", "ovpn"); rr.State != tunnel.RouteInstalled {
+		t.Errorf("0.0.0.0/1: %+v, want installed through the new gateway", rr)
+	}
+	if got, want := e.journalLines(), tableWithoutInterfaces(e.table()); !slices.Equal(got, want) || !slices.Contains(got, "0.0.0.0/1 via 10.8.0.1") {
+		t.Errorf("journal %v, want the routes in the table %v, the old half among them", got, want)
+	}
+
+	e.change(osnet.ChangeRoute)
+
+	if got := e.table(); slices.Contains(got, "0.0.0.0/1 via 10.8.0.1 dev utun11") {
+		t.Errorf("the old route is still there: %v", got)
+	}
+	if got, want := e.journalLines(), tableWithoutInterfaces(e.table()); !slices.Equal(got, want) {
+		t.Errorf("journal %v, want %v", got, want)
+	}
+}
+
+// openvpn reconnects and the server pushes another IPv6 gateway, or none, or the
+// tunnel gains one: the IPv6 halves follow like the IPv4 routes do, the new ones
+// before the old ones are removed.
+func TestIPv6GatewayChangeWhileUp(t *testing.T) {
+	halves := []netip.Prefix{pfx("::/1"), pfx("8000::/1")}
+	dualStack := func(v6 string) tunnel.Intent { return withGateway(tapIntent("10.8.0.1"), v6) }
+	e := newEnv(t, windowsCase)
+	e.addTap()
+	e.announce(dualStack(""))
+
+	for _, gateway := range []string{"fd00:8::1", "fd00:8::2", "", "fe80::1"} {
+		gaps := watchForGaps(e, halves)
+
+		e.announce(dualStack(gateway))
+
+		via := ""
+		if gateway != "" {
+			via = " via " + gateway
+		}
+		e.checkTable(
+			"0.0.0.0/1 via 10.8.0.1 dev utun11",
+			"10.20.0.0/16 via 10.8.0.1 dev utun11",
+			"128.0.0.0/1 via 10.8.0.1 dev utun11",
+			"198.51.100.7/32 via 192.168.51.1 dev en0",
+			"::/1"+via+" dev utun11",
+			"8000::/1"+via+" dev utun11",
+		)
+		gaps.check(t)
+		if got, want := e.journalLines(), tableWithoutInterfaces(e.table()); !slices.Equal(got, want) {
+			t.Errorf("gateway %q: journal %v, want the routes in the table %v", gateway, got, want)
+		}
+	}
+}
+
+// A run that crashed before the tunnel announced any gateway left its routes
+// on-link, and the journal says so. The next run removes them by that key, and
+// installs the routes through the gateways it is given.
+func TestRecoveryRemovesTheOnLinkRoutesOfARunWithoutGateways(t *testing.T) {
+	e := newEnv(t, windowsCase)
+	e.addTap()
+	e.announce(tapIntent(""))
+	if left := e.unresolved(); !slices.ContainsFunc(left, func(r record) bool { return r.Key == "::/1" && r.Gateway == "" && r.IfIndex != 0 }) {
+		t.Fatalf("setup: no on-link route in the journal: %+v", left)
+	}
+	e.crash() // the adapter stays, and its routes with it
+
+	e.r = e.newReconciler()
+
+	e.checkTable()
+	if left := e.unresolved(); len(left) != 0 {
+		t.Errorf("the journal still lists %+v", left)
+	}
+
+	e.announce(withGateway(tapIntent("10.8.0.1"), "fd00:8::1"))
+
+	e.checkTable(
+		"0.0.0.0/1 via 10.8.0.1 dev utun11",
+		"10.20.0.0/16 via 10.8.0.1 dev utun11",
+		"128.0.0.0/1 via 10.8.0.1 dev utun11",
+		"198.51.100.7/32 via 192.168.51.1 dev en0",
+		"::/1 via fd00:8::1 dev utun11",
+		"8000::/1 via fd00:8::1 dev utun11",
+	)
+	if got, want := e.journalLines(), tableWithoutInterfaces(e.table()); !slices.Equal(got, want) {
+		t.Errorf("journal %v, want the routes in the table %v", got, want)
+	}
 }

@@ -13,14 +13,15 @@ import (
 // overriddenState is the state of a route of ours that a route of another
 // program outranks: it is in the table, and the traffic goes the other way.
 //
-// It is RouteFailed and not a new state. The manager turns Pending, Blocked and
-// Failed into the warnings that say a tunnel does not carry what it asked for
-// (for a bypass route: that the tunnel cannot connect), and keeps quiet about
-// Shadowed, which is the normal state of a tunnel on standby; an overridden route
-// has to warn. Failed is also what macOS reports for a prefix another program
-// holds ("held by another program"), which is the same situation found by another
-// means. Pending would say that the route waits for something, and nothing is
-// retried: the verdict is read again whenever the network changes.
+// It is RouteFailed and not a new state, and RouteReport.Overridden tells it from
+// a route that could not be installed: the manager warns about every overridden
+// route by that flag (tunnelStatusToProto), whatever else of the tunnel is
+// installed, while its warning that a tunnel carries nothing counts only the
+// routes that are not in the table. Shadowed, the normal state of a tunnel on
+// standby, would not warn at all. Failed is also what macOS reports for a prefix
+// another program holds ("held by another program"), which is the same situation
+// found by another means. Pending would say that the route waits for something,
+// and nothing is retried: the verdict is read again whenever the network changes.
 const overriddenState = tunnel.RouteFailed
 
 // markOverridden finds the routes of ours that are not the ones in use, because a
@@ -45,13 +46,21 @@ const overriddenState = tunnel.RouteFailed
 //     the internet (the full tunnel of a profile with the private ranges taken
 //     out) takes all of it.
 //
-// On Windows an interface metric of zero is one the network state did not give;
-// the detail says so when it takes part in a verdict.
-func (r *Reconciler) markOverridden(table map[routeKey]osnet.Route, out map[netip.Prefix]outcome) {
+// An interface metric of zero is one the network state did not give; the detail
+// says so when it takes part in a verdict.
+//
+// The table and the network state are read one after the other, so a route can
+// name an interface that the state does not list yet (an adapter that has just
+// appeared, with its routes). Such a route has no metric to compare and says
+// nothing this pass: it is no rival, and the pass asks to be repeated with a
+// fresh look at the network. A route that is still unlisted at the next pass
+// belongs to an interface the state does not know, and counts with the interface
+// metric unknown.
+func (r *Reconciler) markOverridden(table map[routeKey]osnet.Route, out map[netip.Prefix]outcome, res *passResult) {
 	if !r.keying.byInterface() {
 		return
 	}
-	foreign := r.foreignRoutes(table)
+	foreign, undecided := r.foreignRoutes(table)
 	verdicts := make(map[netip.Prefix]string)
 	for _, plan := range r.desired.Routes {
 		dst := plan.Route.Dst
@@ -65,27 +74,55 @@ func (r *Reconciler) markOverridden(table map[routeKey]osnet.Route, out map[neti
 		if why := r.overrideReason(ours, foreign); why != "" {
 			verdicts[dst] = why
 			out[dst] = outcome{overriddenState, why}
+		} else if slices.ContainsFunc(undecided, func(rival osnet.Route) bool { return competes(ours.Dst.Masked(), rival) }) {
+			res.retry = true
 		}
 	}
 	r.logOverrides(verdicts, out)
-	r.overridden = verdicts
+	r.overridden, res.overridden = verdicts, verdicts
 }
 
 // foreignRoutes are the routes in the table that are not ours and can carry
-// traffic: a route through an interface that is down does not.
-func (r *Reconciler) foreignRoutes(table map[routeKey]osnet.Route) []osnet.Route {
-	var out []osnet.Route
+// traffic: a route through an interface that is down does not. A route through an
+// interface the network state does not list is undecided the first time it is
+// seen (see markOverridden), and a rival after that. It remembers which routes it
+// found unlisted for the next pass.
+func (r *Reconciler) foreignRoutes(table map[routeKey]osnet.Route) (rivals, undecided []osnet.Route) {
+	unlisted := make(map[routeKey]bool)
 	for _, key := range sortedKeys(table) {
 		rt := table[key]
 		if _, ours := r.owned[key]; ours {
 			continue
 		}
-		if ifc, known := routeInterface(r.netState, rt); known && !ifc.Up {
+		ifc, known := routeInterface(r.netState, rt)
+		switch {
+		case !known:
+			unlisted[key] = true
+			if !r.unlisted[key] {
+				undecided = append(undecided, rt)
+				continue
+			}
+		case !ifc.Up:
 			continue
 		}
-		out = append(out, rt)
+		rivals = append(rivals, rt)
 	}
-	return out
+	r.unlisted = unlisted
+	return rivals, undecided
+}
+
+// competes says whether a foreign route could be the one in use instead of ours
+// to dst: one to the same prefix, or, for a half of the default route, one a
+// program added inside it.
+func competes(dst netip.Prefix, rival osnet.Route) bool {
+	return rival.Dst.Masked() == dst || isDefault(dst) && addedInside(dst, rival)
+}
+
+// addedInside reports whether a program added rt, and to a prefix inside half.
+// The routes the system derives from interface addresses are never a way out.
+func addedInside(half netip.Prefix, rt osnet.Route) bool {
+	dst := rt.Dst.Masked()
+	return rt.Static && dst.Bits() > half.Bits() && half.Contains(dst.Addr())
 }
 
 // overrideReason says why a foreign route outranks ours, or "" when none does.
@@ -164,14 +201,13 @@ func coveringPiece(half netip.Prefix, foreign []osnet.Route) (osnet.Route, bool)
 	var pieces []netip.Prefix
 	var first osnet.Route
 	for _, rt := range foreign {
-		dst := rt.Dst.Masked()
-		if !rt.Static || dst.Bits() <= half.Bits() || !half.Contains(dst.Addr()) {
+		if !addedInside(half, rt) {
 			continue
 		}
 		if len(pieces) == 0 {
 			first = rt
 		}
-		pieces = append(pieces, dst)
+		pieces = append(pieces, rt.Dst.Masked())
 	}
 	var notOnTheInternet []netip.Prefix
 	if half.Addr().Is4() {

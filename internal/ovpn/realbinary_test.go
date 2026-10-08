@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -86,6 +87,9 @@ type serverOpts struct {
 	// network is the network of the tunnel the server hands out, a /24; 10.8.0.0
 	// when empty.
 	network string
+	// networkV6 is the IPv6 network of the tunnel the server hands out, a /64;
+	// none when empty.
+	networkV6 string
 }
 
 // loopbackServer is a real openvpn server on 127.0.0.1 with a throw-away PKI.
@@ -112,6 +116,9 @@ func startLoopbackServer(t *testing.T, bin string, p *pki, o serverOpts) *loopba
 		"--dh", "none", "--verb", "3", "--cd", dir,
 		// What the owner's ASUS router speaks.
 		"--cipher", "AES-128-CBC", "--data-ciphers", "AES-128-CBC", "--auth", "SHA1", "--comp-lzo", "yes",
+	}
+	if o.networkV6 != "" {
+		args = append(args, "--server-ipv6", o.networkV6)
 	}
 	for _, push := range o.pushes {
 		args = append(args, "--push", push)
@@ -466,6 +473,46 @@ func TestRealBinaryPushedRedirectAndDNS(t *testing.T) {
 			h.stop()
 			h.requireProcessGone()
 		})
+	}
+}
+
+// A dual-stack tunnel's IPv6 next hop is the far end of the tunnel's IPv6
+// address (ifconfig_ipv6_remote), not the gateway of the first pushed route: the
+// server pushes an IPv6 route that names a gateway of its own.
+func TestRealBinaryIPv6NextHopIsTheFarEndOfTheTunnelAddress(t *testing.T) {
+	const (
+		tunnelFarEnd    = "fd00:8::1" // what --server-ipv6 fd00:8::/64 gives the server
+		routeGateway    = "fd00:8::99"
+		pushedV6Network = "2001:db8:5::/48"
+	)
+	bin := realBinary(t)
+	p := newPKI(t)
+	srv := startLoopbackServer(t, bin, p, serverOpts{
+		networkV6: "fd00:8::/64",
+		pushes:    []string{"route-ipv6 " + pushedV6Network + " " + routeGateway},
+	})
+	plain := strings.NewReplacer("auth-user-pass\n", "", "auth-nocache\n", "").Replace(asusLoopbackProfile(p, srv.port, "null"))
+	h := realHarness(t, bin, plain, tunnel.Spec{Owner: "dual", Mode: tunnel.ModeSplit})
+
+	h.start()
+	h.waitFor("Up", h.stateIs(tunnel.StateUp))
+	var got tunnel.Intent
+	for _, c := range h.net.snapshot() {
+		if c.intent.State == tunnel.StateUp {
+			got = c.intent
+		}
+	}
+	h.stop()
+	h.requireProcessGone()
+
+	if want := netip.MustParseAddr(tunnelFarEnd); got.GatewayV6 != want {
+		t.Errorf("GatewayV6 = %v, want %v, the far end of the tunnel address and not the %s of the pushed route", got.GatewayV6, want, routeGateway)
+	}
+	if want := netip.MustParseAddr("10.8.0.1"); got.Gateway != want {
+		t.Errorf("Gateway = %v, want %v", got.Gateway, want)
+	}
+	if !slices.Contains(got.Routes, netip.MustParsePrefix(pushedV6Network)) {
+		t.Errorf("routes %v lack the pushed IPv6 route %s", got.Routes, pushedV6Network)
 	}
 }
 

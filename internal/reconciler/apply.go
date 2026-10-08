@@ -35,9 +35,12 @@ var installed = outcome{state: tunnel.RouteInstalled}
 
 // passResult says how a pass went: errs are failures no later pass is
 // guaranteed to fix, retry that something is only waiting for the network.
+// overridden holds, by destination, the routes of ours that another program's
+// route outranks; they are in the table and so are no failure.
 type passResult struct {
-	errs  []error
-	retry bool
+	errs       []error
+	retry      bool
+	overridden map[netip.Prefix]string
 }
 
 func (p *passResult) fail(err error) { p.errs = append(p.errs, err) }
@@ -145,7 +148,7 @@ func (r *Reconciler) reconcileLocked(intents []tunnel.Intent, forceDNS bool) pas
 	if table != nil {
 		r.stale = findStale(r.keying, table, r.netState, r.endpointsLocked(), r.isOwned)
 	}
-	r.buildReports(routeOut, dnsOut)
+	r.buildReports(routeOut, dnsOut, res.overridden)
 	for _, err := range res.errs {
 		r.log.Warn("reconciliation incomplete", "err", err)
 	}
@@ -262,9 +265,58 @@ func (r *Reconciler) syncRoutes(table map[routeKey]osnet.Route, res *passResult)
 	if len(added) > 0 {
 		table = r.verifyAdded(table, added, out, res)
 	}
-	r.deleteOwned(replaced, table, res)
-	r.markOverridden(table, out)
+	r.deleteReplaced(replaced, want, table, out, res)
+	r.markOverridden(table, out, res)
 	return out, table
+}
+
+// deleteReplaced deletes the routes that a route to the same destination through
+// another next hop replaces, once that route is in the verified table. A
+// replacement that could not be added leaves the old route where it is: it
+// still leads into the tunnel, where deleting it would let the traffic of a
+// full tunnel out through the physical network while the tunnel reports itself
+// up. The pass is retried, and the report of the destination says that the old
+// route stays. Only the route of the tunnel that is replaced by its own route is
+// kept: a prefix that went to another owner (priority, or the holder of the default
+// route changed) is not held for the loser.
+func (r *Reconciler) deleteReplaced(replaced []routeKey, want map[routeKey]RoutePlan, table map[routeKey]osnet.Route, out map[netip.Prefix]outcome, res *passResult) {
+	replacements := make(map[netip.Prefix]RoutePlan, len(replaced))
+	for _, plan := range want {
+		replacements[plan.Route.Dst.Masked()] = plan
+	}
+	var superseded []routeKey
+	for _, key := range replaced {
+		plan := replacements[key.dst]
+		if plan.Owner != r.owned[key].owner || r.replacementIsInTable(plan, key.dst, table, out) {
+			superseded = append(superseded, key)
+			continue
+		}
+		out[key.dst] = keptOldRoute(out[key.dst], r.owned[key].route)
+		res.retry = true
+	}
+	r.deleteOwned(superseded, table, res)
+}
+
+// replacementIsInTable says whether the route planned for dst was installed this
+// pass and is in the table read back after adding.
+func (r *Reconciler) replacementIsInTable(plan RoutePlan, dst netip.Prefix, table map[routeKey]osnet.Route, out map[netip.Prefix]outcome) bool {
+	if out[dst] != installed {
+		return false
+	}
+	actual, ok := table[r.keying.key(plan.Route)]
+	return ok && r.keying.same(actual, plan.Route)
+}
+
+// keptOldRoute is the outcome of a destination whose replacement is not in the
+// table: the reason it is not, and that the old route stays. A replacement that
+// is neither failed nor refused is pending, because nothing says why it is
+// missing.
+func keptOldRoute(replacement outcome, old osnet.Route) outcome {
+	if replacement == installed {
+		replacement = outcome{state: tunnel.RoutePending, detail: "the new route is not in the routing table yet"}
+	}
+	replacement.detail += "; the previous route via " + via(old) + " is kept"
+	return replacement
 }
 
 // doomedRoutes are the routes we own that are not wanted any more, or not as
@@ -663,7 +715,7 @@ func (r *Reconciler) sweepResolvers() error {
 	return errors.Join(errs...)
 }
 
-func (r *Reconciler) buildReports(routeOut map[netip.Prefix]outcome, dnsOut map[tunnel.OwnerID]outcome) {
+func (r *Reconciler) buildReports(routeOut map[netip.Prefix]outcome, dnsOut map[tunnel.OwnerID]outcome, overridden map[netip.Prefix]string) {
 	r.routeReports = r.routeReports[:0:0]
 	for _, p := range r.desired.Routes {
 		rep := tunnel.RouteReport{
@@ -672,7 +724,7 @@ func (r *Reconciler) buildReports(routeOut map[netip.Prefix]outcome, dnsOut map[
 		}
 		if o, ok := routeOut[p.Route.Dst]; ok && p.Install {
 			rep.State, rep.Detail = o.state, o.detail
-			rep.Overridden = o.state == overriddenState && r.overridden[p.Route.Dst] == o.detail
+			rep.Overridden = o.state == overriddenState && overridden[p.Route.Dst] == o.detail
 		}
 		r.routeReports = append(r.routeReports, rep)
 	}

@@ -87,6 +87,7 @@ ifconfig_local=10.8.0.2
 ifconfig_netmask=255.255.255.0
 ifconfig_ipv6_local=fd00:8::2
 ifconfig_ipv6_netbits=64
+ifconfig_ipv6_remote=fd00:8::1
 route_net_gateway=192.168.51.1
 route_vpn_gateway=10.8.0.1
 route_network_1=10.20.0.0

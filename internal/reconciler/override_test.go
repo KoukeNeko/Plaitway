@@ -2,12 +2,14 @@ package reconciler
 
 import (
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/KoukeNeko/Plaitway/internal/osnet"
+	"github.com/KoukeNeko/Plaitway/internal/osnet/fake"
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
 
@@ -62,14 +64,14 @@ func (e *env) overriddenBy(dst, gateway string, theirs, ours uint64) string {
 
 func (e *env) expectInstalled(dst string, owner tunnel.OwnerID) {
 	e.t.Helper()
-	if rr := e.routeReport(dst, owner); rr.State != tunnel.RouteInstalled || rr.Detail != "" {
+	if rr := e.routeReport(dst, owner); rr.State != tunnel.RouteInstalled || rr.Detail != "" || rr.Overridden {
 		e.t.Errorf("%s of %s: %+v, want installed", dst, owner, rr)
 	}
 }
 
 func (e *env) expectOverridden(dst string, owner tunnel.OwnerID, detail string) {
 	e.t.Helper()
-	if rr := e.routeReport(dst, owner); rr.State != tunnel.RouteFailed || rr.Detail != detail {
+	if rr := e.routeReport(dst, owner); rr.State != tunnel.RouteFailed || rr.Detail != detail || !rr.Overridden {
 		e.t.Errorf("%s of %s: %+v\nwant state failed and %q", dst, owner, rr, detail)
 	}
 }
@@ -88,6 +90,30 @@ func (e *env) expectSettled() {
 	}
 	if e.r.dirty || e.r.failedPasses != 0 || e.r.failStreak != 0 {
 		e.t.Errorf("an overridden route is no failure to retry: dirty %v, failed %d, streak %d", e.r.dirty, e.r.failedPasses, e.r.failStreak)
+	}
+}
+
+// A route that could not be installed is no override: the typed flag is what the
+// manager tells them apart by.
+func TestOnlyAnOverriddenRouteIsFlagged(t *testing.T) {
+	e := newEnv(t, windowsCase)
+	e.addTunnel("utun10", "10.6.0.2/24")
+	e.addForeignVPN(foreignAdapterMetric)
+	e.foreignRoute("0.0.0.0/1", foreignRouteMetric)
+	e.host.Routes.InjectFault(fake.Fault{Op: fake.OpAdd, Dst: pfx("128.0.0.0/1"), Err: errBoom})
+
+	e.announce(wgIntent())
+
+	flagged := map[string]bool{}
+	for _, rr := range e.r.Report().Routes {
+		flagged[rr.Prefix.String()] = rr.Overridden
+	}
+	want := map[string]bool{"0.0.0.0/1": true, "128.0.0.0/1": false, "::/1": false, "8000::/1": false, "203.0.113.10/32": false}
+	if !maps.Equal(flagged, want) {
+		t.Errorf("flagged %v, want %v", flagged, want)
+	}
+	if rr := e.routeReport("128.0.0.0/1", "wg"); rr.State != tunnel.RouteFailed {
+		t.Errorf("128.0.0.0/1: %+v, want failed", rr)
 	}
 }
 
@@ -336,6 +362,7 @@ func TestVerdictSaysWhenAnInterfaceMetricIsUnknown(t *testing.T) {
 		e.host.Inject(osnet.Route{Dst: pfx("0.0.0.0/1"), Gateway: ip("10.9.0.1"), Iface: "ghost", IfIndex: 99, Static: true, Metric: 1})
 
 		e.announce(wgIntent())
+		e.change(osnet.ChangeRoute) // the interface is still not listed after a fresh look
 
 		want := fmt.Sprintf("overridden by 0.0.0.0/1 via 10.9.0.1 (interface 99): effective metric 1, ours %d; interface metric unknown", ourTunnelMetric)
 		e.expectOverridden("0.0.0.0/1", "wg", want)
@@ -353,6 +380,56 @@ func TestVerdictSaysWhenAnInterfaceMetricIsUnknown(t *testing.T) {
 		want := e.overriddenBy("0.0.0.0/1", "10.9.0.1", foreignRouteMetric+foreignAdapterMetric, tunnelMetric) + "; interface metric unknown"
 		e.expectOverridden("0.0.0.0/1", "wg", want)
 	})
+}
+
+// The table is read before the network state, so the routes of an adapter that
+// has just appeared can be in the table while the state does not list it. Such a
+// route has no metric: counting it as 0 flagged our route as overridden for a
+// pass. It says nothing the first time, the pass is repeated with a fresh look at
+// the network, and the verdict is then made with the real metrics.
+func TestForeignRouteOfAnInterfaceNotListedYetGivesNoVerdict(t *testing.T) {
+	e := newEnv(t, windowsCase)
+	e.addTunnel("utun10", "10.6.0.2/24")
+	late := e.host.lastIndex + 1 // the index the adapter will have
+	for _, dst := range []string{"0.0.0.0/1", "128.0.0.0/1"} {
+		e.host.Inject(osnet.Route{Dst: pfx(dst), Gateway: ip("10.9.0.1"), Iface: foreignAdapter, IfIndex: uint32(late), Static: true, Metric: foreignRouteMetric})
+	}
+
+	e.announce(wgIntent())
+
+	e.expectInstalled("0.0.0.0/1", "wg")
+	e.expectInstalled("128.0.0.0/1", "wg")
+	if !e.r.dirty {
+		t.Error("the pass did not ask to be repeated")
+	}
+	if len(e.r.overridden) != 0 {
+		t.Errorf("verdicts without a metric to compare: %v", e.r.overridden)
+	}
+
+	// The network state catches up: the adapter has a high metric, so it is no rival.
+	e.addForeignVPN(foreignAdapterMetric + 100)
+	e.change(osnet.ChangeHeartbeat)
+
+	e.expectInstalled("0.0.0.0/1", "wg")
+	e.expectInstalled("128.0.0.0/1", "wg")
+
+	// And with a low one it is, and the verdict says nothing is unknown.
+	e.host.Routes.SetInterfaceMetric(foreignAdapter, foreignAdapterMetric)
+	e.host.Sync()
+	e.change(osnet.ChangeRoute)
+
+	e.expectOverridden("0.0.0.0/1", "wg", e.overriddenBy("0.0.0.0/1", "10.9.0.1", foreignRouteMetric+foreignAdapterMetric, ourTunnelMetric))
+}
+
+// An unlisted route that has nothing to do with ours asks for nothing.
+func TestUnlistedForeignRouteOfAnotherPrefixAsksForNoRetry(t *testing.T) {
+	e := newEnv(t, windowsCase)
+	e.addTunnel("utun10", "10.6.0.2/24")
+	e.host.Inject(osnet.Route{Dst: pfx("192.168.77.0/24"), Gateway: ip("10.9.0.1"), Iface: "ghost", IfIndex: 99, Static: true, Metric: 1})
+
+	e.announce(wgIntent())
+
+	e.expectSettled()
 }
 
 // A list of routes that leaves out only what is not on the internet (the full
@@ -441,14 +518,17 @@ func TestOurOwnRoutesAreNotForeign(t *testing.T) {
 	e.bothTunnels()
 	e.announce(wgIntent())
 	e.announce(asusIntent())
+	e.addForeignVPN(foreignAdapterMetric)
 	e.foreignRoute("203.0.113.0/24", 0)
+	e.change(osnet.ChangeRoute) // the network state lists the adapter
 
 	table, err := e.r.dumpTable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var seen []string
-	for _, rt := range e.r.foreignRoutes(table) {
+	rivals, _ := e.r.foreignRoutes(table)
+	for _, rt := range rivals {
 		if rt.Static && rt.Dst.Bits() != 0 {
 			seen = append(seen, routeLine(rt))
 		}

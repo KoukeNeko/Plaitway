@@ -18,9 +18,12 @@ package windows
 // before the first change and removes the scratch routes and the DNS rules when
 // this process ends without releasing it, or when its deadline passes. Its log
 // is the folder of temporary files, plaitway-rootguard-*.log, and each guard prints the command that
-// does by hand what it does. The DNS tests refuse to run on a PC that has
-// Plaitway rules already (the daemon is running, say), because the guard
-// removes every rule that carries the marker.
+// does by hand what it does. Every test refuses to run while the PlaitwayHelper
+// service is running (or its state cannot be read), and the DNS tests on a PC
+// that has Plaitway rules already: a daemon that connects a profile with DNS in
+// the minutes a test takes would have its live rules removed by the clean-up, and
+// its start-up sweep would remove the test's. The clean-up and the guard remove
+// only the rules of the owners the tests write for.
 //
 // TestRootDNSCatchAll sends every name lookup of the PC to the throw-away
 // resolver for a moment, so it runs only when PLAITWAY_ROOT_CATCHALL=1.
@@ -40,6 +43,8 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/KoukeNeko/Plaitway/internal/osnet"
 	"github.com/KoukeNeko/Plaitway/internal/winiface/rootguard"
@@ -61,6 +66,92 @@ func requireElevated(t *testing.T) {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		t.Fatal("refusing to run: this test changes the host; run it from an elevated shell")
 	}
+	requireHelperServiceIdle(t)
+}
+
+// helperServiceName is the service of the product; the tests never touch it, but
+// what it does while they run would touch them.
+const helperServiceName = "PlaitwayHelper"
+
+// readHelperServiceState reads the state of the real service with the right to
+// read it and no other. installed is false when there is no such service.
+func readHelperServiceState() (state svc.State, installed bool, err error) {
+	manager, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
+	if err != nil {
+		return 0, false, fmt.Errorf("connect to the Service Control Manager: %w", err)
+	}
+	defer windows.CloseServiceHandle(manager)
+	name, err := windows.UTF16PtrFromString(helperServiceName)
+	if err != nil {
+		return 0, false, err
+	}
+	handle, err := windows.OpenService(manager, name, windows.SERVICE_QUERY_STATUS)
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("open %s: %w", helperServiceName, err)
+	}
+	service := &mgr.Service{Name: helperServiceName, Handle: handle}
+	defer service.Close()
+	status, err := service.Query()
+	if err != nil {
+		return 0, true, fmt.Errorf("query %s: %w", helperServiceName, err)
+	}
+	return status.State, true, nil
+}
+
+// helperServiceBlocksTests says why the tests must not run, or "" when the
+// service is not installed or stopped. A state that could not be read blocks them
+// too: a running service is the case this guards against.
+func helperServiceBlocksTests(state svc.State, installed bool, readErr error) string {
+	switch {
+	case readErr != nil:
+		return fmt.Sprintf("cannot tell whether %s is running: %v", helperServiceName, readErr)
+	case installed && state != svc.Stopped:
+		return fmt.Sprintf("%s is not stopped (state %d): its rules and routes would meet the ones of this test", helperServiceName, state)
+	}
+	return ""
+}
+
+func requireHelperServiceIdle(t *testing.T) {
+	t.Helper()
+	state, installed, err := readHelperServiceState()
+	if why := helperServiceBlocksTests(state, installed, err); why != "" {
+		t.Fatalf("refusing to run: %s; stop it with 'plaitwayd stop' first", why)
+	}
+}
+
+// The check reads the real service, which needs no elevation, and refuses in
+// each state the service can be in.
+func TestRootHelperServiceCheck(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		state     svc.State
+		installed bool
+		readErr   error
+		blocks    bool
+	}{
+		{"not installed", 0, false, nil, false},
+		{"stopped", svc.Stopped, true, nil, false},
+		{"running", svc.Running, true, nil, true},
+		{"starting", svc.StartPending, true, nil, true},
+		{"stopping", svc.StopPending, true, nil, true},
+		{"paused", svc.Paused, true, nil, true},
+		{"state unreadable", 0, true, errors.New("access denied"), true},
+		{"the manager cannot be reached", 0, false, errors.New("access denied"), true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if why := helperServiceBlocksTests(tt.state, tt.installed, tt.readErr); (why != "") != tt.blocks {
+				t.Errorf("helperServiceBlocksTests = %q, want blocking %v", why, tt.blocks)
+			}
+		})
+	}
+	state, installed, err := readHelperServiceState()
+	if err != nil {
+		t.Fatalf("reading %s without elevation: %v", helperServiceName, err)
+	}
+	t.Logf("%s on this PC: installed %v, state %d", helperServiceName, installed, state)
 }
 
 // presentRoutes returns the routes in the table to dst.
@@ -87,13 +178,37 @@ const (
 
 func init() {
 	rootguard.Register(recoveryRoutes, deleteRoutesTo)
-	rootguard.Register(recoveryDNSRules, func(string) error {
-		result, err := SweepDNS(nil)
-		if err == nil && len(result.Remaining) > 0 {
-			err = fmt.Errorf("rules remain: %v", result.Remaining)
-		}
-		return err
+	rootguard.Register(recoveryDNSRules, func(owners string) error {
+		return removeRulesOf(NewDNS(DNSOptions{}), strings.Split(owners, ownerSeparator))
 	})
+}
+
+// The owners the tests write rules for. Clean-up and the guard remove the rules
+// of these and of no other owner.
+const (
+	ruleOwner          = "plaitway-root-test"
+	ruleOwnerNoRefresh = "plaitway-root-test-norefresh"
+	ruleOwnerCatchAll  = "plaitway-root-test-catchall"
+	ruleOwnerSweep     = "plaitway-root-test-sweep"
+
+	ownerSeparator = ","
+)
+
+var ruleOwners = []string{ruleOwner, ruleOwnerNoRefresh, ruleOwnerCatchAll, ruleOwnerSweep}
+
+// removeRulesOf removes everything applied for the owners and flushes the
+// resolver cache.
+func removeRulesOf(dns osnet.DNSConfigurator, owners []string) error {
+	var failures []error
+	for _, owner := range owners {
+		if err := dns.Remove(owner); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	if err := dns.Flush(); err != nil {
+		failures = append(failures, fmt.Errorf("flush: %w", err))
+	}
+	return errors.Join(failures...)
 }
 
 // TestRootGuardHelper is the entry of the guards that these tests arm: the
@@ -469,28 +584,24 @@ func resolvesTo(t *testing.T, name string, want bool) time.Duration {
 }
 
 // sweepRules refuses to run on a PC that has Plaitway rules, arms the guard
-// that removes every rule with the marker if this process is killed, and
+// that removes the rules of the test owners if this process is killed, and
 // removes them when the test ends. The window is how long the test may run
 // before the guard acts.
 func sweepRules(t *testing.T, dns osnet.DNSConfigurator, window time.Duration) {
 	t.Helper()
+	requireHelperServiceIdle(t)
 	if owned, err := dns.Owned(); err != nil || len(owned) != 0 {
 		t.Fatalf("Plaitway rules are on this machine already: %v, %v", owned, err)
 	}
-	rootguard.Arm(t, rootguard.Plan{Action: recoveryDNSRules, Within: window, Manual: ManualSweepCommand()})
+	rootguard.Arm(t, rootguard.Plan{
+		Action:   recoveryDNSRules,
+		Argument: strings.Join(ruleOwners, ownerSeparator),
+		Within:   window,
+		Manual:   ManualSweepCommand(),
+	})
 	t.Cleanup(func() {
-		keys, err := dns.Owned()
-		if err != nil {
+		if err := removeRulesOf(dns, ruleOwners); err != nil {
 			t.Errorf("clean up: %v", err)
-			return
-		}
-		for _, key := range keys {
-			if err := dns.Remove(key); err != nil {
-				t.Errorf("clean up %s: %v", key, err)
-			}
-		}
-		if err := dns.Flush(); err != nil {
-			t.Errorf("clean up flush: %v", err)
 		}
 	})
 }
@@ -503,7 +614,7 @@ func TestRootDNSRuleResolvesThroughTheSystemResolver(t *testing.T) {
 	server := startResolver(t, false, "plaitway-test.invalid", "host.plaitway-test.invalid")
 	dns := NewDNS(DNSOptions{Logger: discardLog()})
 	sweepRules(t, dns, dnsGuardWindow)
-	const owner = "plaitway-root-test"
+	const owner = ruleOwner
 	const name = "plaitway-test.invalid"
 
 	if err := dns.Apply(owner, []osnet.DNSEntry{{
@@ -578,7 +689,7 @@ func TestRootDNSRegistryWriteWithoutPolicyRefresh(t *testing.T) {
 	dns.sys.refresh = func() error { return nil }
 	const name = "plaitway-norefresh.invalid"
 
-	if err := dns.Apply("plaitway-root-test-norefresh", []osnet.DNSEntry{{
+	if err := dns.Apply(ruleOwnerNoRefresh, []osnet.DNSEntry{{
 		Servers:      []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 		MatchDomains: []string{name},
 	}}); err != nil {
@@ -609,7 +720,7 @@ func TestRootDNSCatchAll(t *testing.T) {
 	server := startResolver(t, true)
 	dns := NewDNS(DNSOptions{Logger: discardLog()})
 	sweepRules(t, dns, catchAllGuardWindow)
-	err := dns.Apply("plaitway-root-test-catchall", []osnet.DNSEntry{{
+	err := dns.Apply(ruleOwnerCatchAll, []osnet.DNSEntry{{
 		Servers:      []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 		MatchDomains: []string{"."},
 	}})
@@ -625,7 +736,7 @@ func TestRootDNSCatchAll(t *testing.T) {
 	if !server.queried("plaitway-catchall-b.invalid") {
 		t.Error("the throw-away resolver never saw the second name")
 	}
-	if err := dns.Remove("plaitway-root-test-catchall"); err != nil {
+	if err := dns.Remove(ruleOwnerCatchAll); err != nil {
 		t.Fatal(err)
 	}
 	if err := dns.Flush(); err != nil {
@@ -642,7 +753,7 @@ func TestRootSweepDNSRemovesTheRulesOfADeadDaemon(t *testing.T) {
 	dns := NewDNS(DNSOptions{Logger: discardLog()})
 	sweepRules(t, dns, dnsGuardWindow)
 
-	err := dns.Apply("plaitway-root-test-sweep", []osnet.DNSEntry{
+	err := dns.Apply(ruleOwnerSweep, []osnet.DNSEntry{
 		{Servers: []netip.Addr{netip.MustParseAddr("127.0.0.1")}, MatchDomains: []string{"plaitway-sweep.invalid"}},
 		{Servers: []netip.Addr{netip.MustParseAddr("127.0.0.1")}, MatchDomains: []string{"plaitway-sweep2.invalid"}, Order: 1},
 	})

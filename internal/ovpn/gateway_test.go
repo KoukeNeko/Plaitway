@@ -18,9 +18,14 @@ func TestParseUpEnvGateways(t *testing.T) {
 		{"net30: the far end of the point-to-point address", "ifconfig_local=10.8.0.6\nifconfig_remote=10.8.0.5", "10.8.0.5", ""},
 		{"route_vpn_gateway wins over the far end", "route_vpn_gateway=10.8.0.1\nifconfig_remote=10.8.0.5", "10.8.0.1", ""},
 		{"nothing reported", "ifconfig_local=10.8.0.2", "", ""},
-		{"IPv6 gateway of the first route", "route_ipv6_gateway_1=fd00:8::1\nifconfig_ipv6_local=fd00:8::2", "", "fd00:8::1"},
-		{"IPv6 far end when no route names one", "ifconfig_ipv6_remote=fd00:8::1", "", "fd00:8::1"},
+		// The manual: ifconfig_ipv6_remote is the target of every --route-ipv6 that
+		// names no gateway, so it is the tunnel's own next hop; route_ipv6_gateway_N
+		// belongs to route N alone and may be an explicit per-route gateway.
+		{"IPv6 far end of the tunnel address", "ifconfig_ipv6_remote=fd00:8::1\nifconfig_ipv6_local=fd00:8::2", "", "fd00:8::1"},
+		{"the far end wins over the explicit gateway of the first route", "route_ipv6_gateway_1=fd00:8::ff\nifconfig_ipv6_remote=fd00:8::1", "", "fd00:8::1"},
+		{"the gateway of the first route is the last resort", "route_ipv6_gateway_1=fd00:8::1\nifconfig_ipv6_local=fd00:8::2", "", "fd00:8::1"},
 		{"openvpn writes :: where it has none", "route_ipv6_gateway_1=::\nifconfig_ipv6_remote=fd00:8::1", "", "fd00:8::1"},
+		{"openvpn writes :: and nothing else", "route_ipv6_gateway_1=::\nifconfig_ipv6_local=fd00:8::2", "", ""},
 		{"the unspecified IPv4 address is none", "route_vpn_gateway=0.0.0.0\nifconfig_remote=10.8.0.5", "10.8.0.5", ""},
 		{"an address of the wrong family", "route_vpn_gateway=fd00:8::1\nroute_ipv6_gateway_1=10.8.0.1", "", ""},
 		{"loopback and multicast are no next hop", "route_vpn_gateway=127.0.0.1\nifconfig_remote=224.0.0.1\nroute_ipv6_gateway_1=::1", "", ""},

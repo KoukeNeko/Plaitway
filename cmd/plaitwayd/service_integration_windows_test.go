@@ -75,7 +75,42 @@ func removeTestServiceAndDirectory(scratch string) error {
 	if err := removeTestService(); err != nil {
 		return err
 	}
+	return removeScratchDirectory(scratch)
+}
+
+// removeScratchDirectory removes the directory of a test service. The path is
+// the environment variable of the guard process, which runs as an administrator,
+// so it is deleted only when newTestService could have made it.
+func removeScratchDirectory(scratch string) error {
+	programFiles, err := windows.KnownFolderPath(windows.FOLDERID_ProgramFiles, windows.KF_FLAG_DEFAULT)
+	if err != nil {
+		return fmt.Errorf("find the Program Files folder: %w", err)
+	}
+	return removeScratchDirectoryBelow(programFiles, scratch)
+}
+
+func removeScratchDirectoryBelow(parent, scratch string) error {
+	if err := checkScratchDirectory(parent, scratch); err != nil {
+		return err
+	}
 	return os.RemoveAll(scratch)
+}
+
+// checkScratchDirectory refuses a path that is not a direct child of parent
+// whose name starts with scratchDirPrefix. The path is cleaned first, so that
+// "..\" cannot lead out of the folder; Windows compares names without case.
+func checkScratchDirectory(parent, scratch string) error {
+	cleaned := filepath.Clean(scratch)
+	name := filepath.Base(cleaned)
+	switch {
+	case !filepath.IsAbs(cleaned):
+		return fmt.Errorf("refusing to remove %q: not an absolute path", scratch)
+	case !strings.EqualFold(filepath.Dir(cleaned), filepath.Clean(parent)):
+		return fmt.Errorf("refusing to remove %q: not directly below %s", scratch, parent)
+	case len(name) <= len(scratchDirPrefix) || !strings.EqualFold(name[:len(scratchDirPrefix)], scratchDirPrefix):
+		return fmt.Errorf("refusing to remove %q: the name does not start with %s", scratch, scratchDirPrefix)
+	}
+	return nil
 }
 
 // manualRecoveryCommand does by hand what the guard does.
@@ -524,4 +559,93 @@ func TestRealServiceRestartsAfterACrash(t *testing.T) {
 		}
 		t.Fatalf("the service was not restarted within %s of a crash: %+v", restartWait, s.status())
 	})
+}
+
+// scratchParent stands for the Program Files folder in the tests of the check.
+const scratchParent = `C:\Program Files`
+
+// The guard of the service tests runs as an administrator and deletes the path in
+// its environment; the tests of the check need no elevation and no service.
+func TestScratchDirectoryCheck(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		refused string // part of the error, empty when the path is accepted
+	}{
+		{"a directory of the tests", scratchParent + `\PlaitwayHelperTest-123456`, ""},
+		{"the case of the name does not matter", `C:\Program Files\plaitwayhelpertest-1`, ""},
+		{"the case of the folder does not matter", `c:\PROGRAM FILES\PlaitwayHelperTest-1`, ""},
+		{"a trailing separator", scratchParent + `\PlaitwayHelperTest-1\`, ""},
+		{"nothing", ``, "not an absolute path"},
+		{"a relative path", `PlaitwayHelperTest-1`, "not an absolute path"},
+		{"Program Files itself", scratchParent, "not directly below"},
+		{"the folder above", `C:\`, "not directly below"},
+		{"another folder", `C:\Windows\PlaitwayHelperTest-1`, "not directly below"},
+		{"a directory of the service itself", scratchParent + `\PlaitwayHelper`, "does not start"},
+		{"another program", scratchParent + `\Plaitway`, "does not start"},
+		{"only the prefix", scratchParent + `\PlaitwayHelperTest-`, "does not start"},
+		{"a child of a test directory", scratchParent + `\PlaitwayHelperTest-1\state`, "not directly below"},
+		{"a way out with dots", scratchParent + `\PlaitwayHelperTest-1\..\..\Windows`, "not directly below"},
+		{"a way to another name with dots", scratchParent + `\PlaitwayHelperTest-1\..\Common Files`, "does not start"},
+		{"a sibling folder that starts like the parent", `C:\Program Files (x86)\PlaitwayHelperTest-1`, "not directly below"},
+		{"the prefix inside the name", scratchParent + `\x-PlaitwayHelperTest-1`, "does not start"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkScratchDirectory(scratchParent, tt.path)
+			switch {
+			case tt.refused == "" && err != nil:
+				t.Errorf("refused %q: %v", tt.path, err)
+			case tt.refused != "" && err == nil:
+				t.Errorf("accepted %q", tt.path)
+			case tt.refused != "" && !strings.Contains(err.Error(), tt.refused):
+				t.Errorf("refused %q with %q, want a message with %q", tt.path, err, tt.refused)
+			}
+		})
+	}
+}
+
+// The removal itself, below a folder of the test's own: what is refused is left
+// where it is, with its contents.
+func TestRemoveScratchDirectoryTouchesOnlyTheDirectoryOfTheTests(t *testing.T) {
+	parent := t.TempDir()
+	makeDirectory := func(path string) string {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(path, "state"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "state", "keep"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	exists := func(path string) bool {
+		_, err := os.Stat(path)
+		return err == nil
+	}
+	own := makeDirectory(filepath.Join(parent, scratchDirPrefix+"42"))
+	other := makeDirectory(filepath.Join(parent, "Documents"))
+	nested := makeDirectory(filepath.Join(own, "inner"))
+	outside := makeDirectory(filepath.Join(t.TempDir(), scratchDirPrefix+"43"))
+
+	for _, refused := range []string{parent, other, nested, outside, filepath.Join(own, "..", "Documents"), ""} {
+		if err := removeScratchDirectoryBelow(parent, refused); err == nil {
+			t.Errorf("removed %q", refused)
+		}
+	}
+	for _, kept := range []string{parent, other, nested, outside, own} {
+		if !exists(kept) {
+			t.Errorf("%s is gone", kept)
+		}
+	}
+
+	if err := removeScratchDirectoryBelow(parent, own); err != nil {
+		t.Fatalf("removing the directory of the tests: %v", err)
+	}
+	if exists(own) {
+		t.Error("the directory of the tests is still there")
+	}
+	if !exists(other) {
+		t.Error("the other directory went with it")
+	}
 }

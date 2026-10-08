@@ -15,6 +15,15 @@ import (
 // environment; the server is not trusted and this feeds the routing table.
 const maxPushedRoutes = 1000
 
+// firstIPv6RouteGateway is the one place left to read an IPv6 next hop from when
+// the server pushed no ifconfig-ipv6 remote. The manual defines
+// ifconfig_ipv6_remote as the target of every --route-ipv6 that names no
+// gateway, which makes it the tunnel's own next hop, whereas
+// route_ipv6_gateway_N is the gateway of route N alone and may be an explicit
+// per-route one (the manual's `route-ipv6 net/bits gateway`). It is only
+// consulted second, where it can at worst be the --route-ipv6-gateway default.
+const firstIPv6RouteGateway = "route_ipv6_gateway_1"
+
 // upInfo is what openvpn reports about its tunnel in the UPDOWN environment.
 // Everything in it came from the VPN server and is validated on the way in.
 type upInfo struct {
@@ -33,9 +42,10 @@ type upInfo struct {
 	// p2p), which has no netmask; invalid for topology subnet.
 	Peer netip.Addr
 	// Gateway and GatewayV6 are the tunnel's own next hops: the address of the far
-	// end that the adapter answers for (openvpn's route_vpn_gateway, or the far end
-	// of the point-to-point address when it names none, and route_ipv6_gateway).
-	// Invalid when openvpn named none.
+	// end that the adapter answers for. For IPv4 that is route_vpn_gateway, or the
+	// far end of the point-to-point address when it names none. For IPv6 it is
+	// ifconfig_ipv6_remote, then firstIPv6RouteGateway. Invalid when openvpn named
+	// none.
 	Gateway, GatewayV6 netip.Addr
 	// MTU is the tunnel MTU openvpn works with, 0 when it did not say.
 	MTU int
@@ -69,7 +79,7 @@ func parseUpEnv(env map[string]string) (upInfo, []string, error) {
 		info.Peer = peer
 	}
 	info.Gateway = firstGateway(netip.Addr.Is4, env["route_vpn_gateway"], env["ifconfig_remote"])
-	info.GatewayV6 = firstGateway(netip.Addr.Is6, env["route_ipv6_gateway_1"], env["ifconfig_ipv6_remote"])
+	info.GatewayV6 = firstGateway(netip.Addr.Is6, env["ifconfig_ipv6_remote"], env[firstIPv6RouteGateway])
 	if mtu, err := strconv.Atoi(env["tun_mtu"]); err == nil && mtu > 0 {
 		info.MTU = mtu
 	}
