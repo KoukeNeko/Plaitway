@@ -199,17 +199,15 @@ git push origin v0.3.0
 ```
 
 The workflow runs the tests, builds and signs the app (`make app`), notarizes and staples it and the dmg
-(`notarize.sh`), checks the bundle (`make verify`), builds the Windows command line and helper for amd64 and
-arm64, creates the GitHub release with the zip, the dmg, the two Windows zips and `SHA256SUMS`, and then
-`packages.yml` updates `Casks/plaitway.rb` in `KoukeNeko/homebrew-tap` and `bucket/plaitway.json` in
-`KoukeNeko/scoop-bucket` from the release's checksums. Run by hand (Actions › Release › Run workflow) it builds and
-signs but publishes nothing and keeps the files as an artifact. Actions › Publish packages redoes the two package
-files of a release that is already published.
+(`notarize.sh`), checks the bundle (`make verify`), creates the GitHub release with the zip, the dmg and
+`SHA256SUMS`, and then `packages.yml` updates `Casks/plaitway.rb` in `KoukeNeko/homebrew-tap` from the release's
+checksums. Run by hand (Actions › Release › Run workflow) it builds and signs but publishes nothing and keeps the
+files as an artifact. Actions › Publish packages redoes the cask of a release that is already published.
 
 | Secret | Used for |
 |---|---|
-| `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERT_PASSWORD` | the Developer ID Application certificate and its password; the first identity in the file signs |
+| `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERT_PASSWORD` | the Developer ID Application certificate and its password; the identity `lib.sh` signs with, or else the first one in the file |
 | `ASC_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | the App Store Connect API key that notarizes |
-| `HOMEBREW_TAP_TOKEN`, `SCOOP_BUCKET_TOKEN` | pushing to the tap and to the bucket; each needs Contents: Read and write on its repository |
+| `HOMEBREW_TAP_TOKEN` | pushing to the tap; it needs Contents: Read and write on `KoukeNeko/homebrew-tap` |
 
-The Windows files are not signed: there is no Windows code-signing certificate among the secrets.
+Windows is not part of a release: it has no app yet.

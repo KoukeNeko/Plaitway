@@ -1,9 +1,9 @@
 name: Release
 
 # Pushing a tag vX.Y.Z, where X.Y.Z is the VERSION file, builds, signs and notarizes the macOS app,
-# builds the Windows command line and helper, publishes the GitHub release, and then updates the
-# Homebrew cask and the Scoop manifest (packages.yml). Run by hand it does everything up to
-# publishing and keeps the files as an artifact, which is how to try the pipeline.
+# publishes the GitHub release, and then updates the Homebrew cask (packages.yml). Run by hand it
+# does everything up to publishing and keeps the files as an artifact, which is how to try the
+# pipeline. Windows is not released: it has no app yet.
 on:
   push:
     tags: ['v*']
@@ -121,46 +121,9 @@ jobs:
             build/Plaitway-${{ env.VERSION }}.dmg
           if-no-files-found: error
 
-  # Go builds for Windows without a Windows machine. Nothing here is signed: there is no Windows
-  # code-signing certificate among the secrets.
-  windows:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - name: Check the version
-        run: |
-          version="$(tr -d '[:space:]' < VERSION)"
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::the tag $GITHUB_REF_NAME does not match VERSION $version" >&2
-            exit 1
-          fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: Build
-        run: |
-          for arch in amd64 arm64; do
-            dir="Plaitway-$VERSION-windows-$arch"
-            mkdir "$dir"
-            for command in plaitway plaitwayd; do
-              CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go build -trimpath -buildvcs=false \
-                -ldflags "-s -w -X main.version=$VERSION" -o "$dir/$command.exe" "./cmd/$command"
-            done
-            cp LICENSE "$dir/"
-            (cd "$dir" && zip -q "../$dir.zip" -- *)
-          done
-          ls -l ./*.zip
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows
-          path: Plaitway-*-windows-*.zip
-          if-no-files-found: error
-
   publish:
     if: github.ref_type == 'tag'
-    needs: [macos, windows]
+    needs: macos
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -171,7 +134,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      # The Homebrew and Scoop files, and Scoop's autoupdate, read their hashes from here.
+      # The Homebrew cask reads its hash from here.
       - name: Checksums
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS
@@ -199,4 +162,3 @@ jobs:
       version: ${{ github.ref_name }}
     secrets:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-      SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}

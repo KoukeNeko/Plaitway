@@ -388,8 +388,8 @@ packaging/notarize.sh     # notarize and staple, then rebuild the zip and dmg
 ```
 
 Pushing a tag `vX.Y.Z` that matches `VERSION` does all of this in GitHub
-Actions and then publishes the release, the Homebrew cask and the Scoop
-manifest; [packaging/README.md](packaging/README.md#releasing) says how.
+Actions and then publishes the release and the Homebrew cask;
+[packaging/README.md](packaging/README.md#releasing) says how.
 [packaging/README.md](packaging/README.md) also describes the bundle, the
 signing order, install, upgrade, uninstall and the licenses.
 
@@ -402,10 +402,7 @@ Files on a machine: profiles and the route journal in
 
 `plaitwayd` and `plaitway` build and run on Windows. The daemon
 serves the in-memory backend (`-fake`) only; without `-fake` it exits with
-"real engines are only available on macOS". There is no Windows app. Scoop
-installs both programs from the release:
-`scoop bucket add koukeneko https://github.com/KoukeNeko/scoop-bucket`, then
-`scoop install koukeneko/plaitway`.
+"real engines are only available on macOS". There is no Windows app.
 
 | | Windows |
 |---|---|
