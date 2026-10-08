@@ -17,10 +17,6 @@ import (
 // version is set at build time: -ldflags "-X main.version=1.2.3".
 var version = "0.0.0-dev"
 
-// defaultSocket is where the LaunchDaemon listens; the -socket argument in its
-// launchd plist (packaging/lib.sh) and DaemonLocation.swift say the same.
-const defaultSocket = "/var/run/plaitway/plaitwayd.sock"
-
 // Exit codes; 0 is success.
 const (
 	exitFailure = 1

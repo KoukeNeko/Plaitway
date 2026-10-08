@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/KoukeNeko/Plaitway/internal/fsperm"
 	pb "github.com/KoukeNeko/Plaitway/internal/gen/plaitway/v1"
 	"github.com/KoukeNeko/Plaitway/internal/profile"
 )
@@ -172,7 +173,7 @@ func (a *app) edit(ctx context.Context, args []string) (err error) {
 	// signal that main handles; the text of the profile must not stay behind.
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGHUP)
 	defer stop()
-	dir, err := os.MkdirTemp("", "plaitway-edit-")
+	dir, err := makePrivateTempDir()
 	if err != nil {
 		return err
 	}
@@ -257,14 +258,32 @@ func profileExtension(kind pb.ProfileKind) string {
 }
 
 // editorCommand is the command that edits a file: $VISUAL, else $EDITOR, else
-// vi. It may carry arguments.
+// defaultEditor. It may carry arguments.
 func editorCommand(getenv func(string) string) ([]string, error) {
-	command := cmp.Or(strings.TrimSpace(getenv("VISUAL")), strings.TrimSpace(getenv("EDITOR")), "vi")
-	words := splitWords(command)
+	command := cmp.Or(strings.TrimSpace(getenv("VISUAL")), strings.TrimSpace(getenv("EDITOR")), defaultEditor)
+	words, err := splitEditorCommand(command)
+	if err != nil {
+		return nil, fmt.Errorf("editor %q: %w", command, err)
+	}
 	if len(words) == 0 {
 		return nil, fmt.Errorf("no editor in %q", command)
 	}
 	return words, nil
+}
+
+// makePrivateTempDir makes the directory for the file the editor works on,
+// which holds the keys of the profile.
+func makePrivateTempDir() (string, error) {
+	dir, err := os.MkdirTemp("", "plaitway-edit-")
+	if err != nil {
+		return "", err
+	}
+	// A temporary directory is private to its user on Unix; on Windows it
+	// depends on where %TEMP% points, and the file takes its access from here.
+	if _, err := fsperm.Restrict(dir); err != nil {
+		return "", errors.Join(err, os.RemoveAll(dir))
+	}
+	return dir, nil
 }
 
 // runEditor lets a person change the file, with the terminal of this command.

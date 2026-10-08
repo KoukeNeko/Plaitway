@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
@@ -32,8 +31,14 @@ type client struct {
 // dial prepares the connection to the daemon. gRPC connects with the first
 // call, so a daemon that is not running shows up there; see failure.
 func (a *app) dial() (*client, error) {
+	// The path is checked as the person gave it: after filepath.Abs a Unix-style
+	// value on Windows would be reported with a drive letter nobody typed.
+	requested := a.socketPath()
+	if err := checkSocketPath(requested); err != nil {
+		return nil, err
+	}
 	// "unix://" plus a relative path would name a host, not a file.
-	socket, err := filepath.Abs(a.socketPath())
+	socket, err := filepath.Abs(requested)
 	if err != nil {
 		return nil, err
 	}
@@ -58,12 +63,15 @@ func (c *client) failure(err error) error {
 	switch st.Code() {
 	case codes.Unavailable:
 		if reason, ok := dialFailure(msg); ok {
-			switch reason {
-			case syscall.ENOENT.Error():
+			if detail, refused := refusal(reason); refused {
+				return fmt.Errorf("refusing to use %s: %s", c.socket, detail)
+			}
+			switch classifyDialFailure(reason) {
+			case socketMissing:
 				return fmt.Errorf("the daemon is not running: %s does not exist", c.socket)
-			case syscall.ECONNREFUSED.Error():
+			case nobodyListens:
 				return fmt.Errorf("the daemon is not running: nothing listens on %s", c.socket)
-			case syscall.EACCES.Error():
+			case accessDenied:
 				return fmt.Errorf("permission denied to open %s", c.socket)
 			}
 			return fmt.Errorf("cannot connect to %s: %s", c.socket, reason)
@@ -81,17 +89,19 @@ func (c *client) failure(err error) error {
 	return fmt.Errorf("%s (%s)", msg, st.Code())
 }
 
-// dialFailure picks the reason out of the message gRPC gives for a socket it
-// could not connect to: connection error: desc = "transport: Error while
-// dialing: dial unix /path: connect: no such file or directory".
-func dialFailure(msg string) (reason string, ok bool) {
-	const marker = ": connect: "
-	i := strings.LastIndex(msg, marker)
-	if i < 0 {
-		return "", false
-	}
-	return strings.TrimSuffix(msg[i+len(marker):], `"`), true
-}
+// dialProblem is why the daemon cannot be reached, as far as a person can do
+// something about it.
+type dialProblem int
+
+const (
+	otherProblem dialProblem = iota
+	// socketMissing: the daemon's socket, or the directory it is in, is not there.
+	socketMissing
+	// nobodyListens: the socket is there, but no daemon is behind it.
+	nobodyListens
+	// accessDenied: the daemon does not let this user connect.
+	accessDenied
+)
 
 func callContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, rpcTimeout)

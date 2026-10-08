@@ -4,17 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,48 +31,42 @@ const (
 	rejectedLine = "line 8: rejected by"
 )
 
-// fakeEditor is an editor that a test scripts. Each time it runs it logs the
-// text it was given, the file's path and the permissions of the file and of
-// its directory, and then replaces the file with the next text in the queue, if
-// there is one: the first run takes the first text.
+// fakeEditor is an editor that a test scripts (see editFromQueue). Each time it
+// runs it logs the text it was given, the file's path and who can reach the
+// file and its directory, and then replaces the file with the next text in the
+// queue, if there is one: the first run takes the first text.
 type fakeEditor struct {
 	dir     string
-	command string // $EDITOR: the script, with the queue and the log as arguments
+	command string // $EDITOR: the test binary as an editor, with the queue and the log as arguments
 }
 
-const fakeEditorScript = `#!/bin/sh
-queue=$1; log=$2; file=$3
-n=$(( $(cat "$log/count" 2>/dev/null || echo 0) + 1 ))
-echo "$n" > "$log/count"
-echo "$file" > "$log/path"
-cp "$file" "$log/seen.$n"
-{ ls -ld "$file"; ls -ld "$(dirname "$file")"; } | cut -c1-10 > "$log/modes.$n"
-if [ -f "$queue/$n" ]; then cp "$queue/$n" "$file"; fi
-`
+// The directories of the editor have a space in their names, as the profile
+// directory of a user may have, so that $EDITOR has to quote them.
+const (
+	queueDirName = "the queue"
+	logDirName   = "the log"
+)
 
 func newFakeEditor(t *testing.T, replacements ...string) *fakeEditor {
 	t.Helper()
 	dir := shortDir(t)
-	queue, logDir, script := filepath.Join(dir, "queue"), filepath.Join(dir, "log"), filepath.Join(dir, "editor.sh")
+	queue, logDir := filepath.Join(dir, queueDirName), filepath.Join(dir, logDirName)
 	for _, d := range []string{queue, logDir} {
 		if err := os.Mkdir(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := os.WriteFile(script, []byte(fakeEditorScript), 0o700); err != nil {
-		t.Fatal(err)
 	}
 	for i, text := range replacements {
 		if err := os.WriteFile(filepath.Join(queue, strconv.Itoa(i+1)), []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return &fakeEditor{dir: dir, command: script + " " + queue + " " + logDir}
+	return &fakeEditor{dir: dir, command: fakeEditorCommand(queueEditor, queue, logDir)}
 }
 
 func (e *fakeEditor) logged(t *testing.T, name string) string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(e.dir, "log", name))
+	data, err := os.ReadFile(filepath.Join(e.dir, logDirName, name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +76,7 @@ func (e *fakeEditor) logged(t *testing.T, name string) string {
 // runs is how often the editor was started.
 func (e *fakeEditor) runs(t *testing.T) int {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(e.dir, "log", "count"))
+	data, err := os.ReadFile(filepath.Join(e.dir, logDirName, "count"))
 	if errors.Is(err, os.ErrNotExist) {
 		return 0
 	}
@@ -324,8 +316,8 @@ func TestEditSavesTheChangedText(t *testing.T) {
 	if got := editor.saw(t, 1); got != wgSecrets {
 		t.Errorf("the editor was given %q, want %q", got, wgSecrets)
 	}
-	if got := editor.logged(t, "modes.1"); got != "-rw-------\ndrwx------\n" {
-		t.Errorf("modes of the file and its directory: %q, want -rw------- and drwx------", got)
+	if got := editor.logged(t, "modes.1"); got != privateEditAccess {
+		t.Errorf("access to the file and its directory: %q, want %q", got, privateEditAccess)
 	}
 	if ext := filepath.Ext(strings.TrimSpace(editor.logged(t, "path"))); ext != ".conf" {
 		t.Errorf("a WireGuard profile is edited as a %q file", ext)
@@ -342,18 +334,19 @@ func TestEditSavesTheChangedText(t *testing.T) {
 
 func TestEditCommandMayCarryArgumentsAndVisualWins(t *testing.T) {
 	t.Parallel()
-	for name, c := range map[string]struct {
+	cases := map[string]struct {
 		visual, editor string
 		want           []string
 		wantErr        bool
 	}{
 		"visual first":    {"code --wait", "nano", []string{"code", "--wait"}, false},
 		"editor":          {"", "nano -w", []string{"nano", "-w"}, false},
-		"neither":         {"", "", []string{"vi"}, false},
-		"blank variables": {"  ", "\t", []string{"vi"}, false},
-		"quoted":          {`"/Applications/My Editor/ed" --new-window`, "", []string{"/Applications/My Editor/ed", "--new-window"}, false},
-		"nothing in it":   {"# nothing", "", nil, true},
-	} {
+		"neither":         {"", "", []string{defaultEditor}, false},
+		"blank variables": {"  ", "\t", []string{defaultEditor}, false},
+	}
+	// How a command is written depends on the OS.
+	maps.Copy(cases, editorCommandCases)
+	for name, c := range cases {
 		getenv := func(name string) string {
 			return map[string]string{"VISUAL": c.visual, "EDITOR": c.editor}[name]
 		}
@@ -598,13 +591,9 @@ func TestEditFailures(t *testing.T) {
 	d.importText("home", wgProfile)
 
 	t.Run("an editor that fails changes nothing", func(t *testing.T) {
-		dir := shortDir(t)
-		script := filepath.Join(dir, "fail.sh")
-		if err := os.WriteFile(script, []byte("#!/bin/sh\necho changed > \"$1\"\nexit 3\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		r := d.runWith(context.Background(), "", withEditor(script), "edit", "home")
-		if r.code != exitFailure || !strings.Contains(r.stderr, "editor "+script+": exit status 3") || d.storedText("home") != wgProfile {
+		r := d.runWith(context.Background(), "", withEditor(fakeEditorCommand(failingEditor)), "edit", "home")
+		if r.code != exitFailure || !strings.Contains(r.stderr, "editor "+fakeEditorProgram+": exit status "+strconv.Itoa(failingEditorExitCode)) ||
+			d.storedText("home") != wgProfile {
 			t.Errorf("edit: %+v", r)
 		}
 	})
@@ -629,83 +618,6 @@ func TestEditFailures(t *testing.T) {
 			t.Errorf("edit without a profile: %+v", r)
 		}
 	})
-}
-
-// Whatever ends the command, the text of the profile is not left in a file.
-func TestEditRemovesItsFileWhenTheCommandIsStopped(t *testing.T) {
-	t.Parallel()
-	d := startDaemon(t)
-	d.importText("home", wgSecrets)
-
-	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP} {
-		dir := shortDir(t)
-		started := filepath.Join(dir, "started")
-		script := filepath.Join(dir, "hang.sh")
-		// exec makes the editor the process that $$ names, so that the test
-		// can tell whether it was stopped.
-		body := "#!/bin/sh\necho \"$1 $$\" > \"" + started + ".tmp\" && mv \"" + started + ".tmp\" \"" + started + "\"\nexec sleep 60\n"
-		if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
-			t.Fatal(err)
-		}
-
-		cmd := exec.Command(clientBinary, "edit", "home")
-		cmd.Env = []string{"PLAITWAY_SOCKET=" + d.socket, "EDITOR=" + script}
-		var stderr syncBuffer
-		cmd.Stderr = &stderr
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		var path string
-		var editorPID int
-		deadline := time.Now().Add(waitTimeout)
-		for path == "" {
-			if data, err := os.ReadFile(started); err == nil {
-				fields := strings.Fields(string(data))
-				editorPID, _ = strconv.Atoi(fields[1])
-				path = fields[0]
-			} else if time.Now().After(deadline) {
-				cmd.Process.Kill()
-				t.Fatalf("%v: the editor did not start; stderr %q", sig, stderr.String())
-			} else {
-				time.Sleep(20 * time.Millisecond)
-			}
-		}
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("%v: the file is not there while the editor runs: %v", sig, err)
-		}
-
-		if err := cmd.Process.Signal(sig); err != nil {
-			t.Fatal(err)
-		}
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
-		select {
-		case err := <-done:
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != exitFailure {
-				t.Errorf("%v: the command ended with %v, want exit status %d", sig, err, exitFailure)
-			}
-		case <-time.After(waitTimeout):
-			cmd.Process.Kill()
-			t.Fatalf("%v: the command did not end", sig)
-		}
-
-		for _, p := range []string{path, filepath.Dir(path)} {
-			if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
-				t.Errorf("%v: %s is still there (stat: %v)", sig, p, err)
-			}
-		}
-		if err := syscall.Kill(editorPID, 0); !errors.Is(err, syscall.ESRCH) {
-			syscall.Kill(editorPID, syscall.SIGKILL)
-			t.Errorf("%v: the editor is still running (kill 0: %v)", sig, err)
-		}
-		if !strings.Contains(stderr.String(), "interrupted") {
-			t.Errorf("%v: stderr %q", sig, stderr.String())
-		}
-		if got := d.storedText("home"); got != wgSecrets {
-			t.Errorf("%v: stored text %q", sig, got)
-		}
-	}
 }
 
 func TestHelpListsTheEditingCommands(t *testing.T) {

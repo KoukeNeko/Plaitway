@@ -7,13 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -27,7 +26,19 @@ var daemonBinary, clientBinary string
 
 func TestMain(m *testing.M) { os.Exit(runTests(m)) }
 
+// helperPrograms are the programs this test binary becomes when it is started
+// with their flag as the first argument; test files of one OS add their own.
+var helperPrograms = map[string]func(args []string) int{
+	fakeEditorFlag: runFakeEditor,
+}
+
 func runTests(m *testing.M) int {
+	// The editors of the edit tests are this very binary; see fakeeditor_test.go.
+	if len(os.Args) > 1 {
+		if helper, ok := helperPrograms[os.Args[1]]; ok {
+			return helper(os.Args[2:])
+		}
+	}
 	dir, err := os.MkdirTemp("", "plaitway-cli-test")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -35,8 +46,8 @@ func runTests(m *testing.M) int {
 	}
 	defer os.RemoveAll(dir)
 
-	daemonBinary = filepath.Join(dir, "plaitwayd")
-	clientBinary = filepath.Join(dir, "plaitway")
+	daemonBinary = filepath.Join(dir, "plaitwayd"+executableSuffix())
+	clientBinary = filepath.Join(dir, "plaitway"+executableSuffix())
 	for _, b := range [][]string{
 		{"-o", daemonBinary, "../plaitwayd"},
 		{"-o", clientBinary, "-ldflags", "-X main.version=" + testVersion, "."},
@@ -47,6 +58,13 @@ func runTests(m *testing.M) int {
 		}
 	}
 	return m.Run()
+}
+
+func executableSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }
 
 // syncBuffer is a buffer that a test may read while a command still writes to it.
@@ -67,8 +85,8 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// shortDir makes a directory whose path leaves room for a socket: macOS limits
-// socket paths to 104 bytes and t.TempDir() is longer.
+// shortDir makes a directory whose path leaves room for a Unix socket: macOS
+// limits socket paths to 104 bytes and t.TempDir() is longer.
 func shortDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "pw")
@@ -91,10 +109,17 @@ type testDaemon struct {
 
 func startDaemon(t *testing.T) *testDaemon {
 	t.Helper()
+	d := &testDaemon{t: t, socket: newSocketPath(t), logs: &syncBuffer{}, exited: make(chan struct{})}
+	// A privileged test run (root, an elevated or SYSTEM shell) would otherwise
+	// take the production log file and run directory, and share them with every
+	// other test daemon and with the real one.
 	dir := shortDir(t)
-	d := &testDaemon{t: t, socket: filepath.Join(dir, "d.sock"), logs: &syncBuffer{}, exited: make(chan struct{})}
-	d.cmd = exec.Command(daemonBinary, "-fake", "-socket", d.socket, "-state-dir", filepath.Join(dir, "state"))
+	d.cmd = exec.Command(daemonBinary, "-fake", "-socket", d.socket,
+		"-state-dir", filepath.Join(dir, "state"),
+		"-run-dir", filepath.Join(dir, "run"),
+		"-log-file", "")
 	d.cmd.Stderr = d.logs
+	prepareToBeInterrupted(d.cmd)
 	if err := d.cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -109,28 +134,43 @@ func startDaemon(t *testing.T) *testDaemon {
 		}
 	})
 
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if c, err := net.Dial("unix", d.socket); err == nil {
-			c.Close()
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the daemon did not listen within 10 seconds:\n%s", d.logs)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	// The daemon authorizes callers from their uid: this suite needs the user
-	// running it to be the console user or an administrator.
-	if r := d.run("", "list"); r.code != 0 && strings.Contains(r.stderr, "permission denied") {
+	// The daemon authorizes callers from their uid or token: this suite needs
+	// the user running it to be the console user or an administrator.
+	r := d.waitUntilListening()
+	if r.code != 0 && strings.Contains(r.stderr, "permission denied") {
 		t.Skipf("the daemon refuses this user: %s", r.stderr)
 	}
 	return d
 }
 
+// waitUntilListening asks the daemon for its profiles until it answers, and
+// returns the answer. Asking is the same on every OS, which a probe of the
+// socket is not.
+func (d *testDaemon) waitUntilListening() result {
+	d.t.Helper()
+	const notRunning = "the daemon is not running"
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if r := d.run("", "list"); !strings.Contains(r.stderr, notRunning) {
+			return r
+		}
+		select {
+		case <-d.exited:
+			d.t.Fatalf("the daemon ended before it listened:\n%s", d.logs)
+		default:
+		}
+		if time.Now().After(deadline) {
+			d.t.Fatalf("the daemon did not listen within 10 seconds:\n%s", d.logs)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // stop ends the daemon the way launchd does.
 func (d *testDaemon) stop() {
-	d.cmd.Process.Signal(syscall.SIGTERM)
+	if err := terminateProcess(d.cmd.Process); err != nil {
+		d.cmd.Process.Kill()
+	}
 	select {
 	case <-d.exited:
 	case <-time.After(10 * time.Second):
@@ -228,7 +268,7 @@ const (
 func execClient(t *testing.T, env []string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(clientBinary, args...)
-	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, env...)
+	cmd.Env = append(scriptEnvironment(), env...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()

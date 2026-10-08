@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -458,10 +459,11 @@ func TestImport(t *testing.T) {
 	})
 
 	t.Run("a file that cannot be a profile is not sent", func(t *testing.T) {
+		missing := filepath.Join(dir, "missing.ovpn")
 		for name, c := range map[string]struct{ path, want string }{
-			"missing":   {filepath.Join(dir, "missing.ovpn"), "no such file"},
+			"missing":   {missing, noSuchFile(t, missing)},
 			"directory": {dir, "not a regular file"},
-			"device":    {"/dev/null", "not a regular file"},
+			"device":    {os.DevNull, "not a regular file"},
 			"too large": {write("huge.ovpn", strings.Repeat("# padding\n", 120_000)), "larger than"},
 			"binary":    {write("binary.ovpn", "client\x00\n"), "not a text file"},
 		} {
@@ -469,7 +471,7 @@ func TestImport(t *testing.T) {
 			// the file's: the command ended before it asked the daemon.
 			var stderr syncBuffer
 			a := d.app(strings.NewReader(""), &syncBuffer{}, &stderr)
-			a.socket = filepath.Join(shortDir(t), "nobody-listens.sock")
+			a.socket = newSocketPath(t)
 			if code := a.run(context.Background(), []string{"import", c.path}); code != exitFailure || !strings.Contains(stderr.String(), c.want) {
 				t.Errorf("%s: exit %d, stderr %q, want %q", name, code, stderr.String(), c.want)
 			}
@@ -566,6 +568,17 @@ func TestDiagnostics(t *testing.T) {
 		parsed.Daemon.Version != testDaemonVersion || len(parsed.OwnedRoutes) == 0 {
 		t.Errorf("diagnostics --json = %+v, %v", parsed, err)
 	}
+}
+
+// noSuchFile is how the OS words a file that is not there.
+func noSuchFile(t *testing.T, path string) string {
+	t.Helper()
+	_, err := os.Stat(path)
+	var pathError *fs.PathError
+	if !errors.As(err, &pathError) {
+		t.Fatalf("stat of a missing file: %v", err)
+	}
+	return pathError.Err.Error()
 }
 
 // The daemon of these tests is built without a version.

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,14 +79,8 @@ func (s *scripted) WatchProfiles(_ *pb.WatchProfilesRequest, stream grpc.ServerS
 // serve starts the scripted daemon and returns the socket it listens on.
 func (s *scripted) serve(t *testing.T) string {
 	t.Helper()
-	socket := filepath.Join(shortDir(t), "s.sock")
-	// Not transport.Listen: it narrows the umask of the whole process while it
-	// binds, and a directory another parallel test creates meanwhile has no
-	// permission to be entered.
-	lis, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
+	socket := newSocketPath(t)
+	lis := listenAt(t, socket)
 	srv := grpc.NewServer()
 	pb.RegisterDaemonServiceServer(srv, s)
 	go srv.Serve(lis)
@@ -145,43 +138,17 @@ func TestDaemonErrorsAreWorded(t *testing.T) {
 
 func TestDaemonThatIsNotRunning(t *testing.T) {
 	t.Parallel()
-	dir := shortDir(t)
-
-	missing := filepath.Join(dir, "missing", "d.sock")
+	missing := newSocketPath(t)
 	if r := runAt(t, missing, "", nil, "status"); r.code != exitFailure || r.stderr != "plaitway: the daemon is not running: "+missing+" does not exist\n" {
 		t.Errorf("no socket: %+v", r)
 	}
 
-	// A daemon that was killed leaves its socket file behind.
-	stale := filepath.Join(dir, "stale.sock")
-	lis, err := net.Listen("unix", stale)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lis.(*net.UnixListener).SetUnlinkOnClose(false)
-	lis.Close()
-	if r := runAt(t, stale, "", nil, "status"); r.code != exitFailure || r.stderr != "plaitway: the daemon is not running: nothing listens on "+stale+"\n" {
-		t.Errorf("stale socket: %+v", r)
-	}
-
-	if os.Getuid() != 0 {
-		locked := filepath.Join(dir, "locked")
-		if err := os.Mkdir(locked, 0o000); err != nil {
-			t.Fatal(err)
-		}
-		defer os.Chmod(locked, 0o700)
-		socket := filepath.Join(locked, "d.sock")
-		if r := runAt(t, socket, "", nil, "status"); r.code != exitFailure || r.stderr != "plaitway: permission denied to open "+socket+"\n" {
-			t.Errorf("socket in a closed directory: %+v", r)
-		}
-	}
-
 	// A path that is no socket, and one macOS cannot bind.
-	notSocket := filepath.Join(dir, "file")
+	notSocket := filepath.Join(shortDir(t), "file")
 	if err := os.WriteFile(notSocket, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if r := runAt(t, notSocket, "", nil, "status"); r.code != exitFailure || !strings.Contains(r.stderr, "cannot connect to "+notSocket+": ") {
+	if r := runAt(t, notSocket, "", nil, "status"); r.code != exitFailure || !strings.Contains(r.stderr, notSocketRefusal(notSocket)) {
 		t.Errorf("a file that is no socket: %+v", r)
 	}
 }
@@ -207,24 +174,22 @@ func TestSocketPathPrecedence(t *testing.T) {
 			t.Errorf("flag %q, env %q: %q, want %q", c.flag, c.env, got, c.want)
 		}
 	}
-	if defaultSocket != "/var/run/plaitway/plaitwayd.sock" {
-		t.Errorf("the default socket is %s", defaultSocket)
+	if defaultSocket != wantDefaultSocket {
+		t.Errorf("the default socket is %s, want %s", defaultSocket, wantDefaultSocket)
 	}
 }
 
 // -socket is accepted before the command and after it, and a relative path
 // names the file, not a host.
 func TestSocketFlagPositionAndRelativePath(t *testing.T) {
-	// Not parallel: it changes the working directory.
+	// Not parallel: a relative path needs the working directory changed.
 	socket := (&scripted{}).serve(t)
-	t.Chdir(filepath.Dir(socket))
 
-	for _, args := range [][]string{
-		{"-socket", "s.sock", "list"},
-		{"list", "-socket", "s.sock"},
-		{"list", "-socket=s.sock"},
+	for _, args := range append([][]string{
 		{"-socket", socket, "list"},
-	} {
+		{"list", "-socket", socket},
+		{"list", "-socket=" + socket},
+	}, relativeSocketArgs(t, socket)...) {
 		a := &app{stdin: strings.NewReader(""), stdout: &syncBuffer{}, stderr: &syncBuffer{}, getenv: func(string) string { return "" }}
 		var stderr syncBuffer
 		a.stderr = &stderr
@@ -545,7 +510,7 @@ func TestImportInlinesFilesNextToTheProfileOnly(t *testing.T) {
 
 	// A profile that names a file elsewhere sends nothing.
 	write("profiles/escape.ovpn", "client\nremote x\nkey ../secret.pem\n")
-	write("profiles/absolute.ovpn", "client\nremote x\nkey "+filepath.Join(dir, "secret.pem")+"\n")
+	write("profiles/absolute.ovpn", "client\nremote x\nkey "+filepath.ToSlash(filepath.Join(dir, "secret.pem"))+"\n")
 	for _, name := range []string{"escape", "absolute"} {
 		r := runAt(t, socket, "", nil, "import", filepath.Join(dir, "profiles", name+".ovpn"))
 		if r.code != exitFailure || !strings.Contains(r.stderr, "key ") || !strings.Contains(r.stderr, "is outside the directory of the profile") {

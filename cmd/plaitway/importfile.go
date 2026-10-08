@@ -308,12 +308,20 @@ func splitWords(line string) []string {
 	return words
 }
 
+// isRooted tells whether a path starts at a place of its own instead of the
+// directory of the profile. On Windows that includes \certs\ca.crt (the root of the current drive) and
+// C:ca.crt (the current directory of drive C), which filepath.IsAbs does not
+// call absolute but which Join would otherwise put inside dir.
+func isRooted(path string) bool {
+	return filepath.IsAbs(path) || filepath.VolumeName(path) != "" || (path != "" && os.IsPathSeparator(path[0]))
+}
+
 // readKeyMaterial reads the PEM data a directive names. The file has to be
 // inside dir, whatever symbolic links lead to it: a profile one is about to
 // import must not be able to send any other file of the user to the daemon.
 func readKeyMaterial(directive, file, dir string) (string, error) {
 	path := file
-	if !filepath.IsAbs(path) {
+	if !isRooted(path) {
 		path = filepath.Join(dir, path)
 	}
 	resolved, err := filepath.EvalSymlinks(path)

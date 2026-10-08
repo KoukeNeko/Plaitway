@@ -117,19 +117,21 @@ func TestInlineFilesRefusesFilesThatAreNotKeyMaterialInTheProfileDirectory(t *te
 		t.Fatal(err)
 	}
 
+	// The line of a profile writes a backslash twice, or not at all.
+	missing := noSuchFile(t, filepath.Join(dir, "nothing.crt"))
 	for name, c := range map[string]struct{ line, want string }{
 		"parent directory":      {"key ../" + filepath.Base(outside) + "/secret.pem", "is outside the directory of the profile"},
-		"absolute path":         {"key " + filepath.Join(outside, "secret.pem"), "is outside the directory of the profile"},
+		"absolute path":         {"key " + filepath.ToSlash(filepath.Join(outside, "secret.pem")), "is outside the directory of the profile"},
 		"link to a file":        {"key link.key", "is outside the directory of the profile"},
 		"link to a directory":   {"key linked-dir/secret.pem", "is outside the directory of the profile"},
-		"home directory":        {"key ~/.ssh/id_rsa", "no such file"},
-		"missing":               {"ca nothing.crt", "no such file"},
+		"home directory":        {"key ~/.ssh/id_rsa", missing},
+		"missing":               {"ca nothing.crt", missing},
 		"not key material":      {"ca readme.txt", "holds no certificate or key"},
 		"not text":              {"ca binary.crt", "not a text file"},
 		"too large":             {"ca big.crt", "larger than"},
 		"directory":             {"ca sub", "not a regular file"},
-		"device":                {"ca /dev/null", "is outside the directory of the profile"},
-		"escape in a directory": {"ca sub/../../x.crt", "no such file"},
+		"device":                {"ca " + deviceReference, deviceRefusal},
+		"escape in a directory": {"ca sub/../../x.crt", missing},
 	} {
 		_, _, err := inlineFiles(c.line+"\n", dir)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

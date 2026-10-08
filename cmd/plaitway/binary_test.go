@@ -1,10 +1,8 @@
 package main
 
 import (
-	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -22,7 +20,7 @@ func TestBinaryTakesItsVersionFromTheLinker(t *testing.T) {
 
 func TestBinaryExitCodes(t *testing.T) {
 	t.Parallel()
-	nobody := []string{"PLAITWAY_SOCKET=" + shortDir(t) + "/nobody.sock"}
+	nobody := []string{"PLAITWAY_SOCKET=" + newSocketPath(t)}
 	for name, c := range map[string]struct {
 		args        []string
 		code        int
@@ -52,7 +50,7 @@ func TestBinaryAgainstTheDaemon(t *testing.T) {
 	d := startDaemon(t)
 	d.importText("home", wgProfile)
 	d.mustRun("", "connect", "home")
-	nobody := "PLAITWAY_SOCKET=" + shortDir(t) + "/nobody.sock"
+	nobody := "PLAITWAY_SOCKET=" + newSocketPath(t)
 
 	// The environment names the socket, and -socket takes precedence over it.
 	for name, c := range map[string]struct {
@@ -83,7 +81,8 @@ func TestBinaryEndsWithSuccessOnInterrupt(t *testing.T) {
 
 	for _, args := range [][]string{{"watch"}, {"logs", "-f", "home"}, {"logs", "-f"}} {
 		cmd := exec.Command(clientBinary, args...)
-		cmd.Env = []string{"PLAITWAY_SOCKET=" + d.socket}
+		cmd.Env = append(scriptEnvironment(), "PLAITWAY_SOCKET="+d.socket)
+		prepareToBeInterrupted(cmd)
 		var stdout, stderr syncBuffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		if err := cmd.Start(); err != nil {
@@ -93,9 +92,7 @@ func TestBinaryEndsWithSuccessOnInterrupt(t *testing.T) {
 		for stdout.String() == "" && time.Now().Before(deadline) {
 			time.Sleep(20 * time.Millisecond)
 		}
-		if err := cmd.Process.Signal(os.Interrupt); err != nil {
-			t.Fatal(err)
-		}
+		interruptProcess(t, cmd.Process)
 		done := make(chan error, 1)
 		go func() { done <- cmd.Wait() }()
 		select {
@@ -104,7 +101,7 @@ func TestBinaryEndsWithSuccessOnInterrupt(t *testing.T) {
 				t.Errorf("plaitway %v after SIGINT: %v, stderr %q", args, err, stderr.String())
 			}
 		case <-time.After(waitTimeout):
-			cmd.Process.Signal(syscall.SIGKILL)
+			cmd.Process.Kill()
 			t.Errorf("plaitway %v did not end after SIGINT", args)
 		}
 	}
