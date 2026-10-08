@@ -38,7 +38,6 @@ struct ConfigurationTab: View {
             case .ready:
                 Notices(editor: editor)
                 ConfigEditorView(text: $editor.text, kind: profile.kind, markedLine: editor.diagnostic?.line, isEditable: !editor.isSaving)
-                    .padding(.top, 8)
             }
         }
         .task(id: profile.id) { await editor.load(from: model.store) }

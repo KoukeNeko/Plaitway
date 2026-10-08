@@ -20,7 +20,7 @@ struct ConfigEditorView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         // TextKit 1: the line numbers and the highlighting below are made for its layout manager.
-        let textView = NSTextView(usingTextLayoutManager: false)
+        let textView = EditorTextView(usingTextLayoutManager: false)
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
@@ -49,10 +49,15 @@ struct ConfigEditorView: NSViewRepresentable {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
+        // Nothing of the margin is drawn outside the editor: its separator was seen running up
+        // into the bar above.
+        scrollView.clipsToBounds = true
         scrollView.documentView = textView
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
-        scrollView.verticalRulerView = LineNumberRuler(scrollView: scrollView, textView: textView)
+        let ruler = LineNumberRuler(scrollView: scrollView, textView: textView)
+        ruler.clipsToBounds = true
+        scrollView.verticalRulerView = ruler
 
         context.coordinator.textView = textView
         textView.string = text
@@ -122,6 +127,16 @@ struct ConfigEditorView: NSViewRepresentable {
             if let line = parent.markedLine, let range = Self.range(ofLine: line, in: text) {
                 layoutManager.addTemporaryAttribute(.backgroundColor, value: NSColor.systemRed.withAlphaComponent(0.18), forCharacterRange: range)
             }
+            if let ruler = textView.enclosingScrollView?.verticalRulerView as? LineNumberRuler {
+                ruler.markedLine = parent.markedLine
+                ruler.needsDisplay = true
+            }
+        }
+
+        /// The line of the insertion point is marked in the text and in the margin.
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView else { return }
+            textView.needsDisplay = true
             textView.enclosingScrollView?.verticalRulerView?.needsDisplay = true
         }
 
@@ -156,10 +171,59 @@ struct ConfigEditorView: NSViewRepresentable {
     }
 }
 
+/// The text view of the editor. It tints the line of the insertion point, across the whole width,
+/// while it has the focus; a selection is not a line to mark.
+private final class EditorTextView: NSTextView {
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard window?.firstResponder === self, selectedRange().length == 0,
+              let band = currentLineBand() else { return }
+        NSColor.labelColor.withAlphaComponent(0.05).setFill()
+        band.intersection(rect).fill()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        needsDisplay = true
+        enclosingScrollView?.verticalRulerView?.needsDisplay = true
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        needsDisplay = true
+        enclosingScrollView?.verticalRulerView?.needsDisplay = true
+        return super.resignFirstResponder()
+    }
+
+    /// The full-width strip of the line the insertion point is on, in the coordinates of the view.
+    private func currentLineBand() -> NSRect? {
+        guard let layoutManager, textContainer != nil else { return nil }
+        let length = (string as NSString).length
+        let location = selectedRange().location
+        let lineRect: NSRect
+        if location >= length {
+            // At the end: the last line, or the empty one a final line break leaves.
+            if length > 0, (string as NSString).character(at: length - 1) == 10 {
+                lineRect = layoutManager.extraLineFragmentRect
+            } else if length == 0 {
+                lineRect = layoutManager.extraLineFragmentRect
+            } else {
+                lineRect = layoutManager.lineFragmentRect(forGlyphAt: layoutManager.numberOfGlyphs - 1, effectiveRange: nil)
+            }
+        } else {
+            lineRect = layoutManager.lineFragmentRect(forGlyphAt: layoutManager.glyphIndexForCharacter(at: location), effectiveRange: nil)
+        }
+        guard lineRect.height > 0 else { return nil }
+        return NSRect(x: 0, y: lineRect.minY + textContainerOrigin.y, width: bounds.width, height: lineRect.height)
+    }
+}
+
 /// The line numbers beside the text.
 private final class LineNumberRuler: NSRulerView {
     private weak var textView: NSTextView?
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    private static let emphasisFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
+    /// The line the daemon refused (1-based): its number is red.
+    var markedLine: Int?
 
     init(scrollView: NSScrollView, textView: NSTextView) {
         self.textView = textView
@@ -180,13 +244,32 @@ private final class LineNumberRuler: NSRulerView {
         needsDisplay = true
     }
 
+    /// The number (1-based) of the line a character is on: the line breaks before it, and one.
+    private func lineNumber(at location: Int, in string: NSString) -> Int {
+        var number = 1
+        var index = 0
+        while index < min(location, string.length) {
+            let line = string.lineRange(for: NSRange(location: index, length: 0))
+            if NSMaxRange(line) <= location { number += 1 }
+            index = NSMaxRange(line)
+        }
+        return number
+    }
+
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
         let string = textView.string as NSString
         let visible = textView.visibleRect
-        let attributes: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: NSColor.tertiaryLabelColor]
+        // A margin of its own, set apart from the text by a tint; its last point is the separator.
+        NSColor.labelColor.withAlphaComponent(0.04).setFill()
+        NSRect(x: 0, y: 0, width: bounds.width - 1, height: bounds.height).fill()
+        let plain: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: NSColor.tertiaryLabelColor]
+        let current: [NSAttributedString.Key: Any] = [.font: Self.emphasisFont, .foregroundColor: NSColor.secondaryLabelColor]
+        let refused: [NSAttributedString.Key: Any] = [.font: Self.emphasisFont, .foregroundColor: NSColor.systemRed]
+        let currentLine = textView.window?.firstResponder === textView ? lineNumber(at: textView.selectedRange().location, in: string) : nil
 
         func draw(_ number: Int, lineRect: NSRect) {
+            let attributes = number == markedLine ? refused : (number == currentLine ? current : plain)
             let label = NSAttributedString(string: "\(number)", attributes: attributes)
             let size = label.size()
             let y = lineRect.minY + textView.textContainerOrigin.y - visible.minY + (lineRect.height - size.height) / 2
