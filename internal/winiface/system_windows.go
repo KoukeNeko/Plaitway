@@ -121,11 +121,30 @@ func (windowsSystem) addAddress(luid uint64, p netip.Prefix) error {
 	return netioCall(procCreateUnicastIpAddressEntry, uintptr(unsafe.Pointer(&row)))
 }
 
-func (windowsSystem) deleteAddress(luid uint64, a netip.Addr) error {
+func (s windowsSystem) deleteAddress(luid uint64, a netip.Addr) error {
 	row := addressRow(luid, a)
 	err := netioCall(procDeleteUnicastIpAddressEntry, uintptr(unsafe.Pointer(&row)))
-	if errors.Is(err, windows.ERROR_NOT_FOUND) {
+	return forgiveAbsentAddress(err, func() (bool, error) {
+		state, stateErr := s.addressState(luid, a)
+		return state != dadInvalid, stateErr
+	})
+}
+
+// forgiveAbsentAddress turns the failure of a delete into success when the
+// address is not there, which is what the delete wanted. Windows answers "not
+// found" for an address that is gone from an adapter, and "the parameter is
+// incorrect" for one that is gone from the loopback (found by
+// TestRootSetAddressesOnLoopback); a parameter that really is wrong must still
+// fail, so that answer is believed only when the address is looked up and is not
+// there.
+func forgiveAbsentAddress(err error, stillThere func() (bool, error)) error {
+	switch {
+	case err == nil, errors.Is(err, windows.ERROR_NOT_FOUND):
 		return nil // gone already: the goal is reached
+	case errors.Is(err, windows.ERROR_INVALID_PARAMETER):
+		if there, lookupErr := stillThere(); lookupErr == nil && !there {
+			return nil
+		}
 	}
 	return err
 }
