@@ -1,8 +1,9 @@
 //go:build windows
 
 // loopbackwatch logs, once per distinct endpoint, every UDP or listening TCP socket whose local address is not
-// loopback and whose owner is a process named like a Go test binary. It polls the kernel tables without
-// sleeping, so a socket that lives for a millisecond is still seen. Read-only.
+// loopback (or in the scratch ranges of the test adapters) and whose owner is a process named like a Go test
+// binary. It polls the kernel tables without sleeping, so a socket that lives for a millisecond is still seen.
+// Read-only.
 package main
 
 import (
@@ -71,8 +72,22 @@ func v6(raw [16]byte) string {
 	return b.String()
 }
 
+// scratchPrefixes are the documentation ranges the elevated tests give to their own
+// Plaitway-test-* adapters. Nothing outside the PC routes to them, and a socket that is
+// bound to one of those addresses belongs to the test that made the adapter, so it is
+// no listener the firewall would ask about.
+var scratchPrefixes = []string{"198.51.100.", "203.0.113."}
+
 func isLoopback(addr string) bool {
-	return strings.HasPrefix(addr, "127.") || addr == "0:0:0:0:0:0:0:1"
+	if strings.HasPrefix(addr, "127.") || addr == "0:0:0:0:0:0:0:1" {
+		return true
+	}
+	for _, prefix := range scratchPrefixes {
+		if strings.HasPrefix(addr, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func snapshot() []endpoint {

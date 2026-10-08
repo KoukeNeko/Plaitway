@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
@@ -77,11 +78,16 @@ func requireElevated(t *testing.T) {
 	}
 }
 
-// requireWintun skips without a signed wintun.dll and makes its folder the one
-// the engines load it from.
+// requireWintun skips without a signed wintun.dll and loads it from its folder,
+// as the engine does. A test that creates an adapter itself (leakAdapter) never
+// goes through the engine, and wireguard-go's own lookup finds the DLL only
+// when it is already loaded, because the test binary does not sit beside it.
 func requireWintun(t *testing.T) {
 	t.Helper()
 	useExecutableDir(t, filepath.Dir(signedWintun(t)))
+	if err := ensureWintun(); err != nil {
+		t.Fatalf("load the signed wintun.dll: %v", err)
+	}
 }
 
 // removeScratchAdapters removes whatever a failed run left, now and when the
@@ -198,9 +204,7 @@ func TestRootTwoWintunTunnelsHandshakeAndCarryADatagram(t *testing.T) {
 	if addrs := addressesOf(t, clientIface); !slices.Contains(addrs, fmt.Sprintf("%s/%d", clientAddress, subnetBits)) {
 		t.Errorf("%s has addresses %v, want %s", clientIface, addrs, clientAddress)
 	}
-	if netIface, err := net.InterfaceByName(clientIface); err != nil || netIface.MTU != 1420 {
-		t.Errorf("client MTU = %v (%v), want 1420", netIface, err)
-	}
+	assertIPv4MTU(t, clientIface, device.DefaultMTU)
 	assertEndpointAnnounced(t, clientNetwork, clientIface)
 
 	sentBefore, receivedBefore := clientStatus.last().Stats.TxBytes, serverStatus.last().Stats.RxBytes
@@ -251,6 +255,28 @@ func assertAdapterIdentity(t *testing.T, name, owner string) {
 		}
 	}
 	t.Errorf("%s is not among the wintun adapters %+v", name, adapters)
+}
+
+// assertIPv4MTU reads the MTU of the adapter's IPv4 interface, the value that
+// winiface.Link.SetMTU writes. net.Interface.MTU is the MTU of the adapter that
+// GetAdaptersAddresses reports, which for a wintun adapter stays at 65535 whatever
+// the IP interface is set to, so it is logged and not asserted.
+func assertIPv4MTU(t *testing.T, name string, want int) {
+	t.Helper()
+	link, err := winiface.FindByName(name)
+	if err != nil {
+		t.Fatalf("winiface cannot find %s: %v", name, err)
+	}
+	row := windows.MibIpInterfaceRow{Family: windows.AF_INET, InterfaceLuid: link.LUID}
+	if err := windows.GetIpInterfaceEntry(&row); err != nil {
+		t.Fatalf("read the IPv4 interface of %s: %v", name, err)
+	}
+	if row.NlMtu != uint32(want) {
+		t.Errorf("%s IPv4 MTU = %d, want %d", name, row.NlMtu, want)
+	}
+	if netIface, err := net.InterfaceByName(name); err == nil {
+		t.Logf("net.Interface MTU of %s = %d (the adapter's, not the IP interface's)", name, netIface.MTU)
+	}
 }
 
 func assertEndpointAnnounced(t *testing.T, network *recorder, iface string) {
