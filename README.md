@@ -26,6 +26,10 @@
   · <a href="#technical-reference">Technical reference</a>
 </p>
 
+<p align="center">
+  <img src="Docs/window.webp" alt="The Plaitway window: three connected profiles in the sidebar, Diagnostics and Settings below them, and the Overview page of one profile with its uptime, traffic and addresses" width="900">
+</p>
+
 Plaitway keeps your OpenVPN and WireGuard profiles in the macOS menu bar.
 Switch an office network on while a personal WireGuard tunnel stays up, see
 which one holds the internet and which one holds `192.168.1.0/24`, and open a
