@@ -35,20 +35,26 @@ const (
 	// It is what a person sees in Get-DnsClientNrptRule.
 	ruleComment = "Plaitway"
 
-	// refreshPolicyAfterChange makes every change of the rules end with a request
-	// to the DNS Client to reread its policy (RefreshPolicyEx).
-	//
-	// PROVISIONAL: whether Windows picks a rule up from the registry without it
-	// is decided by TestRootDNSRegistryWriteWithoutPolicyRefresh, which has not
-	// been run on an elevated shell yet. Until it has, the call stays. If the
-	// test shows that the rules are picked up promptly without it, set this to
-	// false (one line); the refresh code and systemCalls.refresh can go later.
-	refreshPolicyAfterChange = true
+	// defaultRefreshPolicyAfterChange: see refreshPolicyAfterChange.
+	defaultRefreshPolicyAfterChange = false
 	// defaultRefreshTimeout is how long a change waits for that request. The
 	// request is a machine-wide group policy refresh, which on a PC in a domain
 	// can take long, and the Reconciler holds its lock while it waits.
 	defaultRefreshTimeout = 5 * time.Second
 )
+
+// refreshPolicyAfterChange makes every change of the rules end with a request to
+// the DNS Client to reread its policy (RefreshPolicyEx), which is a machine-wide
+// group policy refresh.
+//
+// Off: TestRootDNSRegistryWriteWithoutPolicyRefresh, run elevated on Windows 11
+// build 26300, showed that the DNS Client picks a rule up from the registry by
+// itself, after 88 ms, and TestRootDNSRuleResolvesThroughTheSystemResolver after
+// 23 ms. Only that build has been measured. If an older Windows or a Server
+// edition does not pick rules up, set the default to true; the refresh code and
+// systemCalls.refresh stay for that reason. It is a variable only so that the
+// unit tests, which exercise the refresh code, can turn it on.
+var refreshPolicyAfterChange = defaultRefreshPolicyAfterChange
 
 // ErrGroupPolicyNRPT is returned by Apply when a group policy (or DirectAccess)
 // delivers a name resolution policy to this PC. Windows then ignores the rules

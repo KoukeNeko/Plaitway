@@ -62,6 +62,17 @@ func TestRouteErrorMapping(t *testing.T) {
 	}
 }
 
+// Found on the first run with the rights to write routes: every call that worked
+// came back as an error, because routeError wrapped the nil of a success.
+func TestRouteErrorOfASuccessIsNoError(t *testing.T) {
+	dst := netip.MustParsePrefix("203.0.113.0/24")
+	for _, op := range []routeOp{opAdd, opDelete} {
+		if got := routeError(op, dst, nil); got != nil {
+			t.Errorf("%v: routeError(nil) = %v, want nil", op, got)
+		}
+	}
+}
+
 func TestIsStaticProtocol(t *testing.T) {
 	for protocol, want := range map[uint32]bool{
 		1:     false, // other

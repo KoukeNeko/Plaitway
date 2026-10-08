@@ -80,14 +80,14 @@ func TestRouteFromRow(t *testing.T) {
 			ok:   true,
 		},
 		{
-			name: "a blackhole is a route to a loopback address on the loopback pseudo-interface",
-			row:  row("198.51.100.64/28", "127.0.0.1", loopback, 0, windows.MIB_IPPROTO_NETMGMT, windows.NlroManual),
+			name: "a blackhole is a static on-link route on the loopback pseudo-interface",
+			row:  row("198.51.100.64/28", "0.0.0.0", loopback, 0, windows.MIB_IPPROTO_NETMGMT, windows.NlroManual),
 			want: osnet.Route{Dst: netip.MustParsePrefix("198.51.100.64/28"), Iface: loopback.Name, IfIndex: 1, Blackhole: true, Static: true, Flags: 0x3},
 			ok:   true,
 		},
 		{
 			name: "an IPv6 blackhole",
-			row:  row("2001:db8:ffff:1::/64", "::1", loopback, 0, windows.MIB_IPPROTO_NETMGMT, windows.NlroManual),
+			row:  row("2001:db8:ffff:1::/64", "::", loopback, 0, windows.MIB_IPPROTO_NETMGMT, windows.NlroManual),
 			want: osnet.Route{Dst: netip.MustParsePrefix("2001:db8:ffff:1::/64"), Iface: loopback.Name, IfIndex: 1, Blackhole: true, Static: true, Flags: 0x3},
 			ok:   true,
 		},
@@ -404,12 +404,12 @@ func TestResolveTarget(t *testing.T) {
 		wantErr error
 		bad     bool
 	}{
-		{"a blackhole leaves through the loopback, to its address", osnet.Route{Dst: netip.MustParsePrefix("198.51.100.0/24"), Blackhole: true}, true,
-			target{LUID: loopback.LUID, Index: 1, Gateway: ip("127.0.0.1")}, nil, false},
+		{"a blackhole leaves through the loopback, on-link", osnet.Route{Dst: netip.MustParsePrefix("198.51.100.0/24"), Blackhole: true}, true,
+			target{LUID: loopback.LUID, Index: 1}, nil, false},
 		{"an IPv6 blackhole", osnet.Route{Dst: netip.MustParsePrefix("2001:db8::/32"), Blackhole: true}, true,
-			target{LUID: loopback.LUID, Index: 1, Gateway: ip("::1")}, nil, false},
+			target{LUID: loopback.LUID, Index: 1}, nil, false},
 		{"a blackhole ignores a gateway and an interface it was given", osnet.Route{Dst: netip.MustParsePrefix("198.51.100.0/24"), Blackhole: true, Gateway: ip("192.168.1.1"), IfIndex: 2}, true,
-			target{LUID: loopback.LUID, Index: 1, Gateway: ip("127.0.0.1")}, nil, false},
+			target{LUID: loopback.LUID, Index: 1}, nil, false},
 		{"the index wins over the name", osnet.Route{Dst: netip.MustParsePrefix("203.0.113.0/24"), IfIndex: 23, Iface: intelEthernet.Name, Gateway: ip("10.20.0.1")}, true,
 			target{Index: 23, Gateway: ip("10.20.0.1")}, nil, false},
 		{"an unknown interface name", osnet.Route{Dst: netip.MustParsePrefix("203.0.113.0/24"), Iface: "Plaitway-test-no-such-adapter"}, true,

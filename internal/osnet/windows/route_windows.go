@@ -103,13 +103,17 @@ func routeFromRow(row *win.MibIpForwardRow2, byLUID map[uint64]adapter) (r osnet
 		Flags:   routeFlags(row.Protocol, row.Origin),
 	}
 	// The next hop of a route that is bound to its interface is the unspecified
-	// address. A loopback address as next hop on the loopback pseudo-interface is
-	// how a route is made to discard its traffic: Windows has no blackhole type.
+	// address. A route that a program or an administrator bound to the loopback
+	// pseudo-interface is how a route is made to discard its traffic: Windows has
+	// no blackhole type, and the stack refuses to send what such a route names
+	// ("General failure"). The loopback's own routes (127.0.0.0/8, ::1/128) are
+	// the stack's, not static, and stay what they are.
 	nextHop := inet.Addr(&row.NextHop)
+	onLink := !nextHop.IsValid() || nextHop.IsUnspecified()
 	switch {
-	case isLoopback(iface) && nextHop.IsLoopback():
+	case isLoopback(iface) && r.Static && onLink:
 		r.Blackhole = true
-	case nextHop.IsValid() && !nextHop.IsUnspecified():
+	case !onLink:
 		r.Gateway = nextHop
 	}
 	return r, true
@@ -173,7 +177,7 @@ func (t *routeTable) resolveTarget(r osnet.Route, mayFindByGateway bool) (target
 	}
 	switch {
 	case r.Blackhole:
-		return t.loopbackTarget(r.Dst.Addr())
+		return t.loopbackTarget()
 	case r.IfIndex != 0:
 		return target{Index: r.IfIndex, Gateway: gateway}, nil
 	case r.Iface != "" || r.Gateway.Zone() != "":
@@ -200,9 +204,11 @@ func (t *routeTable) resolveTarget(r osnet.Route, mayFindByGateway bool) (target
 	return target{}, errors.New("a route needs an interface or a gateway")
 }
 
-// loopbackTarget is the loopback pseudo-interface with the loopback address of
-// dst's family as next hop.
-func (t *routeTable) loopbackTarget(dst netip.Addr) (target, error) {
+// loopbackTarget is the loopback pseudo-interface with no next hop: an on-link
+// route there is how a route is made to discard its traffic. The older form,
+// the loopback address as next hop, is refused by Windows 11 with "the parameter
+// is incorrect" (TestRootBlackholeRoutes found that out), also by New-NetRoute.
+func (t *routeTable) loopbackTarget() (target, error) {
 	adapters, err := t.readAdapters()
 	if err != nil {
 		return target{}, err
@@ -211,11 +217,7 @@ func (t *routeTable) loopbackTarget(dst netip.Addr) (target, error) {
 	if i < 0 {
 		return target{}, errors.New("this PC has no loopback pseudo-interface")
 	}
-	nextHop := netip.AddrFrom4([4]byte{127, 0, 0, 1})
-	if dst.Is6() {
-		nextHop = netip.IPv6Loopback()
-	}
-	return target{LUID: adapters[i].LUID, Index: adapters[i].Index, Gateway: nextHop}, nil
+	return target{LUID: adapters[i].LUID, Index: adapters[i].Index}, nil
 }
 
 // forwardRow builds the row that names (and for an addition describes) a route.

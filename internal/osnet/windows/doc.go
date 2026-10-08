@@ -20,11 +20,15 @@
 // the default route a router advertisement gave. Flags holds the origin in the
 // upper half and the protocol in the lower half.
 //
-// Windows has no blackhole route. A blackhole is a route whose next hop is the
-// loopback address on the loopback pseudo-interface, which is where the stack
-// drops what it cannot deliver; Dump reads such a route back as Blackhole. The
-// IPv4 form is the workaround that Windows administrators use. The IPv6 form
-// (next hop ::1) follows from it; TestRootBlackholeRoutes checks both.
+// Windows has no blackhole route. A blackhole is a static route that is bound
+// to the loopback pseudo-interface with no next hop: the stack refuses to send
+// what it names ("General failure", measured with ping on Windows 11 build
+// 26300, where the same packet without the route goes out and times out), and
+// Dump reads such a route back as Blackhole. The loopback's own routes are the
+// stack's, not static, and are not blackholes. The older workaround, the loopback
+// address (127.0.0.1, ::1) as next hop, is refused by this Windows with "the
+// parameter is incorrect", by New-NetRoute as well; TestRootBlackholeRoutes
+// found that out and checks the form that works, in both families.
 //
 // # Network state
 //
@@ -138,17 +142,14 @@
 // resolver always finds a complete set. An Apply that changes nothing writes
 // nothing. Flush calls DnsFlushResolverCache.
 //
-// After a change the DNS Client is told to reread its policy with
-// RefreshPolicyEx, as other programs that write the NRPT do. The call is
-// PROVISIONAL, pending TestRootDNSRegistryWriteWithoutPolicyRefresh, which has
-// not been run on an elevated shell: if the DNS Client picks a rule up from the
-// registry promptly without it, the call goes (refreshPolicyAfterChange in
-// dns.go is the one line that switches it off). It forces a machine-wide group
-// policy refresh, which is slow on a PC in a domain, and the Reconciler holds
-// its lock for the duration of an Apply, so the call is bounded: it runs in a
-// goroutine of its own, the pass waits for it five seconds at most and logs
-// when it takes longer, and while one has not returned no second one is started.
-// A failure of the call is logged, not returned.
+// The DNS Client picks a rule up from the registry by itself: measured on
+// Windows 11 build 26300, 23 to 88 ms after the write, so a change does not end
+// with a request to reread the policy (refreshPolicyAfterChange in dns.go is
+// false). That request, RefreshPolicyEx, forces a machine-wide group policy
+// refresh, which is slow on a PC in a domain and which the Reconciler would wait
+// for with its lock held; the code stays, bounded (a goroutine of its own, five
+// seconds at most, no second call while one has not returned, a failure logged
+// and not returned), for a Windows that turns out not to pick rules up.
 //
 // When a group policy or DirectAccess delivers an NRPT (any subkey of
 // HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\DnsPolicyConfig),

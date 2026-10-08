@@ -54,6 +54,9 @@ const (
 // that the interface the route names is gone, and the others mean that the next
 // hop is not reachable from it: in both cases the route cannot be placed.
 func routeError(op routeOp, dst netip.Prefix, err error) error {
+	if err == nil {
+		return nil // the call worked: wrapping nothing would make a success an error
+	}
 	switch {
 	case errors.Is(err, errorObjectAlreadyExists) && op == opAdd:
 		err = osnet.ErrExists

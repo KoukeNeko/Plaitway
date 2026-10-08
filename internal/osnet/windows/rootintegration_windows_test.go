@@ -299,7 +299,10 @@ func TestRootRouteLifecycleOnLoopback(t *testing.T) {
 		t.Fatalf("Dump shows %d routes to %s: %+v", len(found), route.Dst, found)
 	}
 	got := found[0]
-	if !got.Static || got.Blackhole || got.Gateway.IsValid() || got.Iface != loopbackAlias || got.IfIndex != loopbackIndex(t) || got.Metric != 0 {
+	// The loopback is the scratch carrier of this test, and a static on-link route
+	// on the loopback is, on Windows, a route that discards its traffic: that is
+	// what a blackhole is here, so it reads back as one.
+	if !got.Static || !got.Blackhole || got.Gateway.IsValid() || got.Iface != loopbackAlias || got.IfIndex != loopbackIndex(t) || got.Metric != 0 {
 		t.Errorf("the route reads back as %+v", got)
 	}
 	if err := table.Add(route); !errors.Is(err, osnet.ErrExists) {
@@ -384,13 +387,16 @@ func TestRootRouteErrors(t *testing.T) {
 	requireElevated(t)
 	table := NewRouteTable()
 	unreachableGateway := netip.MustParseAddr("203.0.113.99") // on no subnet of this PC
+	// A gateway on no connected subnet with the interface named is not a case here:
+	// the loopback pseudo-interface takes any next hop, so it cannot show what a
+	// real adapter does, and no scratch route may go on a real adapter.
 	tests := []struct {
 		name  string
 		route osnet.Route
 		want  error
 	}{
 		{"a gateway on no connected subnet, interface not named", osnet.Route{Dst: netip.MustParsePrefix("198.51.100.0/25"), Gateway: unreachableGateway}, osnet.ErrUnreachable},
-		{"a gateway on no connected subnet, interface named", osnet.Route{Dst: netip.MustParsePrefix("198.51.100.128/25"), Gateway: unreachableGateway, Iface: loopbackAlias}, osnet.ErrUnreachable},
+
 		{"an interface that does not exist", osnet.Route{Dst: netip.MustParsePrefix("203.0.113.0/25"), Iface: "Plaitway-test-no-such-adapter"}, osnet.ErrUnreachable},
 		{"an interface index that does not exist", osnet.Route{Dst: netip.MustParsePrefix("203.0.113.128/25"), IfIndex: 0x7fffff00}, osnet.ErrUnreachable},
 	}
