@@ -198,3 +198,62 @@ func TestJournalViewIsBounded(t *testing.T) {
 		t.Error("view must be a copy")
 	}
 }
+
+// A write that dies halfway leaves a partial line. The record that follows must
+// start on a line of its own, or the restart drops it along with the debris.
+func TestJournalAppendAfterAFailedWriteStartsANewLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal")
+	j := testJournal(t, path)
+	if err := j.append(routeRecord("1.1.1.1/32", stateApplied)); err != nil {
+		t.Fatal(err)
+	}
+	healthy := j.file
+	readOnly, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.file = readOnly
+	appendErr := j.append(routeRecord("2.2.2.2/32", statePending))
+	j.file = healthy
+	readOnly.Close() // Windows would otherwise refuse the restart's replacement
+	if appendErr == nil {
+		t.Fatal("append succeeded on a handle that cannot write")
+	}
+	// What a full disk leaves behind: the start of the record that failed.
+	partial := []byte(`{"seq":2,"owner":"wg","kind":"route","key":"2.2.2.2/32","sta`)
+	if _, err := healthy.Write(partial); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.append(routeRecord("3.3.3.3/32", stateApplied)); err != nil {
+		t.Fatal(err)
+	}
+	j.close()
+
+	var got []string
+	for _, rec := range testJournal(t, path).unresolved() {
+		got = append(got, rec.Key)
+	}
+	if want := "1.1.1.1/32|3.3.3.3/32"; strings.Join(got, "|") != want {
+		t.Errorf("unresolved after restart %v, want %v", got, want)
+	}
+}
+
+// Only a failed write calls for the extra newline; a healthy journal has no
+// blank lines in it.
+func TestJournalWritesNoBlankLinesWhenNothingFailed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal")
+	j := testJournal(t, path)
+	for _, key := range []string{"1.1.1.1/32", "2.2.2.2/32"} {
+		if err := j.append(routeRecord(key, stateApplied)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	j.close()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "\n\n") {
+		t.Errorf("blank line in a healthy journal: %q", content)
+	}
+}

@@ -70,6 +70,9 @@ type journal struct {
 	compactAfter int
 	// noSync skips the disk sync; tests that write thousands of records set it.
 	noSync bool
+	// torn is set when a write failed and may have left half a line behind,
+	// which the next record must not be glued onto.
+	torn bool
 }
 
 func liveKey(kind, key string) string { return kind + " " + key }
@@ -132,9 +135,15 @@ func (j *journal) append(rec record) error {
 	if err != nil {
 		return fmt.Errorf("encoding journal record: %w", err)
 	}
-	if _, err := j.file.Write(append(line, '\n')); err != nil {
+	line = append(line, '\n')
+	if j.torn {
+		line = append([]byte{'\n'}, line...)
+	}
+	if _, err := j.file.Write(line); err != nil {
+		j.torn = true
 		return fmt.Errorf("writing journal: %w", err)
 	}
+	j.torn = false
 	if !j.noSync {
 		if err := j.file.Sync(); err != nil {
 			return fmt.Errorf("syncing journal: %w", err)
@@ -185,6 +194,7 @@ func (j *journal) rewrite() error {
 		return fmt.Errorf("reopening journal: %w", err)
 	}
 	j.appended = 0
+	j.torn = false
 	return nil
 }
 
