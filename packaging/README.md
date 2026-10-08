@@ -3,6 +3,8 @@
 Build, sign, verify and install Plaitway.app. Everything here targets Apple silicon (arm64 only) and macOS 15
 or later, except `linux/`, which builds the Debian package of the Linux version, see [Linux](#linux).
 
+The Windows installer is in [windows/](windows/README.md).
+
 | Path | Purpose |
 |---|---|
 | `build-openvpn.sh`, `openvpn-deps.env` | builds the bundled OpenVPN and its static libraries from pinned, checksummed sources |

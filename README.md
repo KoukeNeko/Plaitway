@@ -362,8 +362,7 @@ to delete them with their private keys as well, `sudo rm -rf /var/lib/plaitway /
   live ebuild, with DNS settings for a full tunnel through openresolv:
   [Linux without systemd](#linux-without-systemd-gentoo-openrc)
 
-Of Windows only the helper and the command line client exist, see
-[Windows](#windows).
+Windows is described under [Windows](#windows).
 
 ---
 
@@ -381,7 +380,8 @@ plaitway/
 │   │                             installation. No AppKit or SwiftUI
 │   └── Sources/PlaitwayMenuBar   The app: menu bar item, window, settings
 ├── linux/                  The Linux app: GTK 4 and libadwaita, Python (PyGObject)
-├── cmd/plaitwayd           The helper (root LaunchDaemon, systemd service on Linux)
+├── windows/                C# solution: the WinUI 3 app, the client library, their tests
+├── cmd/plaitwayd           The helper (root LaunchDaemon, systemd service on Linux, Windows service)
 ├── cmd/plaitway            The command line client
 ├── internal/
 │   ├── manager             Profile lifecycle, settings, on-demand, logs, status
@@ -392,7 +392,10 @@ plaitway/
 │   ├── wg                  WireGuard engine on embedded wireguard-go
 │   ├── reconciler          The only code that changes routes and DNS
 │   ├── osnet               Adapter interfaces; macos/ (PF_ROUTE, scutil), linux/
-│   │                       (netlink, resolvectl) and fake/
+│   │                       (netlink, resolvectl), windows/ (IP Helper API, NRPT rules
+│   │                       in the registry) and fake/
+│   ├── winiface            Windows only: addresses, MTU and metric of an adapter an engine made
+│   ├── authenticode        Windows only: the signature check of wintun.dll and openvpn.exe
 │   ├── tunnel              The contracts between engines, adapters and Reconciler
 │   ├── transport, peercred Unix socket or named pipe serving and the caller's
 │   │                       identity
@@ -547,9 +550,54 @@ Files on a machine: profiles and the route journal in
 
 ## Windows
 
-`plaitwayd` and `plaitway` build and run on Windows. The daemon
-serves the in-memory backend (`-fake`) only; without `-fake` it exits with
-"real engines are only available on macOS". There is no Windows app.
+`plaitwayd` runs on Windows with the real OpenVPN and WireGuard engines, as the service `PlaitwayHelper` or in a
+console, and `plaitway` is the same command line as on macOS. The app is native: C#, .NET 10, WinUI 3, unpackaged,
+in `windows/` ([windows/README.md](windows/README.md)). `packaging/windows/build-installer.ps1` builds the MSI
+([packaging/windows/README.md](packaging/windows/README.md)); there is no release yet.
+[Docs/windows-status.md](Docs/windows-status.md) lists what is verified, what waits for a machine or a decision and what is
+not done; [Docs/windows-architecture.md](Docs/windows-architecture.md) says what is where, who is trusted with what and
+why the choices were made.
+
+| | OpenVPN | WireGuard |
+|---|---|---|
+| Tunnel device | A TAP-Windows6 adapter that the engine makes with `tapctl`, named `Plaitway-ovpn-` and eight hex digits | A wintun adapter named `Plaitway-` and eight hex digits |
+| Needs | `openvpn.exe` and `tapctl.exe` of an OpenVPN installation (tested with 2.7.1) that has the TAP-Windows6 driver, signed by OpenVPN Inc., in a folder that only administrators can change: `<folder of plaitwayd.exe>\openvpn\bin`, else `C:\Program Files\OpenVPN\bin`; `-openvpn` names another | `wintun.dll` signed by WireGuard LLC, next to `plaitwayd.exe` |
+| Routes | The Reconciler, through the tunnel's own gateway: the adapter answers only for it | The Reconciler, on-link |
+| DNS | NRPT rules written by the Reconciler | NRPT rules written by the Reconciler |
+
+An engine that cannot run does not stop the daemon: it logs `engine unavailable` with the reason, and the reason is
+shown with the profile.
+
+### Build and run
+
+Go 1.27.1 builds the daemon and the command line client. .NET SDK 10 (`windows/global.json` pins 10.0.401) builds the
+app; no Visual Studio workload is needed. The app targets Windows 10 1809 or later, x64; development and tests are on
+Windows 11, and Windows 10 and arm64 are not tested.
+
+```powershell
+go build -o bin\plaitwayd.exe .\cmd\plaitwayd
+go build -o bin\plaitway.exe .\cmd\plaitway
+powershell -File packaging\windows\fetch-wintun.ps1 -OutputDirectory bin       # wintun.dll, checked by hash and signature
+dotnet build windows\Plaitway.sln -c Release
+```
+
+Without elevation the daemon runs on the in-memory backend, which is a complete stand-in for UI work:
+
+```powershell
+$daemon = Start-Process bin\plaitwayd.exe -ArgumentList '-fake','-socket','\\.\pipe\plaitway-dev' -WindowStyle Hidden -PassThru
+bin\plaitway.exe -socket '\\.\pipe\plaitway-dev' list
+Stop-Process -Id $daemon.Id
+```
+
+With the real engines, in an elevated PowerShell, `packaging\windows\dev\Run-DaemonElevated.ps1` runs the daemon in
+the foreground on a scratch pipe and a scratch state directory, and lists what it left behind when it ends
+([packaging/windows/dev/README.md](packaging/windows/dev/README.md)). The service is registered with
+`plaitwayd.exe install -start` from an elevated shell, for a copy that is below Program Files: `install` refuses an
+executable, or a folder above it, that a standard user can change. The app offers the same through **Install Helper**,
+and Windows asks for confirmation once. `plaitwayd.exe status` prints `PlaitwayHelper: running`, `stopped` or `not
+installed` and needs no elevation; its exit code is 0, 3 or 4. The registration, the commands, the update and the
+uninstall are described in [packaging/windows/service/README.md](packaging/windows/service/README.md). An uninstall
+keeps `%ProgramData%\Plaitway`, because the profiles hold private keys; `uninstall -purge` deletes it.
 
 | | Windows |
 |---|---|
@@ -595,7 +643,9 @@ path; a value that is the path of an existing file is not split, so an unquoted
 path with spaces works. `-socket` and `PLAITWAY_SOCKET` must start with
 `\\.\pipe\`.
 
-**Tests.** `go test ./...` runs on Windows without a tag; files for one system
+### Tests
+
+`go test ./...` runs on Windows without a tag; files for one system
 carry a `_windows` suffix or a `//go:build` line (`unix`, `!windows`). The
 engine tests that run a fake `openvpn`, and the tests of the Unix socket, run
 only on Unix. A test that needs what the session lacks (a console, permission
@@ -613,8 +663,81 @@ wsl --cd /mnt/e/dev/plaitway/internal/ovpn -- ../../bin/ovpn.linux.test
 The tests of `cmd/plaitway` start `go build` for both programs. A WSL
 distribution without Go needs an executable named `go` first on `PATH` that
 copies Linux builds of `plaitway` and `plaitwayd` to the `-o` path it is given.
-The `rootintegration` tag (see [Development](#development)) is for macOS and
-Linux as root.
+
+A Go test binary is built to a new temporary path on every run, and Windows Defender Firewall asks about each one that
+listens on an address other than loopback, leaving two permanent allow rules behind for a file that is gone a minute
+later. Tests listen on `127.0.0.0/8` and `::1` only.
+`scripts\windows\Test-LoopbackOnly.ps1` runs the tests of every package, or of the packages named in `-Packages`, from
+fixed paths, with a watcher that reads the socket tables without pausing, and fails with the name of a package that
+opens another address (`-PerTest <package>` names the test). The WireGuard engine's tests go through `newBind`, never
+through wireguard-go's default bind.
+
+The C# tests run from the `windows` directory, because `global.json` selects the runner for it:
+`dotnet test --project Tests\Plaitway.Client.Tests -c Release`, and the same for `Plaitway.AppCore.Tests`. Both start
+`plaitwayd -fake` on pipes of their own. The UI tests open the app window on the screen of whoever runs them.
+
+The tests that change the routing table, DNS, adapters or the service carry the `rootintegration` tag and need an
+elevated shell. They use scratch resources only, and `packaging\windows\dev\Run-ElevatedTests.ps1` runs them in groups
+with a snapshot and a comparison around each; `-WhatIf` prints the plan from any shell.
+[Docs/windows-elevated-tests.md](Docs/windows-elevated-tests.md) lists every test, what it changes, what is expected
+and how to undo it.
+
+### Troubleshooting on Windows
+
+**The app says "Helper not installed" or "Helper stopped".** The service is not registered or is not running.
+`plaitwayd.exe status` says which (`PlaitwayHelper: not installed`, exit code 4; `PlaitwayHelper: stopped`, exit code
+3). **Install Helper** and **Start Helper** run `install -start` and `start` with the consent prompt. The command line
+client says `the daemon is not running: \\.\pipe\plaitway does not exist`. From an elevated shell, `plaitwayd.exe
+install -start` registers it; from a copy in a folder that a standard user can change it fails with
+`plaitwayd install: <path> cannot be a service: ...; use an administrator-only location such as Program Files`, and
+without elevation with `plaitwayd install: this needs administrator rights: run from an elevated shell`.
+
+**The helper's log.** `%ProgramData%\Plaitway\Logs\plaitwayd.log`, readable by SYSTEM and Administrators. A service
+that ends at start shows the reason as the last `ERROR` line.
+
+**The command line client or the app refuses the pipe.** The command line client says `refusing to use
+\\.\pipe\plaitway: it is owned by <account>, not by SYSTEM, Administrators or <your account>`; other clients see the same
+text after `pipe server refused: `. Something other than the service serves the pipe. The app words it as "The helper's
+pipe belongs to an unexpected account. Plaitway does not use it." Start the service, or stop the other program.
+
+**WireGuard is unavailable: `wintun.dll`.** The profile shows `<folder>\wintun.dll is missing; the WireGuard engine
+needs wintun.dll in the folder of the program`. A file that is there but is not signed by WireGuard LLC is reported
+with its signature problem (`has no Authenticode signature`, `is signed by "<name>", not by "WireGuard LLC"`, `was
+changed after it was signed`). Put the checked copy next to `plaitwayd.exe`:
+`powershell -File packaging\windows\fetch-wintun.ps1 -OutputDirectory <folder of plaitwayd.exe>`. The first adapter
+installs the wintun driver into the driver store.
+
+**OpenVPN is unavailable: `openvpn is not trusted`.** The daemon runs `openvpn.exe` as LocalSystem, so it runs only a
+file that a standard user could not have replaced. The reason follows the message: `openvpn is not trusted: <path>:
+can be changed by an account that is not SYSTEM, Administrators or TrustedInstaller`, `... is not on a local fixed
+disk`, `... has no Authenticode signature`, `... is signed by "<name>", not by "OpenVPN Inc."`. Install OpenVPN below
+`C:\Program Files\OpenVPN`, or copy the installation to `<folder of plaitwayd.exe>\openvpn\bin`. Other reasons:
+`openvpn not found at <path>`, `the TAP-Windows6 driver is not installed (<system>\drivers\tap0901.sys is missing);
+install OpenVPN with its TAP-Windows6 driver`, `tapctl is not trusted: ...`. A trusted binary is checked again each
+time a profile starts. `packaging\windows\openvpn\check-openvpn.ps1` prints what the checks look at, and changes
+nothing.
+
+**DNS is not in effect: group policy.** The Routes and DNS page shows `DNS is not in effect: a group policy defines
+name resolution (NRPT) rules, and Windows applies those instead of the rules of local programs`. A group policy or
+DirectAccess on the PC delivers NRPT rules, and Windows then ignores the rules of local programs. The daemon does not
+write its rules in that case; rules written before the policy arrived are still removed. Only the administrator of
+the policy can change this.
+
+**A route is not in effect: another VPN.** A route of another program with a lower effective metric (route metric plus
+interface metric), or one that is more specific, decides where the traffic goes. The route of Plaitway stays in the
+table, is shown as failed with `overridden by <route>: effective metric <n>, ours <m>` or `overridden by more specific
+routes, such as <route>`, and is judged again at every network change. Plaitway never lowers a metric to win and never
+deletes a route it did not add. Disconnecting the other VPN puts the route in use at the next network event.
+
+**No network after a route or adapter is left behind.** The Reconciler repairs its journal at the next start, and
+`plaitwayd.exe uninstall` removes the NRPT rules left in the registry (`removed <n> DNS rules left in the registry`).
+Adapters named `Plaitway-` are removed when the first one of the next run is made. `Run-DaemonElevated.ps1` and
+`Run-ElevatedTests.ps1` list what they find and print the commands that remove it.
+
+**A firewall prompt appears while the tests run.** A test binary listens on an address other than loopback.
+`Test-LoopbackOnly.ps1` finds the package. Each **Allow** leaves rules for a binary that is deleted; they are listed
+by `Get-NetFirewallApplicationFilter | Where-Object Program -like '*.test.exe'` and removed with `Remove-NetFirewallRule`
+after a look at the list.
 
 ## Linux
 
@@ -1046,9 +1169,8 @@ menu and the command line work without it.
 - Credentials are always remembered in the login Keychain; there is no opt-out
 - The helper's log is rotated when it starts, not while it runs
 - A corrupt `profiles.json` stops the helper instead of being recovered
-- Windows: the daemon runs the `-fake` backend only. The OpenVPN and
-  WireGuard engines, the route table, DNS, the network monitor, Windows service
-  integration and the check of the OpenVPN binary are not implemented
+- Windows: unsigned, no release yet, the MSI has not been installed on a clean machine, and the OpenVPN engine's tests
+  that need an elevated shell have not been run; see [Docs/windows-status.md](Docs/windows-status.md) for the full list
 - Linux: the limits are listed under [Known limitations on Linux](#known-limitations-on-linux)
 
 <p>
