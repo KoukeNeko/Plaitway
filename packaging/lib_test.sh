@@ -246,4 +246,24 @@ has_string() { bash -c 'source "$1"; binary_has_string "$2" "$3"' _ "$PACKAGING_
 expect "binary_has_string finds a string" has_string "$TMP/leaky" plain
 expect "binary_has_string does not find a missing string" not has_string "$TMP/leaky" missing
 
+# notary_credentials chooses between an API key and a keychain profile.
+echo key >"$TMP/AuthKey.p8"
+notary() { # ENVIRONMENT...: the notarytool arguments, one per line
+    # shellcheck disable=SC2016
+    OUTPUT="$(env -u PLAITWAY_NOTARY_KEY -u PLAITWAY_NOTARY_KEY_ID -u PLAITWAY_NOTARY_ISSUER -u PLAITWAY_NOTARY_PROFILE "$@" \
+        bash -c 'source "$1"; notary_credentials; printf "%s\n" "${NOTARY_AUTH[@]}"' _ "$PACKAGING_DIR/lib.sh" 2>&1)"
+    STATUS=$?
+}
+notary
+expect "without a key the keychain profile is the default one" test "$STATUS" -eq 0 -a "$OUTPUT" = "$(printf -- '--keychain-profile\nplaitway-notary')"
+notary PLAITWAY_NOTARY_PROFILE=other
+expect "PLAITWAY_NOTARY_PROFILE names another profile" test "$STATUS" -eq 0 -a "$OUTPUT" = "$(printf -- '--keychain-profile\nother')"
+notary PLAITWAY_NOTARY_KEY="$TMP/AuthKey.p8" PLAITWAY_NOTARY_KEY_ID=KEYID PLAITWAY_NOTARY_ISSUER=ISSUER PLAITWAY_NOTARY_PROFILE=other
+expect "an API key is used instead of a profile" test "$STATUS" -eq 0 -a "$OUTPUT" = "$(printf -- '--key\n%s\n--key-id\nKEYID\n--issuer\nISSUER' "$TMP/AuthKey.p8")"
+notary PLAITWAY_NOTARY_KEY="$TMP/AuthKey.p8" PLAITWAY_NOTARY_KEY_ID=KEYID
+expect "an API key without its issuer is an error" test "$STATUS" -ne 0
+expect "the error names what is missing" grep -q PLAITWAY_NOTARY_ISSUER <<<"$OUTPUT"
+notary PLAITWAY_NOTARY_KEY="$TMP/missing.p8" PLAITWAY_NOTARY_KEY_ID=KEYID PLAITWAY_NOTARY_ISSUER=ISSUER
+expect "an API key that is not a file is an error" test "$STATUS" -ne 0
+
 [ "$FAILURES" -eq 0 ]

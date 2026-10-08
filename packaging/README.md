@@ -35,6 +35,7 @@ the app it replaces, so a dist file never outlives its build.
 | `PLAITWAY_OPENVPN_WORK` | work directory of `build-openvpn.sh` (default `build/openvpn-work`); the result does not depend on it |
 | `PLAITWAY_SOURCE_CONTACT` | where the written source offer says to ask (default: the web address of the `go.mod` module path) |
 | `PLAITWAY_NOTARY_PROFILE` | notarytool keychain profile for `notarize.sh` (default `plaitway-notary`) |
+| `PLAITWAY_NOTARY_KEY`, `PLAITWAY_NOTARY_KEY_ID`, `PLAITWAY_NOTARY_ISSUER` | an App Store Connect API key (the `.p8` file, its key id and the issuer id) for `notarize.sh` in place of the keychain profile; the release workflow uses it |
 
 `make dist` output is not notarized. To notarize: `make app`, then `packaging/notarize.sh`, which builds the zip and
 dmg from the stapled app. Build 0.1.0 was notarized on 2026-10-07: the app and the dmg are stapled and `spctl` reports

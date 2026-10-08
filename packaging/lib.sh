@@ -43,6 +43,21 @@ DEV_PLIST=/Library/LaunchDaemons/$DAEMON_LABEL.plist
 SIGN_IDENTITY="${PLAITWAY_SIGN_IDENTITY:-86A98634D7596D78A0F6BC838B99FF93AFE5BD45}"
 SIGN_TIMEOUT_SECONDS=60
 
+# notary_credentials sets NOTARY_AUTH, the notarytool arguments that say who is submitting: an
+# App Store Connect API key (PLAITWAY_NOTARY_KEY, the .p8 file, with PLAITWAY_NOTARY_KEY_ID and
+# PLAITWAY_NOTARY_ISSUER), which is what a build machine without a keychain profile uses, or else
+# the keychain profile PLAITWAY_NOTARY_PROFILE (default plaitway-notary).
+notary_credentials() {
+    if [ -n "${PLAITWAY_NOTARY_KEY:-}" ]; then
+        [ -f "$PLAITWAY_NOTARY_KEY" ] || die "PLAITWAY_NOTARY_KEY is not a file: $PLAITWAY_NOTARY_KEY"
+        [ -n "${PLAITWAY_NOTARY_KEY_ID:-}" ] && [ -n "${PLAITWAY_NOTARY_ISSUER:-}" ] ||
+            die "PLAITWAY_NOTARY_KEY needs PLAITWAY_NOTARY_KEY_ID and PLAITWAY_NOTARY_ISSUER"
+        NOTARY_AUTH=(--key "$PLAITWAY_NOTARY_KEY" --key-id "$PLAITWAY_NOTARY_KEY_ID" --issuer "$PLAITWAY_NOTARY_ISSUER")
+    else
+        NOTARY_AUTH=(--keychain-profile "${PLAITWAY_NOTARY_PROFILE:-plaitway-notary}")
+    fi
+}
+
 # read_version sets VERSION from the VERSION file.
 read_version() {
     VERSION="$(tr -d '[:space:]' <"$ROOT/VERSION")"
