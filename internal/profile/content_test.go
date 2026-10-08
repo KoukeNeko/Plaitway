@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -162,38 +161,23 @@ func TestUpdateContentUnknownProfile(t *testing.T) {
 }
 
 func TestUpdateContentWritesAPrivateFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX modes")
-	}
-	s := openStore(t, t.TempDir())
+	s := openStore(t, filepath.Join(t.TempDir(), "state"))
 	p := importOK(t, s, ImportRequest{Name: "home", Content: []byte(wgContent)}).Profile
 	if _, err := s.UpdateContent(p.ID, []byte(wgContent+"# edited\n")); err != nil {
 		t.Fatal(err)
 	}
-	fi, err := os.Stat(s.contentPath(p.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode().Perm() != 0o600 {
-		t.Fatalf("content mode = %v, want 0600", fi.Mode().Perm())
-	}
+	assertPrivate(t, s.contentPath(p.ID), 0o600)
 }
 
 // A failed write must leave the store, in memory and on disk, as it was: here
 // the content can be replaced but the index cannot, and the old text has to
 // come back.
 func TestFailedUpdateContentRestoresTheOldText(t *testing.T) {
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-		t.Skip("needs a non-root POSIX user to make the directory read-only")
-	}
 	dir := t.TempDir()
 	s := openStore(t, dir)
 	p := importOK(t, s, ImportRequest{Name: "home", Content: []byte(wgContent)}).Profile
 
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(dir, 0o700)
+	makeIndexUnwritable(t, dir)
 
 	if _, err := s.UpdateContent(p.ID, []byte("[Interface]\nPrivateKey = new\n")); err == nil {
 		t.Fatal("UpdateContent succeeded although the index could not be written")

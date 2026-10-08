@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
@@ -144,8 +143,8 @@ func readRegular(path string, limit int64) ([]byte, error) {
 }
 
 // writeFileAtomic replaces path with data (mode 0600): it writes a temporary
-// file next to it, syncs it, renames it over path and syncs the directory, so
-// a crash leaves either the old or the new file.
+// file next to it, syncs it and renames it over path (replaceFile), so a crash
+// leaves either the old or the new file.
 func writeFileAtomic(path string, data []byte) (err error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, tmpPrefix+"*")
@@ -169,17 +168,5 @@ func writeFileAtomic(path string, data []byte) (err error) {
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmp.Name(), path); err != nil {
-		return err
-	}
-	// Windows cannot fsync a directory.
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	return replaceFile(tmp.Name(), path)
 }

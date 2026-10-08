@@ -87,9 +87,6 @@ func names(profiles []Profile) []string {
 }
 
 func TestOpenCreatesPrivateDirectoryAndImportWritesPrivateFiles(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX modes")
-	}
 	dir := filepath.Join(t.TempDir(), "state")
 	s := openStore(t, dir)
 	res := importOK(t, s, ImportRequest{Name: "Office", Content: []byte(ovpnContent)})
@@ -100,27 +97,50 @@ func TestOpenCreatesPrivateDirectoryAndImportWritesPrivateFiles(t *testing.T) {
 		filepath.Join(dir, "profiles.json"): 0o600,
 		s.contentPath(res.Profile.ID):       0o600,
 	} {
-		fi, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if fi.Mode().Perm() != want {
-			t.Errorf("%s mode = %v, want %v", path, fi.Mode().Perm(), want)
-		}
+		assertPrivate(t, path, want)
 	}
 }
 
 func TestOpenTightensLooseDirectory(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX modes")
-	}
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dir := filepath.Join(t.TempDir(), "state")
+	s := openStore(t, dir)
+	res := importOK(t, s, ImportRequest{Name: "Office", Content: []byte(ovpnContent)})
+	loosen(t, dir)
+
 	openStore(t, dir)
-	if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o700 {
-		t.Fatalf("state directory mode = %v, want 0700", fi.Mode().Perm())
+	assertPrivate(t, dir, 0o700)
+	assertPrivate(t, s.contentPath(res.Profile.ID), 0o600)
+}
+
+// A directory that was already private is not reported: on Windows the real
+// state directory is made private when it is created, so a development daemon
+// whose directory sits under %TEMP% must start without a warning.
+func TestOpenWarnsOnlyWhenItRestrictsTheDirectory(t *testing.T) {
+	var logged bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logged, nil))
+	dir := filepath.Join(t.TempDir(), "state")
+	open := func() {
+		t.Helper()
+		if _, err := Open(dir, stubBackends(), log); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const warning = "accessible to others"
+
+	open()
+	open()
+	if strings.Contains(logged.String(), warning) {
+		t.Fatalf("a private directory was reported: %s", logged.String())
+	}
+
+	loosen(t, dir)
+	open()
+	if got := strings.Count(logged.String(), warning); got != 1 {
+		t.Fatalf("the warning was logged %d times, want once: %s", got, logged.String())
+	}
+	open()
+	if got := strings.Count(logged.String(), warning); got != 1 {
+		t.Fatalf("the repaired directory was reported again: %s", logged.String())
 	}
 }
 
@@ -468,9 +488,6 @@ func TestOpenKeepsContentWhenTheIndexIsMissing(t *testing.T) {
 }
 
 func TestContentRefusesSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlinks need privileges")
-	}
 	dir := t.TempDir()
 	s := openStore(t, dir)
 	p := importOK(t, s, ImportRequest{Name: "a", Content: []byte(ovpnContent)}).Profile
@@ -483,6 +500,9 @@ func TestContentRefusesSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(secret, s.contentPath(p.ID)); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("this session may not create symbolic links (needs Developer Mode or elevation): %v", err)
+		}
 		t.Fatal(err)
 	}
 	if content, err := s.Content(p.ID); err == nil {
@@ -492,17 +512,11 @@ func TestContentRefusesSymlink(t *testing.T) {
 
 // A failed write must leave the store, in memory and on disk, as it was.
 func TestFailedWriteLeavesStoreUnchanged(t *testing.T) {
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-		t.Skip("needs a non-root POSIX user to make the directory read-only")
-	}
 	dir := t.TempDir()
 	s := openStore(t, dir)
 	a := importOK(t, s, ImportRequest{Name: "a", Content: []byte(ovpnContent)}).Profile
 
-	if err := os.Chmod(dir, 0o500); err != nil { // the index cannot be replaced
-		t.Fatal(err)
-	}
-	defer os.Chmod(dir, 0o700)
+	makeIndexUnwritable(t, dir) // the index cannot be replaced
 
 	newName := "changed"
 	if _, err := s.Update(a.ID, Change{Name: &newName}); err == nil {
@@ -520,15 +534,9 @@ func TestFailedWriteLeavesStoreUnchanged(t *testing.T) {
 }
 
 func TestFailedImportLeavesNoContentBehind(t *testing.T) {
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-		t.Skip("needs a non-root POSIX user to make the directory read-only")
-	}
 	dir := t.TempDir()
 	s := openStore(t, dir)
-	if err := os.Chmod(dir, 0o500); err != nil { // the index cannot be written, the profiles directory still can
-		t.Fatal(err)
-	}
-	defer os.Chmod(dir, 0o700)
+	makeIndexUnwritable(t, dir) // the index cannot be written, the profiles directory still can
 
 	if _, err := s.Import(ImportRequest{Name: "a", Content: []byte(ovpnContent)}); err == nil {
 		t.Fatal("Import succeeded although the index could not be written")

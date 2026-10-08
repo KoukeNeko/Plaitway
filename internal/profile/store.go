@@ -3,7 +3,9 @@
 // goes through the backend's Parse, and what is stored is the sanitized
 // Parsed.Content, never the raw upload.
 //
-// Layout of the state directory (mode 0700, files 0600):
+// Layout of the state directory (mode 0700, files 0600; on Windows an access
+// list for SYSTEM, Administrators and the daemon's own user, and a directory
+// that someone else owns or that is a link is refused, see internal/fsperm):
 //
 //	profiles.json            schema version and the metadata of every profile
 //	profiles/<id>.profile    the profile content
@@ -30,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KoukeNeko/Plaitway/internal/fsperm"
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
 
@@ -137,7 +140,7 @@ type Store struct {
 // overwrite the profiles it could not read.
 func Open(dir string, backends map[tunnel.Kind]tunnel.Backend, log *slog.Logger) (*Store, error) {
 	s := &Store{dir: dir, backends: backends, log: log}
-	if err := os.MkdirAll(filepath.Join(dir, contentDir), 0o700); err != nil {
+	if err := fsperm.MkdirAll(filepath.Join(dir, contentDir), 0o700); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
 	}
 	fi, err := os.Lstat(dir)
@@ -148,11 +151,8 @@ func Open(dir string, backends map[tunnel.Kind]tunnel.Backend, log *slog.Logger)
 		return nil, fmt.Errorf("state directory %s is not a directory (a symbolic link is not followed)", dir)
 	}
 	// Profiles hold private keys: nobody else may list or read the directory.
-	if fi.Mode().Perm()&0o077 != 0 {
-		if err := os.Chmod(dir, 0o700); err != nil {
-			return nil, fmt.Errorf("restrict state directory: %w", err)
-		}
-		log.Warn("state directory was accessible to others, restricted to 0700", "dir", dir, "was", fi.Mode().Perm())
+	if err := fsperm.RestrictAndWarn(log, "state directory", dir); err != nil {
+		return nil, fmt.Errorf("restrict state directory: %w", err)
 	}
 	indexed, err := s.load()
 	if err != nil {
