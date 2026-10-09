@@ -100,7 +100,10 @@ class DaemonProcess:
     def _probe(self) -> None:
         client = DaemonClient(self.socket_path)
         try:
-            for _ in range(100):
+            # A daemon started again on the same socket path is reached only when the
+            # channel's reconnect backoff (up to five seconds) is over, and the
+            # older gRPC of the distributions waits it out where the newest does not.
+            for _ in range(400):
                 try:
                     client.get_daemon_info()
                     return
