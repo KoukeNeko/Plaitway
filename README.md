@@ -29,7 +29,7 @@
 </p>
 
 <p align="center">
-  <img src="Docs/window.webp" alt="The Plaitway window: three connected profiles in the sidebar, Diagnostics and Settings below them, and the Overview page of one profile with its uptime, traffic and addresses" width="900">
+  <img width="1062" height="710" alt="image" src="https://github.com/user-attachments/assets/16fd3456-c51d-438b-aec6-844dd074dc93" />
 </p>
 
 Plaitway keeps your OpenVPN and WireGuard profiles in the macOS menu bar.
