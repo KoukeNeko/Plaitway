@@ -83,6 +83,12 @@ func TestLinkClassification(t *testing.T) {
 		{"vti", "vti", arphrdIPGRE, running, isTunnel, false},
 		{"vti6", "vti6", arphrdTunnel6, running, isTunnel, false},
 		{"geneve", "geneve", ether, running, isTunnel, false},
+		{"erspan", "erspan", ether, running, isTunnel, false},
+		{"ip6erspan", "ip6erspan", ether, running, isTunnel, false},
+		{"xfrm", "xfrm", ether, running, isTunnel, false},
+		{"bareudp", "bareudp", ether, running, isTunnel, false},
+		{"gtp", "gtp", ether, running, isTunnel, false},
+		{"ovpn", "ovpn", ether, running, isTunnel, false},
 		{"vxlan", "vxlan", ether, running, isTunnel, false},
 		{"a tunnel of a kind we do not list, by its hardware type", "", arphrdTunnel, running, isTunnel, false},
 

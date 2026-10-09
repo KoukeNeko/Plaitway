@@ -9,10 +9,11 @@ import (
 )
 
 // tunnelKinds are the IFLA_INFO_KIND of the devices that encapsulate traffic.
-// "tun" is the kind of tap devices too.
+// "tun" is the kind of tap devices too, "xfrm" is an IPsec interface and "ovpn" the
+// device of the kernel's OpenVPN data channel offload.
 var tunnelKinds = []string{
 	"tun", "wireguard", "ipip", "sit", "gre", "gretap", "ip6gre", "ip6gretap", "ip6tnl",
-	"vti", "vti6", "geneve", "vxlan",
+	"vti", "vti6", "geneve", "vxlan", "erspan", "ip6erspan", "xfrm", "bareudp", "gtp", "ovpn",
 }
 
 // link is an interface as read from the kernel, with what osnet.Interface does
