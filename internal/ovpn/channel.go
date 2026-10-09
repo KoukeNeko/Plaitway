@@ -37,12 +37,9 @@ type mgmtChannel interface {
 
 // --- Unix socket ---
 
-const (
-	socketFileName = "m.sock"
-	// maxSocketPath is the longest Unix socket path macOS accepts (sun_path is
-	// 104 bytes including the terminating NUL).
-	maxSocketPath = 103
-)
+// socketFileName is the management socket in the engine's directory. The
+// longest path openvpn can listen on is maxSocketPath (platform_*.go).
+const socketFileName = "m.sock"
 
 // unixSocketPath names the management socket in the engine's directory.
 func unixSocketPath(dir string) (string, error) {

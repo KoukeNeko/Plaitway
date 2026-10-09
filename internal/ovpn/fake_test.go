@@ -392,6 +392,11 @@ type harnessOpts struct {
 	realProbe bool
 	// binary runs this executable instead of the fake.
 	binary string
+	// network is the Network that the engine's calls are passed on to, after the
+	// harness has recorded them.
+	network tunnel.Network
+	// runDir replaces the engine's run directory.
+	runDir string
 	// device replaces the stand-in that does nothing.
 	device deviceProvider
 	// realTrust leaves the checks of the binary and the way the engine gets its
@@ -428,8 +433,11 @@ ZmFrZQ==
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
 	t.Helper()
-	h := &harness{t: t, dir: shortTempDir(t), net: &fakeNetwork{}, collect: make(chan struct{})}
+	h := &harness{t: t, dir: shortTempDir(t), net: &fakeNetwork{inner: o.network}, collect: make(chan struct{})}
 	h.runDir = filepath.Join(shortTempDir(t), "run")
+	if o.runDir != "" {
+		h.runDir = o.runDir
+	}
 
 	if o.binary != "" {
 		o.realProbe = true

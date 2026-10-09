@@ -662,8 +662,9 @@ func TestParseWarnsAboutWhatMakesAProfileUnusable(t *testing.T) {
 		name, line, directive, message string
 		kept                           bool
 	}{
-		{"tap device", "dev tap0", "dev", "no tap device", true},
-		{"tap", "dev tap", "dev", "no tap device", true},
+		{"tap device", "dev tap0", "dev", tapRefusal, true},
+		{"tap", "dev tap", "dev", tapRefusal, true},
+		{"tap by type", "dev vpn0\ndev-type tap", "dev-type", tapRefusal, true},
 		{"one-time code", "static-challenge \"Enter code\" 1", "static-challenge", reasonOTP, false},
 	}
 	for _, tt := range tests {
@@ -682,6 +683,36 @@ func TestParseWarnsAboutWhatMakesAProfileUnusable(t *testing.T) {
 	}
 	if p, err := parseProfile([]byte(prefix + "dev tun\n")); err != nil || len(p.Warnings) != 0 {
 		t.Errorf("dev tun: %v, warnings %+v", err, p.Warnings)
+	}
+}
+
+// The tap warning is decided by the whole profile, and stands among the others
+// by the line it is about.
+func TestParseTapWarningDependsOnTheLastDeviceAndKeepsTheLineOrder(t *testing.T) {
+	const prefix = "client\nremote h.example 1194\n"
+	tests := []struct {
+		name, lines string
+		want        []int // the lines of the warnings
+	}{
+		{"tap among other warnings", "up /bin/a\ndev tap0\nroute-up /bin/b\n", []int{3, 4, 5}},
+		{"tap by type, first", "dev-type tap\nup /bin/a\ndev vpn0\n", []int{3, 4}},
+		{"tap given up again", "up /bin/a\ndev tap\ndev tun\nroute-up /bin/b\n", []int{3, 6}},
+		{"the type wins over the name", "up /bin/a\ndev tap0\ndev-type tun\n", []int{3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := parseProfile([]byte(prefix + tt.lines))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []int
+			for _, w := range p.Warnings {
+				got = append(got, w.Line)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("warnings are about lines %v, want %v: %+v", got, tt.want, p.Warnings)
+			}
+		})
 	}
 }
 

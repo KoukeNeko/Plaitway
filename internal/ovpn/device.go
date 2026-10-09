@@ -15,10 +15,10 @@ import (
 const nullDevice = "null"
 
 // deviceProvider is what an engine does about the tunnel interface that the OS
-// makes it do itself. openvpn on macOS opens a utun device of its own; on
-// Windows it can only use an adapter that exists, so the engine makes one for
-// it and sets its addresses, because openvpn must not (the Reconciler owns
-// routes and DNS, and the engine owns nothing else on the adapter).
+// makes it do itself. openvpn on macOS and Linux opens a tunnel device of its
+// own; on Windows it can only use an adapter that exists, so the engine makes
+// one for it and sets its addresses, because openvpn must not (the Reconciler
+// owns routes and DNS, and the engine owns nothing else on the adapter).
 type deviceProvider interface {
 	// options are added to the openvpn command line.
 	options() []string

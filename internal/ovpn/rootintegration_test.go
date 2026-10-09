@@ -6,26 +6,37 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/KoukeNeko/Plaitway/internal/tunnel"
 )
 
-// TestRootRealTunnel brings a real utun tunnel up against a loopback openvpn
-// server and checks what only root can show: the interface exists with the
-// pushed address, it survives a Rebind (persist-tun), and it is gone after
-// Stop. Routes and DNS are not touched: the engine runs openvpn with
-// --route-noexec, and the Network here is a recorder.
+// tunnelName is how the system names the interface openvpn opens for "dev tun".
+var tunnelName = map[string]*regexp.Regexp{
+	"darwin": regexp.MustCompile(`^utun\d+$`),
+	"linux":  regexp.MustCompile(`^tun\d+$`),
+}[runtime.GOOS]
+
+// TestRootRealTunnel brings a real tunnel up against a loopback openvpn server
+// and checks what only root can show: the interface exists with the pushed
+// address, it survives a Rebind (persist-tun), and it is gone after Stop.
+// Routes and DNS are not touched: the engine runs openvpn with --route-noexec,
+// and the Network here is a recorder.
 //
-// It creates and destroys a utun interface on the host, so it refuses to run
+// It creates and destroys a tunnel interface on the host, so it refuses to run
 // unless PLAITWAY_ROOT_TESTS=1 and the effective uid is 0:
 //
 //	sudo env PLAITWAY_ROOT_TESTS=1 go test -tags rootintegration -run TestRootRealTunnel ./internal/ovpn
+//
+// On Linux run it in a private user and network namespace instead, which needs
+// no privileges and leaves the host alone (see rootintegration_linux_test.go).
 func TestRootRealTunnel(t *testing.T) {
 	if os.Getenv("PLAITWAY_ROOT_TESTS") != "1" || os.Geteuid() != 0 {
-		t.Skip("set PLAITWAY_ROOT_TESTS=1 and run as root to create a real utun interface")
+		t.Skip("set PLAITWAY_ROOT_TESTS=1 and run as root to create a real tunnel interface")
 	}
+	requirePrivateNetns(t)
 	bin := realBinary(t)
 	p := newPKI(t)
 	srv := startLoopbackServer(t, bin, p, serverOpts{
@@ -41,8 +52,8 @@ func TestRootRealTunnel(t *testing.T) {
 	}
 	up := h.waitFor("Up", h.stateIs(tunnel.StateUp))
 
-	if !regexp.MustCompile(`^utun\d+$`).MatchString(up.Iface) {
-		t.Fatalf("Iface = %q, want a utun interface", up.Iface)
+	if !tunnelName.MatchString(up.Iface) {
+		t.Fatalf("Iface = %q, want a name like %s", up.Iface, tunnelName)
 	}
 	requireInterfaceAddress(t, up.Iface, "10.8.0.2")
 	for _, c := range h.net.snapshot() {

@@ -22,9 +22,11 @@ import (
 // These tests run the real openvpn binary and need no root: both ends use
 // "--dev null", which opens no interface. They are skipped when the binary is
 // absent. The binary is looked up in build/openvpn/bin or in
-// $PLAITWAY_OPENVPN, and on Windows in the Program Files of an OpenVPN
-// installation. Nothing of the daemon's trust applies: the binary runs as the
-// user who runs the tests, and an adapter is never opened (the device is null).
+// $PLAITWAY_OPENVPN, and then where the system installs one: on Windows in the
+// Program Files of an OpenVPN installation, on Linux on the PATH of the system
+// (/usr/sbin, which a user's PATH often lacks). Nothing of the daemon's trust
+// applies: the binary runs as the user who runs the tests, and an adapter is
+// never opened (the device is null).
 
 func realBinary(t *testing.T) string {
 	t.Helper()
@@ -51,10 +53,18 @@ func realBinary(t *testing.T) string {
 // installedBinary is where an OpenVPN installation puts the program; empty where
 // there is no such place.
 func installedBinary() string {
-	if runtime.GOOS != "windows" {
-		return ""
+	switch runtime.GOOS {
+	case "windows":
+		return filepath.Join(os.Getenv("ProgramFiles"), "OpenVPN", "bin", "openvpn.exe")
+	case "linux":
+		for _, dir := range []string{"/usr/sbin", "/usr/bin", "/sbin", "/bin"} {
+			path := filepath.Join(dir, "openvpn")
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
 	}
-	return filepath.Join(os.Getenv("ProgramFiles"), "OpenVPN", "bin", "openvpn.exe")
+	return ""
 }
 
 func freeTCPPort(t *testing.T) int {

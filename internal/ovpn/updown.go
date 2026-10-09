@@ -251,7 +251,9 @@ func upIntent(spec tunnel.Spec, prof *profile, up upInfo, endpoints []netip.Addr
 		Endpoints: endpoints,
 		Routes:    routes,
 		// An Ethernet-like adapter (tap-windows6) answers only for the tunnel's
-		// own next hop, one for each family, so the Reconciler needs both.
+		// own next hop, one for each family, so the Reconciler needs both. A tunnel
+		// device on macOS and Linux is point-to-point, and the Reconciler ignores
+		// them there.
 		Gateway:   up.Gateway,
 		GatewayV6: up.GatewayV6,
 	}

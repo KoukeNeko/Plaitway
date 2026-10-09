@@ -19,6 +19,8 @@ type fakeNetwork struct {
 	calls       []netCall
 	announceErr func(n int, it tunnel.Intent) error
 	onWithdraw  func()
+	// inner, when set, is a Network that gets every call after it is recorded.
+	inner tunnel.Network
 }
 
 func (n *fakeNetwork) Announce(it tunnel.Intent) error {
@@ -28,7 +30,12 @@ func (n *fakeNetwork) Announce(it tunnel.Intent) error {
 	hook := n.announceErr
 	n.mu.Unlock()
 	if hook != nil {
-		return hook(count, it)
+		if err := hook(count, it); err != nil {
+			return err
+		}
+	}
+	if n.inner != nil {
+		return n.inner.Announce(it)
 	}
 	return nil
 }
@@ -40,6 +47,9 @@ func (n *fakeNetwork) Withdraw(owner tunnel.OwnerID) {
 	n.mu.Unlock()
 	if hook != nil {
 		hook()
+	}
+	if n.inner != nil {
+		n.inner.Withdraw(owner)
 	}
 }
 

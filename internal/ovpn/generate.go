@@ -28,7 +28,7 @@ const configFileName = "profile.ovpn"
 //   - auth-retry interact: a rejected password is asked for again through the
 //     management interface instead of ending the process.
 //   - script-security 1 is the default, written down: no profile script can
-//     run, and openvpn may still call its built-in ifconfig.
+//     run, and openvpn may still call its built-in ifconfig or ip.
 //   - dns-updown disable: since 2.7 openvpn runs a helper script, whose path
 //     is fixed when openvpn is built and which runs even at script-security 1,
 //     whenever DNS options are set. The Reconciler owns DNS.

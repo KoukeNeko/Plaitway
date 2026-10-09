@@ -1,10 +1,12 @@
 package ovpn
 
 import (
+	"cmp"
 	"fmt"
 	"math/bits"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -40,6 +42,18 @@ type profile struct {
 	filters []pullFilter
 	// device is the profile's "dev": tun, tap, or null for none.
 	device string
+	// deviceType is the profile's "dev-type". When it is set it decides between
+	// tun and tap whatever the name of the device says.
+	deviceType string
+}
+
+// usesTap reports whether the profile asks openvpn for a tap device, an
+// Ethernet link, as openvpn itself reads dev and dev-type.
+func (p *profile) usesTap() bool {
+	if p.deviceType != "" {
+		return p.deviceType == "tap"
+	}
+	return strings.HasPrefix(p.device, "tap")
 }
 
 // Parse validates an untrusted profile. It rejects the whole profile, with an
@@ -81,6 +95,7 @@ func parseProfile(content []byte) (*profile, error) {
 	if len(pr.Summary.Endpoints) == 0 {
 		return nil, errAt(0, "profile has no remote server")
 	}
+	pr.warnAboutTap()
 	for _, s := range pr.dns.usableServers() {
 		for _, addr := range s.addrs {
 			pr.addDNSServer(addr)
@@ -111,10 +126,28 @@ type parser struct {
 	seenDNS       map[netip.Addr]struct{}
 	seenDomains   map[string]struct{}
 	seenProxies   map[string]struct{}
+
+	// deviceLine and deviceTypeLine are where the last dev and dev-type are.
+	deviceLine, deviceTypeLine int
 }
 
 func (pr *parser) warn(line int, directive, message string) {
 	pr.Warnings = append(pr.Warnings, tunnel.Warning{Line: line, Directive: directive, Message: message})
+}
+
+// warnAboutTap says that the profile wants a tap device (see tapRefusal). It
+// waits for the whole profile: the last dev and dev-type decide. The warning
+// goes where the line is among the others.
+func (pr *parser) warnAboutTap() {
+	if !pr.usesTap() {
+		return
+	}
+	line, directive := pr.deviceLine, "dev"
+	if pr.deviceType != "" {
+		line, directive = pr.deviceTypeLine, "dev-type"
+	}
+	at, _ := slices.BinarySearchFunc(pr.Warnings, line, func(w tunnel.Warning, line int) int { return cmp.Compare(w.Line, line) })
+	pr.Warnings = slices.Insert(pr.Warnings, at, tunnel.Warning{Line: line, Directive: directive, Message: "kept: " + tapRefusal + ", so the profile cannot connect"})
 }
 
 func (pr *parser) process(items []item, base scope, top bool) ([]item, error) {
@@ -252,8 +285,11 @@ func (pr *parser) check(it item, name string, sc scope) error {
 			return fmt.Errorf("needs a device name such as tun")
 		}
 		pr.device = args[0]
-		if strings.HasPrefix(args[0], "tap") {
-			pr.warn(it.line, "dev", "kept: macOS has no tap device, so the profile cannot connect")
+		pr.deviceLine = it.line
+	case "dev-type":
+		if len(args) == 1 {
+			pr.deviceType = args[0]
+			pr.deviceTypeLine = it.line
 		}
 	case "route":
 		return pr.route(it)
@@ -554,8 +590,8 @@ func maskLength(mask netip.Addr) (int, error) {
 
 var deviceName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,14}$`)
 
-// validDeviceName accepts tun, tun0, utun5 and null; a path is refused,
-// because it would open a device node the profile picked.
+// validDeviceName accepts tun, tun0, utun5, tap0, ovpn0 and null; a path is
+// refused, because it would open a device node the profile picked.
 func validDeviceName(s string) bool { return deviceName.MatchString(s) }
 
 // validHost accepts an IP address or a DNS name. The value is used for a DNS

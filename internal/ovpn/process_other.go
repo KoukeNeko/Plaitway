@@ -7,17 +7,10 @@ import (
 	"syscall"
 )
 
-// childEnv is the whole environment of the openvpn child. It runs
-// /sbin/ifconfig by absolute path; nothing from the daemon's environment is
-// needed, and none is passed on.
-func childEnv() []string { return []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin"} }
-
 // processGuard is what the OS keeps to make sure the child does not outlive
-// the engine. A Unix child is stopped by its pid, and nothing more is needed.
+// the engine. A Unix child is stopped by its pid, and nothing more is needed;
+// on Linux the kernel ends it with the daemon (see prepareCommand).
 type processGuard struct{}
-
-// prepareCommand sets the OS specific attributes of the child before it starts.
-func prepareCommand(*exec.Cmd, string) {}
 
 // guardProcess takes the child that has just started under the guard.
 func guardProcess(*exec.Cmd) (processGuard, error) { return processGuard{}, nil }

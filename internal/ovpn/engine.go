@@ -213,8 +213,8 @@ func warningTexts(ws []tunnel.Warning) []string {
 
 // Start returns once openvpn is being launched; the engine reports progress
 // through Status. It checks what it can without waiting: the binary, LZO
-// support and the workspace. ctx only bounds this call; the engine runs until
-// Stop.
+// support, the device the profile asks for and the workspace. ctx only bounds
+// this call; the engine runs until Stop.
 func (e *engine) Start(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -225,6 +225,8 @@ func (e *engine) Start(ctx context.Context) error {
 		return fmt.Errorf("openvpn is not available: %s", bin.detail)
 	case e.prof.needsLZO && !bin.lzo:
 		return errors.New("this profile uses LZO compression, which the openvpn binary was built without")
+	case refusesTap && e.prof.usesTap():
+		return errors.New(tapRefusal)
 	}
 	if !e.started.CompareAndSwap(false, true) {
 		return errors.New("openvpn: engine was already started or stopped")

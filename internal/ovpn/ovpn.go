@@ -13,6 +13,11 @@
 // the daemon (device_windows.go, process_windows.go). The binary is run only
 // after the checks of trust_windows.go.
 //
+// On Linux openvpn makes its tun device and sets its addresses itself, as on
+// macOS, and the kernel ends the child with the daemon (process_linux.go). A
+// profile for a tap device is refused, because the Reconciler binds the routes
+// of a tunnel to its device without a next hop (platform_linux.go).
+//
 // Profiles are untrusted input to a root process. Parse is the only way in:
 // it rejects profiles that name files, removes directives that run programs
 // or reconfigure the daemon, and writes back a canonical profile that holds
@@ -41,7 +46,8 @@ type Config struct {
 	RunDir string
 	// BinarySHA256 (hex), when not empty, is the hash the binary must have. It is
 	// for Windows, where the engine verifies the binary where it is: see
-	// VerifyBinary. On macOS the daemon checks a copy before it gives the path.
+	// VerifyBinary. Elsewhere the daemon decides which binary it trusts before it
+	// gives the path (on macOS it checks a copy).
 	BinarySHA256 string
 	// Log receives the backend's own diagnostics. openvpn's output goes to
 	// Deps.Log of each engine instead.
