@@ -45,8 +45,9 @@ ACTIONABLE = (
 )
 # Parts of widgets that name themselves: the window's own buttons, and what a row or a split button builds.
 SELF_NAMING_ANCESTORS = (
-    Gtk.WindowControls, Adw.EntryRow, Adw.ExpanderRow, Adw.SplitButton, Gtk.MenuButton, Gtk.Popover, Adw.ToggleGroup,
-    Adw.Banner,
+    Gtk.WindowControls, Adw.EntryRow, Adw.ExpanderRow, Adw.SplitButton, Gtk.MenuButton, Gtk.Popover, Adw.Banner,
+    # libadwaita 1.7; before it the page switcher is made of toggle buttons, which have text of their own.
+    *((Adw.ToggleGroup,) if hasattr(Adw, "ToggleGroup") else ()),
 )
 # libadwaita's own: the back button of a collapsed split view.
 SELF_NAMING_TYPES = {"AdwBackButton"}

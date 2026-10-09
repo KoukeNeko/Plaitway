@@ -165,6 +165,15 @@ def clear(box: Gtk.Box) -> None:
         child = following
 
 
+def accent_color(widget: Gtk.Widget):
+    """The system's accent colour: libadwaita 1.6 asks for it, before that it is the named colour."""
+    manager = Adw.StyleManager.get_default()
+    if hasattr(manager, "get_accent_color_rgba"):
+        return manager.get_accent_color_rgba()
+    found, color = widget.get_style_context().lookup_color("accent_color")
+    return color if found else widget.get_color()
+
+
 class Sparkline(Gtk.Widget):
     """A sparkline of both directions on one scale: received as a filled area, sent
     as a dashed line, so that the two differ by shape and not by colour. It has no
@@ -186,7 +195,7 @@ class Sparkline(Gtk.Widget):
     def do_snapshot(self, snapshot) -> None:
         width, height = self.get_width(), self.get_height()
         foreground = self.get_color()
-        accent = Adw.StyleManager.get_default().get_accent_color_rgba()
+        accent = accent_color(self)
 
         background = foreground.copy()
         background.alpha = 0.07
@@ -230,17 +239,33 @@ class Sparkline(Gtk.Widget):
         snapshot.append_stroke(sent.to_path(), dashed, dim)
 
 
+def spinner(**properties) -> Gtk.Widget:
+    """A spinner that is already turning: libadwaita's (1.6) where there is one, else GTK's."""
+    if hasattr(Adw, "Spinner"):
+        return Adw.Spinner(**properties)
+    return Gtk.Spinner(spinning=True, **properties)
+
+
 class PageSwitcher(Gtk.Box):
-    """The pages of what is selected, as a row of toggles in the header."""
+    """The pages of what is selected, as a row of toggles in the header.
+
+    libadwaita 1.7 has the toggle group for it. Before that (Ubuntu 24.04 has 1.5) the
+    same row is made of linked toggle buttons of one group.
+    """
 
     def __init__(self, on_chosen: Callable[[str], None]) -> None:
         super().__init__()
         self._on_chosen = on_chosen
         self._names: list[str] = []
         self._syncing = False
-        self._group = Adw.ToggleGroup()
-        self._group.connect("notify::active-name", self._changed)
-        self.append(self._group)
+        self._group = None
+        self._buttons: dict[str, Gtk.ToggleButton] = {}
+        if hasattr(Adw, "ToggleGroup"):
+            self._group = Adw.ToggleGroup()
+            self._group.connect("notify::active-name", self._changed)
+            self.append(self._group)
+        else:
+            self.add_css_class("linked")
 
     def show_pages(self, pages: list[tuple[str, str]], active: str | None) -> None:
         """`pages` is (name, label) in order; `active` the name that is open."""
@@ -248,15 +273,40 @@ class PageSwitcher(Gtk.Box):
         try:
             names = [name for name, _ in pages]
             if names != self._names:
-                while self._group.get_n_toggles():
-                    self._group.remove(self._group.get_toggle(0))
-                for name, text in pages:
-                    self._group.add(Adw.Toggle(name=name, label=text))
+                self._set_pages(pages)
                 self._names = names
-            if active != self._group.get_active_name():
-                self._group.set_active_name(active)
+            if self._group is not None:
+                if active != self._group.get_active_name():
+                    self._group.set_active_name(active)
+            elif active in self._buttons:
+                self._buttons[active].set_active(True)
         finally:
             self._syncing = False
+
+    def _set_pages(self, pages: list[tuple[str, str]]) -> None:
+        if self._group is not None:
+            while self._group.get_n_toggles():
+                self._group.remove(self._group.get_toggle(0))
+            for name, text in pages:
+                self._group.add(Adw.Toggle(name=name, label=text))
+            return
+        for button in self._buttons.values():
+            self.remove(button)
+        self._buttons = {}
+        first = None
+        for name, text in pages:
+            button = Gtk.ToggleButton(label=text)
+            if first is None:
+                first = button
+            else:
+                button.set_group(first)
+            button.connect("toggled", self._toggled, name)
+            self.append(button)
+            self._buttons[name] = button
+
+    def _toggled(self, button: Gtk.ToggleButton, name: str) -> None:
+        if button.get_active() and not self._syncing:
+            self._on_chosen(name)
 
     def _changed(self, *_) -> None:
         name = self._group.get_active_name()

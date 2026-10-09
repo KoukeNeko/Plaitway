@@ -13,7 +13,7 @@ from ...client.types import StaleRoute  # noqa: E402
 from ...core import formatting  # noqa: E402
 from ...core.app_model import AppModel, DiagnosticsPage  # noqa: E402
 from ...core.diagnostics_model import DiagnosticsModel  # noqa: E402
-from ..widgets import StatusLabel, follow, label, page_bar, text_button  # noqa: E402
+from ..widgets import StatusLabel, follow, label, page_bar, spinner, text_button  # noqa: E402
 from .icons import ICONS
 from .logs import LogsPage
 
@@ -51,7 +51,7 @@ class DiagnosticsOverview(Gtk.Box):
         self.append(bar)
 
         self._stack = Gtk.Stack(vexpand=True)
-        self._waiting = Adw.Spinner(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, width_request=32, height_request=32)
+        self._waiting = spinner(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, width_request=32, height_request=32)
         self._stack.add_named(self._waiting, "waiting")
         self._failure = Adw.StatusPage(icon_name="dialog-warning-symbolic")
         self._stack.add_named(self._failure, "failure")

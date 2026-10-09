@@ -10,7 +10,7 @@ place of Apple's. [docs/ui-architecture.md](docs/ui-architecture.md) describes t
 | What | For | Version |
 |---|---|---|
 | Python | everything | 3.10 or newer (tested on 3.14) |
-| `python3-gi`, `gir1.2-gtk-4.0`, `gir1.2-adw-1` | the window | GTK 4.14, libadwaita 1.7 |
+| `python3-gi`, `gir1.2-gtk-4.0`, `gir1.2-adw-1` | the window | GTK 4.14, libadwaita 1.5 |
 | `gir1.2-secret-1` | saved passwords | libsecret 0.20 |
 | `python3-grpc`, `python3-protobuf` | the connection to the helper | the distribution's: written for grpcio 1.51 and protobuf 3.21, tested with 1.84 and 7.36 |
 | systemd, polkit, a system D-Bus | starting and restarting the helper | |

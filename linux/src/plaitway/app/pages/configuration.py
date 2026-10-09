@@ -13,7 +13,7 @@ from ...core.app_model import AlertTitle, AppModel  # noqa: E402
 from ...core.presentation import Tone  # noqa: E402
 from ...core.profile_editor import Phase, SaveResult  # noqa: E402
 from ..config_editor import ConfigEditor  # noqa: E402
-from ..widgets import NoticeBar, follow, label, page_bar, status_page  # noqa: E402
+from ..widgets import NoticeBar, follow, label, page_bar, spinner, status_page  # noqa: E402
 
 
 class ConfigurationPage(Gtk.Box):
@@ -82,7 +82,7 @@ class ConfigurationPage(Gtk.Box):
 
     def _build_body(self, kind: int) -> None:
         self._stack = Gtk.Stack(vexpand=True)
-        self._stack.add_named(Adw.Spinner(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, width_request=32, height_request=32), "loading")
+        self._stack.add_named(spinner(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, width_request=32, height_request=32), "loading")
         self._unavailable = status_page("changes-prevent-symbolic", "")
         self._stack.add_named(self._unavailable, "unavailable")
         self._editor_widget = ConfigEditor(kind, self._edited, self._strings.configuration)

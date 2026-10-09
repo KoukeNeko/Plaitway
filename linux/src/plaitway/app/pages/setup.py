@@ -10,7 +10,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 from ...core.app_model import AppModel  # noqa: E402
 from ...core.setup import SetupContent  # noqa: E402
-from ..widgets import follow, status_page, text_button  # noqa: E402
+from ..widgets import follow, spinner, status_page, text_button  # noqa: E402
 
 
 class SetupPage(Gtk.Box):
@@ -36,7 +36,7 @@ class SetupPage(Gtk.Box):
         self._status.set_description(content.detail or "")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, halign=Gtk.Align.CENTER)
         if content.shows_progress:
-            box.append(Adw.Spinner(width_request=32, height_request=32))
+            box.append(spinner(width_request=32, height_request=32))
         if content.primary is not None:
             primary = content.primary
             button = text_button(primary.label(self._strings), lambda: self._model.perform(primary), css=["suggested-action", "pill"])

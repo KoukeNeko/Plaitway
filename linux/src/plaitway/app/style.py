@@ -37,6 +37,9 @@ row.dragged { opacity: .5; }
 /* Files dragged over the window. */
 .drop-over { box-shadow: inset 0 0 0 3px @accent_bg_color; border-radius: 8px; }
 
+/* libadwaita 1.7 styles .dimmed; Ubuntu 24.04 has 1.5, which does not. Same value as theirs. */
+.dimmed { opacity: .55; }
+
 .log-view, .config-editor { font-family: monospace; font-size: 90%; }
 .log-view { padding: 8px 12px; }
 .line-numbers { font-family: monospace; font-size: 80%; padding: 0 6px 0 10px; background-color: alpha(currentColor, .04); }
