@@ -77,7 +77,8 @@ class OverviewPage(Adw.PreferencesPage):
     def _build_traffic(self) -> None:
         self._traffic = Adw.PreferencesGroup()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        columns = Gtk.Box(spacing=24)
+        # Two columns of one width, so that the numbers of one do not push the other.
+        columns = Gtk.Box(spacing=24, homogeneous=True)
         self._received = _Direction("plaitway-arrow-down-symbolic", self._strings.received)
         self._sent = _Direction("plaitway-arrow-up-symbolic", self._strings.sent)
         columns.append(self._received)
@@ -218,7 +219,7 @@ class _Direction(Gtk.Box):
     """The rate in one direction, with the total under it."""
 
     def __init__(self, icon: str, name: str) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
         heading = Gtk.Box(spacing=4)
         heading.add_css_class("dimmed")
         heading.add_css_class("caption")

@@ -174,6 +174,24 @@ class WindowTests(SmokeTestCase):
         self.pump(app)
         self.assertEqual(MESSAGES, [])
 
+    def test_the_sent_column_stays_put_when_the_received_numbers_change(self):
+        from plaitway.app.pages.overview import OverviewPage
+
+        app = self.make_app()
+        window = self.open_window(app)
+        office, _, _ = self.three_profiles(app)
+        app.model.select(Selection.profile(office))
+        self.pump(app, 0.5)
+        page = next(widget for widget in descendants(window) if isinstance(widget, OverviewPage) and widget.get_mapped())
+        positions = []
+        for rate, total in [("–", "0 B"), ("88 kB/s", "5.55 GB"), ("1.2 MB/s", "412.2 MB"), ("123.4 MB/s", "1023.9 GB")]:
+            page._received.show(rate, total)
+            self.pump(app, 0.15)
+            ok, bounds = page._sent.compute_bounds(page)
+            self.assertTrue(ok)
+            positions.append(round(bounds.get_x(), 1))
+        self.assertEqual(len(set(positions)), 1, f"the Sent column moved: {positions}")
+
     def test_every_control_a_person_can_act_on_has_a_name(self):
         app = self.make_app()
         window = self.open_window(app)
