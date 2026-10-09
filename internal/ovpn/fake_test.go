@@ -1,8 +1,8 @@
 package ovpn
 
 import (
-	"cmp"
 	"bufio"
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -116,9 +116,9 @@ func runFakeOpenVPN() int {
 }
 
 type fakeOpenVPN struct {
-	conn   net.Conn
-	record func(name, text string)
-	wmu    sync.Mutex
+	conn     net.Conn
+	record   func(name, text string)
+	wmu      sync.Mutex
 	password string
 
 	holds chan struct{} // one entry per "hold release" received

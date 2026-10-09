@@ -63,6 +63,37 @@ extension ProfileStore {
     func waitForState(_ id: String, _ state: ProfileState) async throws {
         try await waitUntil("\(id) to be \(state)") { profile(id)?.state == state }
     }
+
+    /// Every state `id` is in from now on, in order and without repeats. It is told of each change of the
+    /// store as it happens, not asked for the state now and then: a state that lasts half a second is
+    /// over before a busy machine gets round to asking.
+    func recordStates(of id: String) -> StateRecorder {
+        let recorder = StateRecorder()
+        recorder.observe { [self] in
+            guard let state = profile(id)?.state, recorder.states.last != state else { return }
+            recorder.states.append(state)
+        }
+        return recorder
+    }
+}
+
+@MainActor
+final class StateRecorder {
+    fileprivate(set) var states: [ProfileState] = []
+    private var isStopped = false
+
+    /// Calls `read` now and after each change of what it reads, until `stop`.
+    fileprivate func observe(_ read: @escaping @MainActor () -> Void) {
+        guard !isStopped else { return }
+        withObservationTracking {
+            read()
+        } onChange: { [weak self] in
+            // onChange runs before the change is made: read once it is.
+            Task { @MainActor in self?.observe(read) }
+        }
+    }
+
+    func stop() { isStopped = true }
 }
 
 enum Fixture {

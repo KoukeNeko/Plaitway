@@ -122,6 +122,8 @@ struct LogsAndDiagnosticsTests {
             try await store.setEnabled(true, profileID: id)
             try await store.waitForState(id, .connected)
             try await store.removeStaleRoute(key: "fake-stale-1")
+            let states = store.recordStates(of: id)
+            defer { states.stop() }
 
             try await store.resync()
 
@@ -130,8 +132,9 @@ struct LogsAndDiagnosticsTests {
             let diagnostics = try await store.fetchDiagnostics()
             #expect(diagnostics.network.lastChangeReason == "manual")
             #expect(diagnostics.staleRoutes.map(\.key) == ["fake-stale-1"])
-            try await store.waitForState(id, .reconnecting)
-            try await store.waitForState(id, .connected)
+            // Connected again, after it has been seen reconnecting: it is connected when the resync starts.
+            try await waitUntil("the profile to reconnect and be connected again") { states.states.count >= 3 }
+            #expect(states.states == [.connected, .reconnecting, .connected])
         }
     }
 }
