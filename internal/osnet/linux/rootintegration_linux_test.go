@@ -77,7 +77,7 @@ func requireNetns(t *testing.T) {
 
 // fallbackDevices are the devices that a tunnel module makes in every network
 // namespace when it is loaded, and that cannot be deleted.
-var fallbackDevices = []string{"tunl0", "sit0", "gre0", "gretap0", "erspan0", "ip6tnl0", "ip6gre0"}
+var fallbackDevices = []string{"tunl0", "sit0", "gre0", "gretap0", "erspan0", "ip6tnl0", "ip6gre0", "ip_vti0", "ip6_vti0"}
 
 func nonLoopbackInterfaces(t *testing.T) []string {
 	t.Helper()

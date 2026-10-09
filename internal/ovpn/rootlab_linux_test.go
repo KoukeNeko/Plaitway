@@ -93,7 +93,7 @@ func requirePrivateNetns(t *testing.T) {
 
 // fallbackDevices are the devices that a tunnel module makes in every network
 // namespace when it is loaded, and that cannot be deleted.
-var fallbackDevices = []string{"tunl0", "sit0", "gre0", "gretap0", "erspan0", "ip6tnl0", "ip6gre0"}
+var fallbackDevices = []string{"tunl0", "sit0", "gre0", "gretap0", "erspan0", "ip6tnl0", "ip6gre0", "ip_vti0", "ip6_vti0"}
 
 // ipIn runs ip(8) in the namespace of pid, or in this one when pid is 0, and
 // fails the test when it fails.
