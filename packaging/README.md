@@ -1,7 +1,7 @@
 # Packaging
 
 Build, sign, verify and install Plaitway.app. Everything here targets Apple silicon (arm64 only) and macOS 15
-or later.
+or later, except `linux/`, which builds the Debian package of the Linux version, see [Linux](#linux).
 
 | Path | Purpose |
 |---|---|
@@ -213,3 +213,75 @@ files as an artifact. Actions › Publish packages redoes the cask of a release 
 | `HOMEBREW_TAP_TOKEN` | pushing to the tap; it needs Contents: Read and write on `KoukeNeko/homebrew-tap` |
 
 Windows is not part of a release: it has no app yet.
+
+## Linux
+
+The Debian package, its unit and its scripts are in `packaging/linux`; the development scripts are in `scripts/linux`.
+None of it needs Swift.
+
+| Path | Purpose |
+|---|---|
+| `linux/plaitwayd.service` | the systemd unit, with the reason for each directive in a comment |
+| `linux/install.sh` | the install map: which file goes where, below `--prefix` and `--destdir`. The package and `make install` both run it |
+| `linux/build.sh` | builds `plaitwayd` and `plaitway`, the notices (`notices -platform linux`) and the changelog into `build/linux` |
+| `linux/build-deb.sh` | `build/linux/plaitway_<version>_<arch>.deb` with `dpkg-deb`, no debhelper |
+| `linux/verify-deb.sh` | acceptance test of the package, without installing it (`make verify-deb`) |
+| `linux/debian/` | `postinst`, `prerm` and `postrm` |
+| `linux/copyright` | the copyright file of the package |
+| `linux/lib.sh`, `linux/lib_test.sh` | shared helpers, and the tests of the scripts against fakes (`make test-packaging-linux`) |
+| `../scripts/linux/dev-install-daemon.sh`, `dev-uninstall-daemon.sh` | the daemon you built, as the system service, without the package |
+| `../scripts/linux/root-tests.sh` | the tests that change routes, links and DNS, each in a private namespace (`make linux-root-test`) |
+
+```sh
+make deb                  # build/linux/plaitway_<version>_<arch>.deb for this machine's architecture
+make verify-deb           # metadata, files against the install map, scripts, unit, desktop files, Python, daemon
+make test-packaging-linux
+sudo apt install ./build/linux/plaitway_*.deb
+```
+
+The version is the `VERSION` file and the date of the package is that of the last commit (`SOURCE_DATE_EPOCH`
+overrides it): two builds of one commit are the same file.
+
+**cgo is on.** The daemon asks the account database which callers are administrators. `os/user` follows the name
+service switch (sssd, LDAP, systemd-homed) only when built with cgo; without it only `/etc/passwd` and `/etc/group` are
+read, and an administrator who is not listed there would be refused. The programs link the C library and nothing else;
+`dpkg-shlibdeps` writes the dependency (`libc6 (>= 2.34)` for the current code).
+
+**One architecture per machine.** cgo needs the C compiler and library of the target, so the package is built for the
+architecture of the machine; the CI builds amd64 on `ubuntu-latest` and arm64 on `ubuntu-24.04-arm`, both in an Ubuntu
+26.04 container.
+
+**Dependencies** are `openvpn (>= 2.6)`, `systemd`, `python3`, `python3-gi`, `gir1.2-gtk-4.0 (>= 4.14)`,
+`gir1.2-adw-1 (>= 1.7)`, `gir1.2-secret-1`, `python3-grpcio` and `python3-protobuf`; it recommends `systemd-resolved`
+(DNS settings go through `resolvectl`), `polkitd` (the app's Start Helper) and `gnome-keyring | kwallet6`, and suggests
+`gnome-shell-extension-appindicator | gnome-shell-ubuntu-extensions`, the AppIndicator extension that the tray item needs
+(Debian's is the first, the session of Ubuntu ships its own in the second). libadwaita 1.7 is the oldest with the toggle
+group the app uses, so Ubuntu 24.04 (1.5) cannot install the package. `apt-get --simulate install` of the package
+resolved on Ubuntu 26.04; nothing was resolved against the package lists of Debian 13 or Ubuntu 24.04.
+
+**Maintainer scripts.** `postinst` enables and starts `plaitwayd.service` (restarts it on an upgrade), `prerm` stops it
+on removal, `postrm` masks it on removal and, on purge only, deletes `/var/lib/plaitway` and `/run/plaitway`. They call
+`deb-systemd-helper` and `deb-systemd-invoke` as `dh_installsystemd` would, so `policy-rc.d` is respected, and none of
+them fails the installation where systemd is not running. The MIME, icon and desktop caches are refreshed by the dpkg
+triggers of `shared-mime-info`, `hicolor-icon-theme` and `desktop-file-utils`. An upgrade restarts the service, which
+disconnects the connected profiles; the stored profiles stay. Removing the package keeps `/var/lib/plaitway`, because
+the profiles hold private keys that cannot be made again.
+
+**Licenses.** The package does not bundle OpenVPN: it depends on the distribution's, which carries its own license and
+source, so there is no source offer. `/usr/share/doc/plaitway/THIRD_PARTY_NOTICES.md` lists the Go modules linked into
+the two programs with their license texts (`go run ./packaging/notices -platform linux`). Plaitway's own code is MIT
+licensed.
+
+`verify-deb.sh` does not run the maintainer scripts and does not install the package; it needs no root. The real
+package was installed, installed again, removed, installed again and purged once on an Ubuntu 26.04 virtual machine with
+systemd, with the unit's sandbox in effect (the root README says what ran). To repeat that, use a VM or a container with
+systemd, not a machine whose network you depend on:
+
+```sh
+sudo apt install ./build/linux/plaitway_*.deb
+systemctl status plaitwayd.service && systemd-analyze security plaitwayd.service
+sudo plaitway diagnostics
+sudo apt install ./build/linux/plaitway_*.deb       # again: the upgrade restarts the service
+sudo apt remove plaitway && ls /var/lib/plaitway    # the profiles stay
+sudo apt purge plaitway && ls /var/lib/plaitway     # gone
+```

@@ -13,6 +13,7 @@
 
 <p align="center">
   <img alt="macOS 15+" src="https://img.shields.io/badge/MACOS-15%2B-000000?style=for-the-badge&logo=apple&logoColor=white">
+  <img alt="Linux with systemd" src="https://img.shields.io/badge/LINUX-SYSTEMD-FCC624?style=for-the-badge&logo=linux&logoColor=black">
   <img alt="Swift 6" src="https://img.shields.io/badge/SWIFT-6-F05138?style=for-the-badge&logo=swift&logoColor=white">
   <img alt="Go 1.27" src="https://img.shields.io/badge/GO-1.27-00ADD8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="OpenVPN" src="https://img.shields.io/badge/OPENVPN-2.7-EA7E20?style=for-the-badge&logo=openvpn&logoColor=white">
@@ -23,6 +24,7 @@
   <a href="#getting-started"><strong>Getting started</strong></a>
   · <a href="#what-it-looks-like">What it looks like</a>
   · <a href="#compatibility">Compatibility</a>
+  · <a href="#linux">Linux</a>
   · <a href="#technical-reference">Technical reference</a>
 </p>
 
@@ -40,6 +42,12 @@ extension and no Network Extension. The official OpenVPN and the WireGuard Go
 implementation run under the helper, and a single Reconciler decides what goes
 in the routing table and in DNS, writes it down, and puts it right again after
 a new Wi-Fi network or a changed gateway.
+
+On Linux the same helper runs as a systemd service. The window is a GTK 4 and
+libadwaita app with a tray item, tunnels are `tun` devices, routes go through
+netlink, DNS through systemd-resolved, and OpenVPN is the distribution's. The
+sections down to Getting started were written for the macOS app;
+[Linux](#linux) says what differs there.
 
 ## What it looks like
 
@@ -187,6 +195,15 @@ The helper runs as root, so it is held to a short list:
   the binary against the hash baked in at build time, with no scripts.
 - Credentials are kept in the helper's memory only and are never logged.
 
+On Linux the rules are the same, with these meanings: an administrator is root
+or a member of `sudo`, `wheel` or `admin`; the person at the console is a user
+with an active session on a seat of systemd-logind, so a session over SSH is
+neither the console nor an administrator unless its user is one; without
+logind's state only administrators get in. The helper runs the distribution's
+`openvpn` where it is, and only when root owns the file and every directory
+above it and nobody else can write to them. The systemd unit restricts the
+helper further; [Linux](#linux) lists how.
+
 ## In your language
 
 English and 繁體中文, following the system. Messages that come from the helper
@@ -213,6 +230,20 @@ If SMAppService does not accept the helper, `sudo scripts/dev-install-daemon.sh`
 installs it as a plain LaunchDaemon and `sudo scripts/dev-uninstall-daemon.sh`
 removes it.
 
+**On Linux** (Ubuntu 26.04 or Debian 13, with systemd):
+
+1. Build the package, `make deb`, or take the artifact of the Linux package job
+   of the CI. A release does not publish it yet
+2. `sudo apt install ./build/linux/plaitway_*.deb`. This installs OpenVPN and
+   the GTK libraries, and enables and starts the helper, `plaitwayd.service`
+3. Open **Plaitway** from the application menu, or run `plaitway-app`. Import a
+   profile with **+**, by dropping the file on the window, or with
+   `plaitway import`. A username and password are asked for at the first
+   connection, and the Secret Service (GNOME Keyring, KWallet) remembers them
+4. Choose the profile and press **Connect**
+
+[Linux](#linux) has the details.
+
 ## Compatibility
 
 - macOS 15 or later on Apple silicon; the window uses the macOS 26 and 27
@@ -226,9 +257,15 @@ removes it.
   as far as WireGuard is concerned, and the import says so
 - Profiles that use `pkcs12` or `secret` are refused, and so are directives
   that run programs or read files outside the profile
+- Linux with systemd, Ubuntu 26.04 and Debian 13: a kernel with `/dev/net/tun`,
+  `systemd-resolved` for DNS settings, and the distribution's `openvpn` (2.6 or
+  later) for OpenVPN profiles; WireGuard profiles run on the embedded
+  wireguard-go and need no kernel module. OpenVPN profiles with `dev tap` are
+  refused. The app needs GTK 4.14 and libadwaita 1.7, which Ubuntu 24.04 lacks
+  (it has 1.5); [Linux](#linux) says what was run where
 
-Windows and Linux (Wails v3 windows on the same helper) are planned. Of Windows
-only the helper and the command line client exist, see [Windows](#windows).
+Of Windows only the helper and the command line client exist, see
+[Windows](#windows).
 
 ---
 
@@ -245,7 +282,8 @@ plaitway/
 │   │                             editing (SecretMask, ConfigTokenizer), helper
 │   │                             installation. No AppKit or SwiftUI
 │   └── Sources/PlaitwayMenuBar   The app: menu bar item, window, settings
-├── cmd/plaitwayd           The helper (root LaunchDaemon)
+├── linux/                  The Linux app: GTK 4 and libadwaita, Python (PyGObject)
+├── cmd/plaitwayd           The helper (root LaunchDaemon, systemd service on Linux)
 ├── cmd/plaitway            The command line client
 ├── internal/
 │   ├── manager             Profile lifecycle, settings, on-demand, logs, status
@@ -255,13 +293,15 @@ plaitway/
 │   ├── ovpn                OpenVPN engine over the management interface
 │   ├── wg                  WireGuard engine on embedded wireguard-go
 │   ├── reconciler          The only code that changes routes and DNS
-│   ├── osnet               Adapter interfaces; macos/ (PF_ROUTE, scutil) and fake/
+│   ├── osnet               Adapter interfaces; macos/ (PF_ROUTE, scutil), linux/
+│   │                       (netlink, resolvectl) and fake/
 │   ├── tunnel              The contracts between engines, adapters and Reconciler
 │   ├── transport, peercred Unix socket or named pipe serving and the caller's
 │   │                       identity
 │   └── gen                 Generated Go code
 ├── proto/plaitway/v1       plaitway.proto, the only hand-written API definition
-└── packaging/, scripts/    The signed bundle, notarization, install scripts
+└── packaging/, scripts/    The signed bundle, notarization, install scripts;
+                            packaging/linux and scripts/linux for Linux
 ```
 
 **One owner for routes and DNS.** Engines announce what they want — routes,
@@ -383,7 +423,8 @@ GitHub Actions (`.github/workflows`) runs `gofmt`, `go mod tidy` and
 `shellcheck`; builds, vets and tests the Go code on macOS, Linux and Windows;
 runs the Swift tests on the Xcode 27 image; and, when `proto/` or the generated
 code changes, runs `make lint-proto` and `make generate` and fails if the
-committed files differ.
+committed files differ. Three Linux jobs run the tests of the app, the root tests
+and the build and check of the package, see [Linux](#linux).
 
 ### Release
 
@@ -477,6 +518,224 @@ copies Linux builds of `plaitway` and `plaitwayd` to the `-o` path it is given.
 The `rootintegration` tag (see [Development](#development)) is for macOS and
 Linux as root.
 
+## Linux
+
+The helper runs as root, as the systemd service `plaitwayd.service`. The app is a
+GTK 4 and libadwaita window with a tray item ([linux/README.md](linux/README.md));
+`plaitway` is the command line client. Tunnels are `tun` devices, routes go
+through netlink, DNS through `resolvectl`, and OpenVPN is the distribution's.
+
+| Path | What |
+|---|---|
+| `/usr/libexec/plaitway/plaitwayd` | the helper; it is not a command, so it is not on `PATH` |
+| `/usr/bin/plaitway`, `/usr/bin/plaitway-app` | the client and the app |
+| `/usr/lib/systemd/system/plaitwayd.service` | the unit |
+| `/var/lib/plaitway` | the profiles, with their keys, and the route journal; root only (0700) |
+| `/run/plaitway` | `plaitwayd.sock` (mode 0666; each call is authorized by who makes it), the management sockets of openvpn and the configurations it is started with; removed when the service stops |
+| the journal | the helper's log: `journalctl -u plaitwayd`. There is no log file |
+| the Secret Service | the credentials the app saves (the user's keyring) |
+
+`make deb` builds `build/linux/plaitway_<version>_<arch>.deb` and `make verify-deb`
+checks it; [packaging/README.md](packaging/README.md#linux) describes the package, what it
+depends on, and what installing, upgrading, removing and purging it do. An upgrade
+restarts the service, which disconnects the connected profiles; removing the package
+keeps `/var/lib/plaitway`, purging it deletes the profiles. Without the package,
+`make linux-build && sudo make install` lays out the same files below `/usr/local`, and
+`sudo scripts/linux/dev-install-daemon.sh` installs the helper you built as the
+service (`dev-uninstall-daemon.sh` removes it). Both refuse to touch a unit that the
+package owns.
+
+**Routes.** Every route the helper adds is in the main table and has `proto 199`:
+`ip route show proto 199` lists them. A tunnel's routes have metric 5; the route that
+keeps a VPN server reachable outside the tunnels (through the physical router) has
+metric 1; a full tunnel is `0.0.0.0/1` and `128.0.0.0/1` (`::/1` and `8000::/1`), so
+the system's default route stays as it is. The helper writes each route to
+`/var/lib/plaitway/journal` before it adds it, and a start after a crash repairs the
+table from that record. On Linux the metric is part of a route's identity: the
+kernel refuses a second route with the same destination and metric, so a route of
+another program with the metric of ours is a conflict, and one with another metric
+is a neighbour that may be the one in use. Then the route of ours stays, is marked
+overridden with the winner named, and is looked at again at every network event. The
+helper never lowers its metric to win and never deletes another program's route on
+its own.
+
+**DNS** is set per tunnel interface through `resolvectl` (servers, a routing domain,
+the default-route flag), which systemd-resolved forgets when the interface goes away.
+The helper writes nothing to `/etc/resolv.conf` and looks at it only to warn, once, when
+it does not lead to systemd-resolved.
+
+**Other VPNs.** A VPN that routes by policy (wg-quick with a table and a fwmark,
+Cloudflare WARP: a rule that sends all traffic without its mark to a table of its own)
+is invisible to the helper, which neither reads nor changes `ip rule` or any table but
+the main one. Its interface counts as a tunnel and the main table's default route stays
+the physical one. A route of ours with a prefix length above zero is not suppressed by
+its rule and wins against its catch-all, the halves of a default route included. A
+tunnel's server that none of our routes captures gets no route of its own: its traffic
+follows the other VPN's catch-all.
+
+**Authorization** is described under Know what the helper may do. The socket is open
+(0666) so that the app, run by any user, can reach it; the helper decides per call from
+the caller's uid and groups.
+
+### Troubleshooting on Linux
+
+```bash
+systemctl status plaitwayd
+journalctl -u plaitwayd -b            # the helper's log since boot
+plaitway diagnostics                  # the network, the routes it owns, the journal
+plaitway resync                       # rebuild the routes and DNS entries it owns
+ip route show proto 199               # the routes it added
+resolvectl status                     # per-link DNS settings
+```
+
+- `plaitway` says `the daemon is not running: … does not exist; run "systemctl status plaitwayd"`
+  when the socket is missing. The app shows a screen for each state (not installed, not
+  running, not answering, refused, not trusted); **Start Helper** asks polkit.
+- A profile that fails says why in its log and on its Overview. The helper's log at
+  start lists which engines it can run and why not: without `/dev/net/tun` (`modprobe tun`)
+  nothing can connect, and without an `openvpn` that root owns (with every directory
+  above it) OpenVPN profiles are refused.
+- `DNS settings of tunnels cannot be applied` in the log means `resolvectl` is missing
+  or systemd-resolved does not answer; the routes still work.
+- A route left behind by something else is listed under Diagnostics, Stale routes, and is
+  removed only when you ask.
+
+### What was run on Linux
+
+Run on one machine, Ubuntu 26.04 (kernel 7.0, systemd 259, OpenVPN 2.7.0), in private user,
+network and mount namespaces as the fake root of the namespace
+(`scripts/linux/root-tests.sh`, `make linux-root-test`), with real tun devices, the
+kernel's routing table and netlink, the kernel's WireGuard as the peer, a real `openvpn`
+server and client, and, for the DNS test, a systemd-resolved of its own on a private bus:
+
+- `internal/osnet/linux`: route writes and reads (IPv4 and IPv6, several routes to
+  a prefix, deleting whatever the protocol, errors, events, lost messages), interface and
+  default-route detection, link configuration, and DNS through a real systemd-resolved
+  and `resolvectl`
+- `internal/reconciler`: 28 kernel tests of the Reconciler on the real table (full and
+  split tunnels, competition between tunnels, foreign routes that outrank or lose to
+  ours, a foreign VPN that routes by policy, a gateway change, crash recovery from the
+  journal, the table with many routes, announcements during network changes)
+- `internal/wg`: 19 tests of the WireGuard engine with real tun devices against the
+  kernel's WireGuard (handshake, traffic through the tunnel, rebind, IPv6, a missing
+  `/dev/net/tun`, a tunnel device removed from outside)
+- `internal/ovpn`: 13 tests of the OpenVPN engine against a real openvpn server (split
+  and full tunnels, IPv6, two tunnels, credentials, a server restart, a changed tunnel
+  network, a network change)
+- `cmd/plaitwayd`: 4 tests of the daemon as a process (a WireGuard tunnel from start to
+  SIGTERM, recovery after a SIGKILL, a failed DNS entry, no tun device)
+
+The CI workflow (`.github/workflows/ci.yml`) is set up to run the tests above on an Ubuntu
+runner, to build and check the package for amd64 and arm64, and to run the Python tests of
+the app under a virtual display. It has not been run: it was written without access to
+Actions.
+
+The unit's sandbox settings were first checked in pieces, before the service could be run as root (the next section is the run as root). Three
+of the four daemon tests (the fourth mounts a file system itself and needs a capability
+of its own) and eight of the OpenVPN tests, with openvpn as server and as client, passed
+with the daemon and openvpn started under the capability bounding set of the unit
+(`CAP_NET_ADMIN` and `CAP_NET_BIND_SERVICE`; without `CAP_NET_ADMIN` the tunnel cannot be
+made), `NoNewPrivileges`, the kernel's memory-deny-write-execute and a seccomp filter of
+the system calls in `@system-service` that killed the process on any other call (the unit
+makes such a call fail with EPERM instead). In the traced tests (the daemon's WireGuard
+tunnel and two OpenVPN ones) the sockets opened were of the four families the unit allows,
+and the paths written were the run and state directories and `/dev/net/tun`. The packaged
+daemon (`-fake`) ran as a transient service of the user's
+systemd with the unit's settings that a user manager can apply: systemd reported it started
+after READY=1, its run and state directories had the modes of the unit, and it stopped
+cleanly. A stand-in process showed what `KillMode=mixed` and `Restart=on-failure` do after
+a kill, and that a process ignoring SIGTERM is killed when `TimeoutStopSec` runs out.
+`ProtectKernelTunables` is not set because the helper writes
+`/proc/sys/net/ipv6/conf/<tunnel>/disable_ipv6`.
+
+### Run on the machine itself
+
+Once, on the same Ubuntu 26.04 machine (a virtual machine, with NetworkManager,
+systemd-resolved and a Cloudflare WARP tunnel of `wg-quick` running on it), as real root
+in the initial namespaces:
+
+- The package was installed with `apt` (it pulled `python3-grpcio` 1.51 and
+  `python3-protobuf` 3.21), and `plaitwayd.service` ran under the system's systemd with the
+  unit's sandbox: `NoNewPrivs`, the seccomp filter, the capability bounding set, the closed
+  device policy and memory-deny-write-execute were all in effect, a WireGuard and an OpenVPN
+  profile connected at once, and the journal and the kernel log show no denial. Installing
+  again, removing, installing again and purging behaved as the maintainer scripts say: the
+  profiles stayed until the purge. The Python tests of the app, and its client against the
+  real socket (with the check that root owns it), pass on that grpcio and protobuf
+- With the WARP tunnel up, the helper connected a WireGuard profile to the kernel's WireGuard
+  and an OpenVPN profile to a real `openvpn` server, both in a namespace behind a veth pair.
+  The routes had `proto 199` and metric 5, the DNS settings of both were written to
+  systemd-resolved (a routing domain, answered through the tunnel), NetworkManager listed the
+  device as `connected (externally)`, `ip rule` and the WARP routes did not change and the
+  machine's own traffic kept going through WARP. Disconnecting, SIGTERM and SIGKILL left no
+  interface, route or DNS setting, and openvpn did not outlive the helper
+- With the WARP tunnel stopped for the time of the test, the WireGuard engine connected to
+  Cloudflare with the WARP profile as a split tunnel to one address, and as a full tunnel:
+  IPv4 and IPv6 traffic, name resolution through the tunnel's catch-all DNS entry and the
+  server's bypass route behaved as described above. A SIGKILL during the full tunnel left only
+  the bypass route, and the next start removed it from the journal
+
+### Not verified on Linux
+
+- Debian 13, Ubuntu 24.04 and arm64: the dependencies were compared with their package
+  lists, nothing was run there
+- The app in a desktop session beyond starting it: its **Start Helper** through polkit, the
+  Secret Service holding a saved password, and the tray item on a shell with an AppIndicator
+  extension (the tests use a private bus with a watcher of their own, see
+  [linux/README.md](linux/README.md))
+- Suspend and resume, systemd-networkd, a profile with a server behind a captive portal,
+  auto-connect at boot, and running beside the distribution's own WireGuard and OpenVPN
+  clients other than `wg-quick`
+- The CI workflow: it was never run on Actions
+
+### Known limitations on Linux
+
+- DNS settings need systemd-resolved and `resolvectl`. There is no `resolvconf` or
+  `/etc/resolv.conf` backend: without resolved the routes work and the DNS entries of
+  profiles fail, and the profile says so
+- Only the main routing table is read and written. Policy routing (`ip rule`) and other
+  tables are neither read nor changed, so a program that sends traffic around the main
+  table cannot be seen
+- OpenVPN profiles with `dev tap` are refused: the helper binds every tunnel route to its
+  device without a next hop, and over a tap device (an Ethernet link) a destination behind
+  the server would be looked for with ARP and go nowhere
+- IPv6 through a tunnel needs IPv6 on the tunnel device. The helper turns it on for a
+  device that the host's default created with it off, and logs when it cannot
+- Another VPN's catch-all DNS routing domain (`~.`) on its own link competes with ours;
+  the helper does not look at links it does not own, and which of them answers is up to
+  systemd-resolved
+- The tray item needs a StatusNotifierWatcher; stock GNOME has none (an AppIndicator
+  extension provides one: Ubuntu's session ships it, on Debian it is
+  `gnome-shell-extension-appindicator`). Without it closing the window quits the app,
+  and the tunnels stay up
+- The package needs libadwaita 1.7, so Ubuntu 24.04 cannot install it
+
+### Development on Linux
+
+The helper runs without root on the in-memory backend, as on macOS
+([linux/README.md](linux/README.md) has the commands for the app). Tests:
+
+```bash
+make linux-test           # Go tests, then the Python tests of linux/
+make linux-root-test      # the tests that change routes, links and DNS, in private namespaces
+make test-packaging-linux # the packaging scripts against fakes
+make deb && make verify-deb
+```
+
+`make linux-root-test` runs `scripts/linux/root-tests.sh`. By hand, for one package:
+
+```bash
+go test -c -tags rootintegration -o /tmp/ovpn.test ./internal/ovpn
+unshare -Urnm sh -c 'mount -t tmpfs none /run; ip link set lo up; PLAITWAY_ROOT_TESTS=1 /tmp/ovpn.test -test.v -test.run ^TestRoot'
+```
+
+The tests refuse to run outside a user namespace of their own and a network namespace with
+nothing in it but loopback, so they cannot reach the machine's network. They need
+`ip`, `ping`, `wg` and the distribution's `openvpn`; on Ubuntu 24.04 and later,
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` first. The DNS test of
+`internal/osnet/linux` runs alone (`-test.run ^TestResolvedEndToEnd$`), and the tests of
+`internal/reconciler` are `^TestKernel`.
+
 ## Verified on real hardware, and what is not
 
 Run as root on macOS 27 (`go test -tags rootintegration ./internal/...`): route
@@ -552,6 +811,7 @@ menu and the command line work without it.
 - Windows: the daemon runs the `-fake` backend only. The OpenVPN and
   WireGuard engines, the route table, DNS, the network monitor, Windows service
   integration and the check of the OpenVPN binary are not implemented
+- Linux: the limits are listed under [Known limitations on Linux](#known-limitations-on-linux)
 
 <p>
   <img alt="Go" src="https://img.shields.io/badge/GO-1.27-00ADD8?style=for-the-badge&logo=go&logoColor=white">
@@ -568,11 +828,14 @@ menu and the command line work without it.
 
 Third-party components keep their own terms. The bundled ones, including the
 GPL source offer for OpenVPN, LZO and LZ4, are listed in
-[packaging/THIRD_PARTY_NOTICES.md](packaging/THIRD_PARTY_NOTICES.md).
+[packaging/THIRD_PARTY_NOTICES.md](packaging/THIRD_PARTY_NOTICES.md). The Linux
+package bundles no OpenVPN; its notices list the Go modules in the two programs
+(`go run ./packaging/notices -platform linux`).
 
 ### Trademarks
 
 OpenVPN is a registered trademark of OpenVPN Inc. WireGuard is a registered
 trademark of Jason A. Donenfeld. Apple, macOS and Keychain are trademarks of
-Apple Inc. Plaitway is not affiliated with or endorsed by any of them; the
-names are used only to say which protocols and which system it works with.
+Apple Inc. Linux is the registered trademark of Linus Torvalds. Plaitway is not
+affiliated with or endorsed by any of them; the names are used only to say which
+protocols and which systems it works with.
