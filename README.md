@@ -233,10 +233,21 @@ removes it.
 
 **On Linux** (Ubuntu 24.04 or 26.04, Debian 13, with systemd):
 
-1. Build the package, `make deb`, or take the artifact of the Linux package job
-   of the CI. A tagged release attaches it to the release page after the macOS files (the `publish-linux` job, not run yet)
-2. `sudo apt install ./build/linux/plaitway_*.deb`. This installs OpenVPN and
-   the GTK libraries, and enables and starts the helper, `plaitwayd.service`
+1. Add the apt repository once, so that `apt upgrade` brings the later versions:
+
+   ```sh
+   sudo install -d -m 0755 /etc/apt/keyrings
+   sudo curl -fsSL https://koukeneko.github.io/Plaitway/key.asc -o /etc/apt/keyrings/plaitway.asc
+   echo "deb [signed-by=/etc/apt/keyrings/plaitway.asc] https://koukeneko.github.io/Plaitway stable main" | sudo tee /etc/apt/sources.list.d/plaitway.list
+   sudo chmod 0644 /etc/apt/keyrings/plaitway.asc /etc/apt/sources.list.d/plaitway.list
+   sudo apt update
+   ```
+
+   Without it, take the `.deb` of the release page (it is attached a few minutes after
+   the macOS files), or build it with `make deb`, which writes it to `build/linux`
+2. `sudo apt install plaitway`, or `sudo apt install ./plaitway_*.deb` for a file in
+   the current directory. This installs OpenVPN and the GTK libraries, and enables and
+   starts the helper, `plaitwayd.service`
 3. Open **Plaitway** from the application menu, or run `plaitway-app`. Import a
    profile with **+**, by dropping the file on the window, or with
    `plaitway import`. A username and password are asked for at the first
@@ -626,10 +637,10 @@ server and client, and, for the DNS test, a systemd-resolved of its own on a pri
 - `cmd/plaitwayd`: 4 tests of the daemon as a process (a WireGuard tunnel from start to
   SIGTERM, recovery after a SIGKILL, a failed DNS entry, no tun device)
 
-The CI workflow (`.github/workflows/ci.yml`) is set up to run the tests above on an Ubuntu
-runner, to build and check the package for amd64 and arm64, and to run the Python tests of
-the app under a virtual display. It has not been run: it was written without access to
-Actions.
+The CI workflow (`.github/workflows/ci.yml`) runs the tests above on an Ubuntu runner,
+builds and checks the package for amd64 and arm64, and runs the Python tests of the app
+under a virtual display on Ubuntu 24.04 and 26.04. It ran on Actions for 0.4.0 and 0.4.1,
+and its failures there found the OpenVPN 2.6 problem that 0.4.1 fixes.
 
 The unit's sandbox settings were first checked in pieces, before the service could be run as root (the next section is the run as root). Three
 of the four daemon tests (the fourth mounts a file system itself and needs a capability
@@ -675,19 +686,25 @@ in the initial namespaces:
   IPv4 and IPv6 traffic, name resolution through the tunnel's catch-all DNS entry and the
   server's bypass route behaved as described above. A SIGKILL during the full tunnel left only
   the bypass route, and the next start removed it from the journal
+- In booted containers, the package under the systemd of Debian 13 (257, OpenVPN 2.6.14) and
+  of Ubuntu 24.04 (255, OpenVPN 2.6.9 and 2.6.19) ran the same lab: a kernel WireGuard peer and
+  an OpenVPN server in a namespace behind a veth pair, DNS answered through systemd-resolved,
+  disconnecting and SIGKILL of the helper. On Ubuntu 24.04 the released package also ran a full
+  tunnel from a server-pushed `redirect-gateway`, which OpenVPN 2.6 does not report to the
+  helper in its environment (the engine reads it from the PUSH_REPLY since 0.4.1)
 
 ### Not verified on Linux
 
-- Debian 13, Ubuntu 24.04 and arm64: the dependencies were compared with their package
-  lists, nothing was run there
-- The app in a desktop session beyond starting it: its **Start Helper** through polkit, the
-  Secret Service holding a saved password, and the tray item on a shell with an AppIndicator
-  extension (the tests use a private bus with a watcher of their own, see
-  [linux/README.md](linux/README.md))
+- arm64: `verify-deb`, which starts the packaged daemon with `-fake`, passes on the CI's
+  arm64 runner; no tunnel, installed service or app has run on arm64
+- The app in a desktop session: **Start Helper** answered by a person at the polkit prompt
+  (it ran with a temporary rule), and the tray icon of the installed package (a checkout's
+  icon was missing in a GNOME session and is fixed; the installed one is looked up by name in
+  the system's icon theme and has not been looked at). The tests use a private bus with a
+  watcher of their own, see [linux/README.md](linux/README.md)
 - Suspend and resume, systemd-networkd, a profile with a server behind a captive portal,
   auto-connect at boot, and running beside the distribution's own WireGuard and OpenVPN
   clients other than `wg-quick`
-- The CI workflow: it was never run on Actions
 
 ### Known limitations on Linux
 

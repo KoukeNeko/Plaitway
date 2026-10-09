@@ -211,6 +211,35 @@ files as an artifact. Actions › Publish packages redoes the cask of a release 
 | `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERT_PASSWORD` | the Developer ID Application certificate and its password; the identity `lib.sh` signs with, or else the first one in the file |
 | `ASC_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | the App Store Connect API key that notarizes |
 | `HOMEBREW_TAP_TOKEN` | pushing to the tap; it needs Contents: Read and write on `KoukeNeko/homebrew-tap` |
+| `APT_GPG_PRIVATE_KEY`, `APT_GPG_PASSPHRASE` | the armored secret key that signs the apt repository, and its passphrase if it has one (`apt.yml`) |
+
+The same tag builds the Linux packages (the `linux` job, amd64 and arm64) and `publish-linux` attaches the two `.deb` files
+and `SHA256SUMS-linux` to the release, after the macOS files. Neither holds back the macOS release or the cask.
+
+**The apt repository.** When the release workflow of a tag has finished, whatever its result, `.github/workflows/apt.yml` downloads the `.deb`
+files of every stable release (each checked against that release's `SHA256SUMS-linux`), runs `linux/make-apt-repo.sh` and
+deploys the result to GitHub Pages, https://koukeneko.github.io/Plaitway/. The repository is made again from the releases
+each time and is not kept in git, so deleting a release takes its version out of apt at the next run. Run it by hand
+(Actions › Publish apt repository) to make it the first time or again, for example after the key was replaced. A person adds it with the
+commands in the root README. Without `APT_GPG_PRIVATE_KEY` the workflow says so and publishes nothing. The workflow runs on
+the default branch because the `github-pages` environment refuses a run on a tag.
+
+Set it up once:
+
+1. Settings › Pages › Build and deployment › Source: GitHub Actions
+2. Make a key that is used for nothing else, and put it in the secrets (the passphrase is optional):
+
+```sh
+gpg --quick-generate-key "Plaitway apt repository <you@example.org>" rsa4096 sign never
+gpg --armor --export-secret-keys FINGERPRINT | gh secret set APT_GPG_PRIVATE_KEY
+```
+
+3. Run Actions › Publish apt repository once, on the default branch, so that the releases that exist are published;
+   the commands in the root README fail until it has run, and after it every release does it
+
+Keep a copy of the secret key: a new key means everyone who added the repository must fetch `key.asc` again. The
+repository made from the real 0.4.0 and 0.4.1 packages was added, installed from and upgraded with the apt of Ubuntu 24.04
+(2.7) and of Debian 13 (3.0) over HTTP on the loopback, with a throwaway key.
 
 Windows is not part of a release: it has no app yet.
 
@@ -229,6 +258,7 @@ None of it needs Swift.
 | `linux/debian/` | `postinst`, `prerm` and `postrm` |
 | `linux/copyright` | the copyright file of the package |
 | `linux/lib.sh`, `linux/lib_test.sh` | shared helpers, and the tests of the scripts against fakes (`make test-packaging-linux`) |
+| `linux/make-apt-repo.sh`, `linux/apt_repo_test.sh` | the signed apt repository made from the `.deb` files of the releases, and its tests with a throwaway key and the apt of the machine |
 | `../scripts/linux/dev-install-daemon.sh`, `dev-uninstall-daemon.sh` | the daemon you built, as the system service, without the package |
 | `../scripts/linux/root-tests.sh` | the tests that change routes, links and DNS, each in a private namespace (`make linux-root-test`) |
 
