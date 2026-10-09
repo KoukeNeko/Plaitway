@@ -1,0 +1,18 @@
+[
+  {
+    "dst": "2001:db8:110:8a92:c758:82fe:a69d:38f3",
+    "dev": "wgcf",
+    "protocol": "kernel",
+    "metric": 256,
+    "flags": [],
+    "pref": "medium"
+  },
+  {
+    "dst": "fe80::/64",
+    "dev": "ens18",
+    "protocol": "kernel",
+    "metric": 1024,
+    "flags": [],
+    "pref": "medium"
+  }
+]

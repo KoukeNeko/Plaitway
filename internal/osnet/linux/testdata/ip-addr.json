@@ -1,0 +1,150 @@
+[
+  {
+    "ifindex": 1,
+    "ifname": "lo",
+    "flags": [
+      "LOOPBACK",
+      "UP",
+      "LOWER_UP"
+    ],
+    "operstate": "UNKNOWN",
+    "link_type": "loopback",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "127.0.0.1",
+        "prefixlen": 8,
+        "scope": "host"
+      },
+      {
+        "family": "inet6",
+        "local": "::1",
+        "prefixlen": 128,
+        "scope": "host"
+      }
+    ]
+  },
+  {
+    "ifindex": 2,
+    "ifname": "ens18",
+    "flags": [
+      "BROADCAST",
+      "MULTICAST",
+      "UP",
+      "LOWER_UP"
+    ],
+    "operstate": "UP",
+    "link_type": "ether",
+    "parentbus": "virtio",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "192.168.50.8",
+        "prefixlen": 24,
+        "scope": "global"
+      },
+      {
+        "family": "inet6",
+        "local": "fe80::200:ff:fe00:1",
+        "prefixlen": 64,
+        "scope": "link"
+      }
+    ]
+  },
+  {
+    "ifindex": 3,
+    "ifname": "wgcf",
+    "flags": [
+      "POINTOPOINT",
+      "NOARP",
+      "UP",
+      "LOWER_UP"
+    ],
+    "operstate": "UNKNOWN",
+    "link_type": "none",
+    "linkinfo": {
+      "info_kind": "wireguard"
+    },
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "172.16.0.2",
+        "prefixlen": 32,
+        "scope": "global"
+      },
+      {
+        "family": "inet6",
+        "local": "2001:db8:110:8a92:c758:82fe:a69d:38f3",
+        "prefixlen": 128,
+        "scope": "global"
+      }
+    ]
+  },
+  {
+    "ifindex": 4,
+    "ifname": "gre0",
+    "flags": [
+      "NOARP"
+    ],
+    "operstate": "DOWN",
+    "link_type": "gre",
+    "linkinfo": {
+      "info_kind": "gre"
+    },
+    "addr_info": []
+  },
+  {
+    "ifindex": 5,
+    "ifname": "gretap0",
+    "flags": [
+      "BROADCAST",
+      "MULTICAST"
+    ],
+    "operstate": "DOWN",
+    "link_type": "ether",
+    "linkinfo": {
+      "info_kind": "gretap"
+    },
+    "addr_info": []
+  },
+  {
+    "ifindex": 6,
+    "ifname": "erspan0",
+    "flags": [
+      "BROADCAST",
+      "MULTICAST"
+    ],
+    "operstate": "DOWN",
+    "link_type": "ether",
+    "linkinfo": {
+      "info_kind": "erspan"
+    },
+    "addr_info": []
+  },
+  {
+    "ifindex": 7,
+    "ifname": "tunl0",
+    "flags": [
+      "NOARP"
+    ],
+    "operstate": "DOWN",
+    "link_type": "ipip",
+    "linkinfo": {
+      "info_kind": "ipip"
+    },
+    "addr_info": []
+  },
+  {
+    "ifindex": 8,
+    "ifname": "sit0",
+    "flags": [
+      "NOARP"
+    ],
+    "operstate": "DOWN",
+    "link_type": "sit",
+    "linkinfo": {
+      "info_kind": "sit"
+    },
+    "addr_info": []
+  }
+]

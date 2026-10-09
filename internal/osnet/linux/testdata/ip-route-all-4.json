@@ -1,0 +1,95 @@
+[
+  {
+    "dst": "default",
+    "dev": "wgcf",
+    "table": "51820",
+    "scope": "link",
+    "flags": []
+  },
+  {
+    "dst": "default",
+    "gateway": "192.168.50.1",
+    "dev": "ens18",
+    "protocol": "dhcp",
+    "prefsrc": "192.168.50.8",
+    "metric": 100,
+    "flags": []
+  },
+  {
+    "dst": "10.6.0.0/24",
+    "gateway": "192.168.50.1",
+    "dev": "ens18",
+    "protocol": "static",
+    "metric": 100,
+    "flags": []
+  },
+  {
+    "dst": "192.168.50.0/24",
+    "dev": "ens18",
+    "protocol": "kernel",
+    "scope": "link",
+    "prefsrc": "192.168.50.8",
+    "metric": 100,
+    "flags": []
+  },
+  {
+    "type": "local",
+    "dst": "127.0.0.0/8",
+    "dev": "lo",
+    "table": "local",
+    "protocol": "kernel",
+    "scope": "host",
+    "prefsrc": "127.0.0.1",
+    "flags": []
+  },
+  {
+    "type": "local",
+    "dst": "127.0.0.1",
+    "dev": "lo",
+    "table": "local",
+    "protocol": "kernel",
+    "scope": "host",
+    "prefsrc": "127.0.0.1",
+    "flags": []
+  },
+  {
+    "type": "broadcast",
+    "dst": "127.255.255.255",
+    "dev": "lo",
+    "table": "local",
+    "protocol": "kernel",
+    "scope": "link",
+    "prefsrc": "127.0.0.1",
+    "flags": []
+  },
+  {
+    "type": "local",
+    "dst": "172.16.0.2",
+    "dev": "wgcf",
+    "table": "local",
+    "protocol": "kernel",
+    "scope": "host",
+    "prefsrc": "172.16.0.2",
+    "flags": []
+  },
+  {
+    "type": "local",
+    "dst": "192.168.50.8",
+    "dev": "ens18",
+    "table": "local",
+    "protocol": "kernel",
+    "scope": "host",
+    "prefsrc": "192.168.50.8",
+    "flags": []
+  },
+  {
+    "type": "broadcast",
+    "dst": "192.168.50.255",
+    "dev": "ens18",
+    "table": "local",
+    "protocol": "kernel",
+    "scope": "link",
+    "prefsrc": "192.168.50.8",
+    "flags": []
+  }
+]

@@ -1,0 +1,19 @@
+{
+  "ens18/type": "1\n",
+  "ens18/uevent": "INTERFACE=ens18\nIFINDEX=2\n",
+  "ens18/device": null,
+  "erspan0/type": "1\n",
+  "erspan0/uevent": "INTERFACE=erspan0\nIFINDEX=6\n",
+  "gre0/type": "778\n",
+  "gre0/uevent": "INTERFACE=gre0\nIFINDEX=4\n",
+  "gretap0/type": "1\n",
+  "gretap0/uevent": "INTERFACE=gretap0\nIFINDEX=5\n",
+  "lo/type": "772\n",
+  "lo/uevent": "INTERFACE=lo\nIFINDEX=1\n",
+  "sit0/type": "776\n",
+  "sit0/uevent": "INTERFACE=sit0\nIFINDEX=8\n",
+  "tunl0/type": "768\n",
+  "tunl0/uevent": "INTERFACE=tunl0\nIFINDEX=7\n",
+  "wgcf/type": "65534\n",
+  "wgcf/uevent": "DEVTYPE=wireguard\nINTERFACE=wgcf\nIFINDEX=3\n"
+}

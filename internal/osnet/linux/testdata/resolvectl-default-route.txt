@@ -1,0 +1,7 @@
+Link 2 (ens18): yes
+Link 3 (wgcf): yes
+Link 4 (gre0): no
+Link 5 (gretap0): no
+Link 6 (erspan0): no
+Link 7 (tunl0): no
+Link 8 (sit0): no

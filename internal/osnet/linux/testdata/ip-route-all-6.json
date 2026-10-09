@@ -1,0 +1,76 @@
+[
+  {
+    "dst": "default",
+    "dev": "wgcf",
+    "table": "51820",
+    "metric": 1024,
+    "flags": [],
+    "pref": "medium"
+  },
+  {
+    "dst": "2001:db8:110:8a92:c758:82fe:a69d:38f3",
+    "dev": "wgcf",
+    "protocol": "kernel",
+    "metric": 256,
+    "flags": [],
+    "pref": "medium"
+  },
+  {
+    "dst": "fe80::/64",
+    "dev": "ens18",
+    "protocol": "kernel",
+    "metric": 1024,
+    "flags": [],
+    "pref": "medium"
+  },
+  {
+    "type": "local",
+    "dst": "::1",
+    "dev": "lo",
+    "table": "local",
+    "protocol": "kernel",
+    "metric": 0,
+    "flags": [],
+    "pref": "medium"
+  },
+  {
+    "type": "local",
+    "dst": "2001:db8:110:8a92:c758:82fe:a69d:38f3",
+    "dev": "wgcf",
+    "table": "local",
+    "protocol": "kernel",
+    "metric": 0,
+    "flags": [],
+    "pref": "medium"
+  },
+  {
+    "type": "local",
+    "dst": "fe80::200:ff:fe00:1",
+    "dev": "ens18",
+    "table": "local",
+    "protocol": "kernel",
+    "metric": 0,
+    "flags": [],
+    "pref": "medium"
+  },
+  {
+    "type": "multicast",
+    "dst": "ff00::/8",
+    "dev": "ens18",
+    "table": "local",
+    "protocol": "kernel",
+    "metric": 256,
+    "flags": [],
+    "pref": "medium"
+  },
+  {
+    "type": "multicast",
+    "dst": "ff00::/8",
+    "dev": "wgcf",
+    "table": "local",
+    "protocol": "kernel",
+    "metric": 256,
+    "flags": [],
+    "pref": "medium"
+  }
+]

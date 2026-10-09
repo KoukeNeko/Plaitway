@@ -1,0 +1,8 @@
+Global:
+Link 2 (ens18): 192.168.50.1
+Link 3 (wgcf): 1.1.1.1 1.0.0.1 2606:4700:4700::1111 2606:4700:4700::1001
+Link 4 (gre0):
+Link 5 (gretap0):
+Link 6 (erspan0):
+Link 7 (tunl0):
+Link 8 (sit0):

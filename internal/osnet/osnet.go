@@ -30,7 +30,8 @@ type Route struct {
 	Iface     string
 	Blackhole bool
 	// Static is set for routes an administrator or a program added, as opposed
-	// to routes the kernel derived from interface addresses (macOS RTF_STATIC).
+	// to routes the kernel derived from interface addresses (macOS RTF_STATIC;
+	// Linux: any protocol but kernel, redirect and router advertisement).
 	Static bool
 	// Scoped routes belong to one interface (macOS RTF_IFSCOPE) and are only
 	// used by sockets bound to it. They never conflict with unscoped routes.
@@ -39,10 +40,16 @@ type Route struct {
 	Flags uint32
 	// IfIndex is the index of the interface the route leaves through, zero when
 	// unknown. Windows keys a route by destination, interface index and next hop,
-	// so there it takes precedence over Iface; macOS ignores it and leaves it zero.
+	// so there it takes precedence over Iface. Linux names the interface of a
+	// route by its index (RTA_OIF) as well, and the Reconciler compares it there,
+	// so the adapter sets it on every route it dumps; the kernel never picks
+	// another interface than the one named. macOS ignores it and leaves it zero.
 	IfIndex uint32
-	// Metric is the route metric, added by the kernel to the metric of the
-	// interface. Zero is a valid metric. macOS has none and ignores it.
+	// Metric is the route metric. Windows adds the metric of the interface to it.
+	// On Linux it is the priority of the route and the whole metric: with the
+	// destination it is what tells the routes of one prefix apart, adding a
+	// second route with both is ErrExists whatever interface and next hop it has,
+	// and Delete names it. Zero is a valid metric. macOS has none and ignores it.
 	Metric uint32
 }
 
@@ -58,7 +65,9 @@ type RouteTable interface {
 
 // Interface is a network interface as the Reconciler needs to see it.
 type Interface struct {
-	Name  string
+	Name string
+	// Index is the system's number of the interface. The Reconciler names the
+	// interface of a Windows or Linux route by it, taken from the network state.
 	Index int
 	Up    bool
 	// Tunnel is true for utun, tun, wg, ppp and ipsec interfaces.
@@ -66,7 +75,7 @@ type Interface struct {
 	// Addrs are the configured addresses with their prefix lengths.
 	Addrs []netip.Prefix
 	// Metric is the interface metric that Windows adds to the metric of every
-	// route through the interface (0 where unknown or not used: macOS).
+	// route through the interface (0 where unknown or not used: macOS, Linux).
 	Metric uint32
 }
 
@@ -131,6 +140,10 @@ type DNSEntry struct {
 	MatchDomains []string
 	// Order breaks ties between resolvers for the same domain; lower wins.
 	Order int
+	// Iface is the tunnel interface the servers belong to. Where the system
+	// keeps resolver settings per interface (Linux, systemd-resolved) the entry
+	// is written there; macOS names no interface and ignores it.
+	Iface string
 }
 
 // DNSConfigurator applies resolver configuration. Everything it writes carries
