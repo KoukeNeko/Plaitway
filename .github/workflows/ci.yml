@@ -37,7 +37,7 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
       - name: shellcheck
-        run: shellcheck -x -S warning packaging/*.sh scripts/*.sh
+        run: shellcheck -x -S warning packaging/*.sh scripts/*.sh packaging/linux/*.sh packaging/linux/debian/postinst packaging/linux/debian/prerm packaging/linux/debian/postrm scripts/linux/*.sh
 
   # The helper and the command line client build and test on each system they run on.
   # The tests that change the routing table need root and the rootintegration tag, and are
@@ -86,3 +86,104 @@ jobs:
       - run: swift build --package-path macos
       - name: Test
         run: PLAITWAY_DAEMON="$PWD/bin/plaitwayd" swift test --package-path macos
+
+  # The Linux app against the real daemon on its in-memory backend, under a
+  # virtual display and a private session bus. libadwaita 1.7 is the oldest the
+  # app can use and Ubuntu 24.04 has 1.5, so the job runs on Ubuntu 26.04, in a
+  # container. The tests that need what the container lacks skip and say why.
+  linux-app:
+    name: linux app
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    timeout-minutes: 30
+    steps:
+      - name: Install the app's requirements
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates build-essential \
+            python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-secret-1 python3-grpcio python3-protobuf \
+            xvfb xauth dbus gsettings-desktop-schemas adwaita-icon-theme librsvg2-common
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go build -o bin/plaitwayd ./cmd/plaitwayd
+      - name: Python tests
+        env:
+          PLAITWAY_DAEMON: ${{ github.workspace }}/bin/plaitwayd
+          PYTHONPATH: linux/src
+          # No GPU in the container.
+          GSK_RENDERER: cairo
+        run: xvfb-run -a dbus-run-session -- python3 -m unittest discover -s linux/tests -v
+
+  # The tests that change the routing table, the links and DNS settings, and run
+  # openvpn and WireGuard tunnels, in network namespaces of their own
+  # (scripts/linux/root-tests.sh). The tests refuse root's user namespace, so
+  # they run as the runner's user in a user namespace of their own, which
+  # Ubuntu 24.04 allows only after the AppArmor restriction is lifted. A kernel
+  # module the runner lacks makes the tests that need it skip or fail with the
+  # reason in the log.
+  linux-root:
+    name: linux root tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install what the tests drive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openvpn wireguard-tools iproute2 iputils-ping dbus
+      - name: Allow user namespaces and load the modules
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || echo "::warning::the AppArmor restriction cannot be lifted"
+          sudo modprobe tun || echo "::warning::the tun module cannot be loaded"
+          sudo modprobe wireguard || echo "::warning::the wireguard module cannot be loaded"
+      - run: scripts/linux/root-tests.sh
+
+  # The Debian package for each architecture it is built for, checked without
+  # installing it (packaging/linux/verify-deb.sh), and kept as an artifact. cgo
+  # needs the C library of the target, so arm64 is built on an arm64 runner. The
+  # container is Ubuntu 26.04 for the GTK 4 and libadwaita 1.7 that the check of
+  # the app's modules imports; there is no systemd user instance in it, so the
+  # check that runs the unit's settings as a transient user service skips.
+  linux-package:
+    name: linux package (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:26.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Install the build and check tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates build-essential dpkg-dev systemd \
+            desktop-file-utils appstream libxml2-utils shellcheck dash \
+            python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-secret-1 python3-grpcio python3-protobuf
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # The repository belongs to another user than the container's root.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: make test-packaging-linux
+      - run: make deb
+      - run: make verify-deb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plaitway-deb-${{ matrix.arch }}
+          path: build/linux/plaitway_*.deb
+          if-no-files-found: error
