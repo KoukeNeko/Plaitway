@@ -1,0 +1,39 @@
+#!/bin/sh
+# Enables and starts plaitwayd.service, and restarts it on an upgrade so that the
+# new daemon runs; the profiles are in /var/lib/plaitway, which is not touched.
+# The calls are those that debhelper's dh_installsystemd would write
+# (deb-systemd-helper and deb-systemd-invoke are part of init-system-helpers,
+# which is essential): they respect policy-rc.d, and nothing here fails the
+# installation in a chroot or a container where systemd is not running.
+set -e
+
+unit=plaitwayd.service
+
+case "$1" in
+configure | abort-upgrade | abort-deconfigure | abort-remove)
+    if [ "$1" = configure ] && command -v py3compile >/dev/null 2>&1; then
+        py3compile -p plaitway || true
+    fi
+
+    if [ -x /usr/bin/deb-systemd-helper ]; then
+        # Undo the mask that postrm leaves on a removed package.
+        deb-systemd-helper unmask "$unit" >/dev/null || true
+        # Enabled on a first installation, as before on an upgrade.
+        if deb-systemd-helper --quiet was-enabled "$unit"; then
+            deb-systemd-helper enable "$unit" >/dev/null || true
+        else
+            deb-systemd-helper update-state "$unit" >/dev/null || true
+        fi
+    fi
+
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+        if [ -x /usr/bin/deb-systemd-invoke ]; then
+            if [ -n "$2" ]; then action=restart; else action=start; fi
+            deb-systemd-invoke "$action" "$unit" >/dev/null || true
+        fi
+    fi
+    ;;
+esac
+
+exit 0

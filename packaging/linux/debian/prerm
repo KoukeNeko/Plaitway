@@ -1,0 +1,19 @@
+#!/bin/sh
+# Stops the daemon before the package goes away. The daemon takes its routes and
+# DNS settings out and ends its tunnels while it stops; systemd allows it 30 s.
+# An upgrade does not stop it here: postinst restarts it with the new files.
+set -e
+
+case "$1" in
+remove | deconfigure)
+    if [ -d /run/systemd/system ] && [ -x /usr/bin/deb-systemd-invoke ]; then
+        deb-systemd-invoke stop plaitwayd.service >/dev/null || true
+    fi
+    ;;
+esac
+
+if command -v py3clean >/dev/null 2>&1; then
+    py3clean -p plaitway || true
+fi
+
+exit 0

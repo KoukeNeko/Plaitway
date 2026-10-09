@@ -1,0 +1,27 @@
+#!/bin/sh
+# Removing the package keeps /var/lib/plaitway: the profiles with their private
+# keys cannot be made again. Purging deletes it.
+set -e
+
+unit=plaitwayd.service
+
+case "$1" in
+remove)
+    if [ -x /usr/bin/deb-systemd-helper ]; then
+        deb-systemd-helper mask "$unit" >/dev/null || true
+    fi
+    ;;
+purge)
+    if [ -x /usr/bin/deb-systemd-helper ]; then
+        deb-systemd-helper purge "$unit" >/dev/null || true
+        deb-systemd-helper unmask "$unit" >/dev/null || true
+    fi
+    rm -rf /var/lib/plaitway /run/plaitway
+    ;;
+esac
+
+if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+fi
+
+exit 0

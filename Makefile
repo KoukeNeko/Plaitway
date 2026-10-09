@@ -1,6 +1,7 @@
 BUF := go run github.com/bufbuild/buf/cmd/buf@v1.72.0
 
-.PHONY: generate lint-proto build test openvpn app dist verify test-packaging
+.PHONY: generate lint-proto build test openvpn app dist verify test-packaging \
+	go-daemon go-test linux-build linux-test linux-root-test test-packaging-linux deb verify-deb install
 
 # Regenerates internal/gen and macos/Sources/PlaitwayAPI from proto/. The
 # generated files are committed, so a normal build needs neither this target
@@ -50,3 +51,50 @@ verify:
 test-packaging:
 	packaging/lib_test.sh
 	go test -race -count=1 ./packaging/...
+
+# Linux (packaging/linux, scripts/linux). None of these needs Swift.
+# go-daemon and go-test are the Go-only part of build and test.
+go-daemon:
+	go build -o bin/plaitwayd ./cmd/plaitwayd
+
+go-test:
+	go test ./...
+
+# The programs, the notices and the changelog in build/linux, which `deb`,
+# `install` and scripts/linux/dev-install-daemon.sh lay out.
+linux-build:
+	packaging/linux/build.sh
+
+# The Go tests, then the Python tests of the GTK app (linux/README.md says what
+# they need: PyGObject, GTK 4, libadwaita, grpcio, protobuf; a test that needs
+# what the machine lacks, such as a display, skips and says why).
+linux-test: go-daemon go-test
+	PLAITWAY_DAEMON=$(CURDIR)/bin/plaitwayd PYTHONPATH=linux/src python3 -m unittest discover -s linux/tests
+
+# The tests that change routes, links and DNS settings, each in a private user
+# and network namespace (scripts/linux/root-tests.sh). They need no sudo.
+linux-root-test:
+	scripts/linux/root-tests.sh
+
+# The scripts against fakes (systemctl, install, the Debian tools) and the Go
+# tests of the notices generator.
+test-packaging-linux:
+	packaging/linux/lib_test.sh
+	go test -race -count=1 ./packaging/...
+
+# build/linux/plaitway_<version>_<arch>.deb, for the architecture of this machine.
+deb:
+	packaging/linux/build-deb.sh
+
+verify-deb:
+	packaging/linux/verify-deb.sh
+
+# Lays out the files of `make linux-build` below DESTDIR and PREFIX, and starts
+# nothing. As root: make linux-build, then sudo make install. The Debian package
+# does the rest in its maintainer scripts, and so must you; the target says what.
+PREFIX ?= /usr/local
+DESTDIR ?=
+install:
+	packaging/linux/install.sh --prefix "$(PREFIX)" --destdir "$(DESTDIR)"
+	@echo "Now: systemctl daemon-reload && systemctl enable --now plaitwayd.service"
+	@echo "     update-mime-database $(PREFIX)/share/mime; gtk-update-icon-cache -t $(PREFIX)/share/icons/hicolor; update-desktop-database $(PREFIX)/share/applications"

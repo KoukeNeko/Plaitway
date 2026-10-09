@@ -1,0 +1,144 @@
+# The Plaitway helper as a system service. It runs as root: it creates tun
+# devices, writes routes through netlink, runs openvpn and sets DNS through
+# systemd-resolved. Every line below is there for a reason that is written next
+# to it; the Linux section of README.md says how they were checked and what
+# could not be.
+#
+# The paths are those of a package (/usr). packaging/linux/install.sh rewrites
+# /usr/libexec for another --prefix.
+[Unit]
+Description=Plaitway helper
+Documentation=https://github.com/KoukeNeko/Plaitway
+
+# Ordering only: the daemon starts without a network and follows it as it
+# comes and goes, so it does not wait for network-online.target.
+After=network.target
+
+# resolvectl (run for each tunnel with DNS) needs resolved at that moment, so
+# when both start in one transaction, resolved goes first. There is no Wants=
+# or Requires=: a host that chose another resolver must not get resolved
+# started because of this unit, and the daemon already says in its log and on
+# the profile when resolved is missing.
+After=systemd-resolved.service
+
+# DeviceAllow= below names /dev/net/tun, and systemd resolves that path when the
+# unit starts; a path that does not exist then is left out of the allow list
+# for good. Loading the tun module first makes sure the node exists. A failure
+# here does not stop the daemon, which says what is wrong with the device.
+Wants=modprobe@tun.service
+After=modprobe@tun.service
+
+# A daemon that fails to start five times within a minute stays down and shows
+# as failed, instead of being started for ever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+# The daemon sends READY=1 once its socket is up and the route journal of the
+# previous run is repaired, and STOPPING=1 when it begins to stop. Systemd
+# reports "started" only after READY=1, so `systemctl start` and the app's
+# Start Helper return when the socket is usable.
+Type=notify
+ExecStart=/usr/libexec/plaitway/plaitwayd -socket /run/plaitway/plaitwayd.sock -socket-mode 0666 -state-dir /var/lib/plaitway -run-dir /run/plaitway -openvpn /usr/sbin/openvpn
+
+# A crash or a kill is followed by a start that repairs the routes from the
+# journal. A stop by `systemctl stop` or by the daemon ending cleanly is not
+# restarted.
+Restart=on-failure
+RestartSec=3
+
+# On SIGTERM the daemon stops its clients (2 s), then its tunnels and the
+# Reconciler (15 s at most): serverStopTimeout and shutdownTimeout in
+# cmd/plaitwayd/daemon.go, 17 s in all. After TimeoutStopSec systemd sends
+# SIGKILL, which leaves routes and interfaces for the next start to repair, so
+# this must stay above that sum; packaging/linux/lib_test.sh checks it.
+TimeoutStopSec=30
+
+# SIGTERM goes to the daemon only, which stops each openvpn in order through
+# its management interface; the SIGKILL that follows (when the daemon is gone
+# or the timeout ran out) goes to everything left in the control group, so no
+# openvpn outlives the daemon, which is what the Reconciler's recovery from a
+# crash assumes. KillMode=control-group would also end an openvpn at the moment
+# of SIGTERM, before the daemon asked it to, and report its exit as a failure
+# of the profile. The daemon also asks the kernel to kill its children when it
+# dies (PR_SET_PDEATHSIG), so a crash is covered twice.
+KillMode=mixed
+
+# The run directory holds the socket, the management sockets of openvpn and the
+# generated configurations, and is removed when the service stops. The state
+# directory holds the profiles with their keys, for root only. Both are the
+# only places the daemon writes, and systemd keeps them writable under
+# ProtectSystem=strict: no ReadWritePaths= is needed. The daemon is told the
+# same paths with -run-dir and -state-dir above.
+RuntimeDirectory=plaitway
+RuntimeDirectoryMode=0755
+StateDirectory=plaitway
+StateDirectoryMode=0700
+
+# Hardening. What the daemon, openvpn and resolvectl do: create a tun device
+# (/dev/net/tun), add routes and addresses (netlink), open UDP and TCP sockets,
+# listen on a Unix socket, talk to the system bus through resolvectl, read
+# /run/systemd/seats and the account database, write the two directories above.
+
+# Nothing the daemon runs needs to gain privileges through setuid or file
+# capabilities; openvpn is started as root already.
+NoNewPrivileges=yes
+
+# CAP_NET_ADMIN: tun devices, routes, addresses, socket marks and buffers.
+# CAP_NET_BIND_SERVICE: a profile may name a local port below 1024 (lport in an
+# OpenVPN profile, ListenPort in a WireGuard one). The profile policy removes
+# user, group and chroot, so openvpn never drops privileges and needs no
+# CAP_SETUID, CAP_SETGID or CAP_SYS_CHROOT. Children inherit this set.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
+# Only the tun clone device, and the few devices every service may use (null,
+# zero, random, urandom). Not PrivateDevices=, which hides /dev/net/tun.
+DevicePolicy=closed
+DeviceAllow=/dev/net/tun rw
+
+# /usr, /etc and the rest of the system are read-only; the home directories do
+# not exist for the daemon (profiles arrive over the socket, never as paths);
+# /tmp is private.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+# The daemon loads no kernel module, reads no kernel log, and changes no cgroup,
+# clock or host name.
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+
+# ProtectKernelTunables= is left off on purpose: it makes /proc/sys read-only,
+# and the daemon writes /proc/sys/net/ipv6/conf/<tunnel>/disable_ipv6 to turn
+# IPv6 on for a tunnel on a host that disables it by default (enableIPv6 in
+# internal/wg/platform_linux.go). ProcSubset=pid and ProtectProc= are left off
+# for the same kind of reason: resolvectl and the C library read /proc and
+# nothing proves they tolerate less.
+
+# AF_NETLINK: routes, addresses, the network monitor. AF_UNIX: the control
+# socket, the management sockets, the system bus. AF_INET and AF_INET6: the
+# tunnels' own sockets.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+# None of these is used by the daemon, openvpn or resolvectl.
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+# Go and openvpn never map memory that is writable and executable at once, so
+# a flaw in either cannot turn data it was sent into code that way.
+MemoryDenyWriteExecute=yes
+
+# The system calls of an ordinary system service and no others: no mount, no
+# module, no ptrace, no clock, no raw I/O, no reboot. A call outside the group
+# fails with EPERM, where the default would kill the process with SIGSYS.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
