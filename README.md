@@ -31,7 +31,8 @@
 </p>
 
 <p align="center">
-  <img width="900" alt="The Plaitway window: three connected profiles in the sidebar, with Diagnostics and Settings below them, and the Overview of one profile with its uptime, traffic and addresses" src="https://github.com/user-attachments/assets/2cd5e4b3-3c74-4280-b840-f17570b9b7bd">
+  <img width="1111" height="704" alt="image" src="https://github.com/user-attachments/assets/6d09589b-1ce9-4a36-9228-6980049001d0" />
+
 </p>
 
 Run an office OpenVPN and a personal WireGuard tunnel together, see which one
