@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1136,6 +1137,47 @@ func TestEngineSoftAuthFailureKeepsTheCredentials(t *testing.T) {
 			}
 			h.stop()
 			requireNoEngineGoroutines(t)
+		})
+	}
+}
+
+// openvpn before 2.7 does not put a pushed redirect-gateway in the UPDOWN
+// environment, only in the PUSH_REPLY it logs. The fake's environment has no
+// route_redirect_gateway_* either, so the tunnel is a full tunnel only where
+// the engine reads the directive from the reply, as the profile's pull-filters
+// allow.
+func TestEngineTakesAPushedRedirectGatewayFromThePushReply(t *testing.T) {
+	tests := []struct {
+		name     string
+		profile  string
+		push     string
+		wantRole tunnel.Role
+	}{
+		{"def1", minimalProfile, "redirect-gateway def1,route-gateway 10.8.0.1", tunnel.RoleFull},
+		{"IPv6 only", minimalProfile, "redirect-gateway !ipv4 ipv6,route-gateway 10.8.0.1", tunnel.RoleFull},
+		{"neither family", minimalProfile, "redirect-gateway !ipv4,route-gateway 10.8.0.1", tunnel.RoleSplit},
+		{"pull-filtered", minimalProfile + "pull-filter ignore \"redirect-gateway\"\n", "redirect-gateway def1", tunnel.RoleSplit},
+		{"no redirect", minimalProfile, "route-gateway 10.8.0.1,dhcp-option DNS 10.8.0.1", tunnel.RoleSplit},
+		{"in the second message", minimalProfile, "route-gateway 10.8.0.1,push-continuation 2\\nredirect-gateway def1,push-continuation 1", tunnel.RoleFull},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t, harnessOpts{profile: tt.profile, env: map[string]string{"OVPN_FAKE_PUSH": tt.push}})
+			h.start()
+			h.waitFor("Up", h.stateIs(tunnel.StateUp))
+			var up tunnel.Intent
+			for _, c := range h.net.snapshot() {
+				if c.intent.State == tunnel.StateUp {
+					up = c.intent
+				}
+			}
+			if up.Role != tt.wantRole {
+				t.Errorf("Role = %v, want %v (routes %v)", up.Role, tt.wantRole, up.Routes)
+			}
+			if hasDefault := slices.Contains(up.Routes, defaultRouteV4); hasDefault != (tt.wantRole == tunnel.RoleFull) {
+				t.Errorf("default route present = %v with role %v", hasDefault, up.Role)
+			}
+			h.stop()
 		})
 	}
 }

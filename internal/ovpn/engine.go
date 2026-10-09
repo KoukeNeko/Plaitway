@@ -81,6 +81,9 @@ type session struct {
 	pushedDNS  dnsOptions // the dns options of the last PUSH_REPLY
 	pushedDHCP []string   // the dhcp-options of the last PUSH_REPLY, where they are read from it
 	pushMore   bool       // that reply is continued in the next message
+	// pushedRedirectV4 and pushedRedirectV6 say the last PUSH_REPLY redirects the default route.
+	// openvpn 2.7 puts that in the UPDOWN environment, and earlier versions do not.
+	pushedRedirectV4, pushedRedirectV6 bool
 
 	vpnState   string      // the name of the last >STATE
 	cause      string      // the latest concrete reason the connection is not coming up
@@ -1161,14 +1164,16 @@ func (e *engine) onLog(msg string) {
 	}
 }
 
-// onPushReply collects the dns options of a PUSH_REPLY. openvpn does not put
-// them in the UPDOWN environment, and applies its own pull-filters before it
-// acts on them, which the log line does not show.
+// onPushReply collects the dns options and the redirect-gateway of a PUSH_REPLY.
+// openvpn does not put the dns options in the UPDOWN environment, nor the
+// redirect-gateway before 2.7, and applies its own pull-filters before it acts
+// on them, which the log line does not show.
 func (e *engine) onPushReply(reply pushReply) {
 	s := &e.s
 	if !s.pushMore {
 		s.pushedDNS = dnsOptions{} // a new reply; the one before is for an earlier connection
 		s.pushedDHCP = nil
+		s.pushedRedirectV4, s.pushedRedirectV6 = false, false
 	}
 	s.pushMore = reply.more
 	for _, opt := range reply.options {
@@ -1178,6 +1183,12 @@ func (e *engine) onPushReply(reply pushReply) {
 		}
 		if readsDHCPOptionsFromLog && args[0] == "dhcp-option" {
 			s.pushedDHCP = append(s.pushedDHCP, opt)
+			continue
+		}
+		if args[0] == redirectGatewayDir {
+			ipv4, ipv6 := redirectGatewayFamilies(args[1:])
+			s.pushedRedirectV4 = s.pushedRedirectV4 || ipv4
+			s.pushedRedirectV6 = s.pushedRedirectV6 || ipv6
 			continue
 		}
 		if args[0] != "dns" {
@@ -1402,6 +1413,8 @@ func (e *engine) onTunnelUp(env map[string]string) error {
 		return err
 	}
 	up.PulledDNS = e.s.pushedDNS
+	up.RedirectV4 = up.RedirectV4 || e.s.pushedRedirectV4
+	up.RedirectV6 = up.RedirectV6 || e.s.pushedRedirectV6
 	for _, opt := range e.s.pushedDHCP {
 		if note := up.addDHCPOption(opt); note != "" {
 			notes = append(notes, note)

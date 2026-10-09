@@ -533,20 +533,26 @@ func (pr *parser) redirects() bool {
 		if pr.filtered(line) {
 			continue
 		}
-		ipv4, ipv6 := true, false
-		for _, flag := range args {
-			switch flag {
-			case "!ipv4":
-				ipv4 = false
-			case "ipv6":
-				ipv6 = true
-			}
-		}
-		if ipv4 || ipv6 {
+		if ipv4, ipv6 := redirectGatewayFamilies(args); ipv4 || ipv6 {
 			return true
 		}
 	}
 	return false
+}
+
+// redirectGatewayFamilies reads the flags of a redirect-gateway directive: it
+// redirects IPv4 unless "!ipv4" is there, and IPv6 only with "ipv6".
+func redirectGatewayFamilies(flags []string) (ipv4, ipv6 bool) {
+	ipv4 = true
+	for _, flag := range flags {
+		switch flag {
+		case "!ipv4":
+			ipv4 = false
+		case "ipv6":
+			ipv6 = true
+		}
+	}
+	return ipv4, ipv6
 }
 
 // filtered reports whether the first pull-filter that matches option drops it.
