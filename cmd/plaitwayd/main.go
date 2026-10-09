@@ -30,10 +30,12 @@ var version = "0.0.0-dev"
 // for this daemon: -ldflags "-X main.openvpnSHA256=<hex>". The daemon runs as
 // root, and the app bundle that holds openvpn can be changed by the user who
 // installed it, so a build that sets it runs only a copy of openvpn that has
-// this hash, made in the run directory. Without it (development builds)
-// openvpn runs from the configured path as it is. On Windows nothing is copied:
-// the engine checks the file where it is, always for its owner, access lists
-// and signature, and for this hash when the build has one.
+// this hash, made in the run directory. Without it (development builds on
+// macOS) openvpn runs from the configured path as it is. On Linux, without it,
+// openvpn runs where it is, provided that only root can change it or the
+// directories above it (the openvpn of the distribution). On Windows nothing is
+// copied: the engine checks the file where it is, always for its owner, access
+// lists and signature, and for this hash when the build has one.
 var openvpnSHA256 string
 
 const (
@@ -149,10 +151,11 @@ func parseFlags(args []string) (config, slog.Level, error) {
 // defaultLocations are the production locations when the daemon is privileged
 // and directories under the temporary directory otherwise, so that a
 // development daemon needs no flags and touches nothing outside its user's own
-// space. The production daemon logs to a file: launchd opens StandardErrorPath
-// before the daemon runs and fails the job when its directory is missing, so
-// the daemon makes its own log directory instead. A development daemon logs to
-// stderr only.
+// space. The production daemon of macOS logs to a file: launchd opens
+// StandardErrorPath before the daemon runs and fails the job when its directory
+// is missing, so the daemon makes its own log directory instead. The one of
+// Linux logs to stderr, which systemd sends to the journal. A development
+// daemon logs to stderr only.
 func defaultLocations() (locations, error) {
 	if isPrivileged() {
 		return productionLocations()
@@ -212,6 +215,7 @@ func run(ctx context.Context, log *slog.Logger, daemonLog *manager.LogBuffer, cf
 		lis.Close()
 		return err
 	}
+	d.notifySocket = os.Getenv("NOTIFY_SOCKET")
 	if cfg.fake == nil {
 		if err := ensureRunDir(log, cfg.runDir); err != nil {
 			lis.Close()

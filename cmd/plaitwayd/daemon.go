@@ -24,7 +24,10 @@ const (
 	// serverStopTimeout is how long open RPCs get to finish when stopping.
 	serverStopTimeout = 2 * time.Second
 	// shutdownTimeout bounds stopping the engines and the Reconciler. launchd
-	// kills a daemon that needs more than 20 seconds.
+	// kills a daemon that needs more than 20 seconds. The systemd unit needs a
+	// TimeoutStopSec above serverStopTimeout + shutdownTimeout (17 seconds):
+	// after that long systemd sends SIGKILL, which leaves routes and
+	// interfaces behind for the journal to remove at the next start.
 	shutdownTimeout = 15 * time.Second
 )
 
@@ -47,6 +50,9 @@ type daemon struct {
 	mgr *manager.Manager
 	svc *service
 	srv *grpc.Server
+	// notifySocket is where systemd wants to hear about readiness and
+	// shutdown ($NOTIFY_SOCKET); empty when it does not.
+	notifySocket string
 }
 
 // newDaemon opens the state directory and builds the server. It does not
@@ -115,7 +121,26 @@ func selectEngines(log *slog.Logger, cfg config) ([]tunnel.Backend, tunnel.Recon
 	if openvpnErr != nil {
 		backends = openvpnUnavailable(backends, openvpnErr)
 	}
+	logEngineProbes(log, backends)
 	return backends, rec, netMonitor, nil
+}
+
+// logEngineProbes says once at start which engines can run, and why not. This
+// is what DaemonInfo shows the clients; it is in the log as well because a
+// daemon without /dev/net/tun or openvpn is still a daemon that starts.
+func logEngineProbes(log *slog.Logger, backends []tunnel.Backend) {
+	for _, b := range backends {
+		info := b.Probe()
+		engine := "wireguard"
+		if b.Kind == tunnel.KindOpenVPN {
+			engine = "openvpn"
+		}
+		if info.Available {
+			log.Info("engine available", "engine", engine, "version", info.Version)
+		} else {
+			log.Warn("engine unavailable", "engine", engine, "reason", info.Detail)
+		}
+	}
 }
 
 // newServer wires the peer-identity credentials and the per-call authorization
@@ -141,6 +166,9 @@ func (d *daemon) serve(ctx context.Context, lis net.Listener) error {
 	go func() { served <- d.srv.Serve(lis) }()
 	// The on-demand profiles follow the network from the moment clients can ask.
 	d.mgr.StartOnDemand()
+	// The listener is up and the Reconciler recovered the journal of the
+	// previous run when it was built.
+	d.notify(notifyReady)
 
 	var cause error
 	serverEnded := false
@@ -158,6 +186,7 @@ func (d *daemon) serve(ctx context.Context, lis net.Listener) error {
 		d.log.Error("stopping", "err", cause)
 	}
 
+	d.notify(notifyStopping)
 	d.svc.beginShutdown()
 	d.stopServer()
 	if !serverEnded {

@@ -1,4 +1,4 @@
-//go:build !darwin && !windows
+//go:build !darwin && !windows && !linux
 
 package main
 
@@ -17,8 +17,8 @@ type realConfig struct {
 	stateDir string
 }
 
-// wireReal: only the macOS and Windows adapters exist so far; run with -fake
+// wireReal: only the macOS, Linux and Windows adapters exist; run with -fake
 // elsewhere.
 func wireReal(realConfig) ([]tunnel.Backend, tunnel.Reconciler, osnet.NetMonitor, error) {
-	return nil, nil, nil, errors.New("real engines are only available on macOS")
+	return nil, nil, nil, errors.New("real engines are only available on macOS, Linux and Windows")
 }

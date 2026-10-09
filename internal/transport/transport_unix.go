@@ -15,12 +15,16 @@ import (
 	"google.golang.org/grpc"
 )
 
-// DefaultPath is where an unprivileged development daemon listens. macOS limits
-// sun_path to 104 bytes, so it lives in the short per-user $TMPDIR rather than
-// under the project. The Swift client derives the same path from $TMPDIR
-// (DaemonLocation.swift); its integration test starts the daemon without
-// -socket to keep the two in agreement.
-func DefaultPath() string { return filepath.Join(os.TempDir(), "plaitway.sock") }
+// socketName is the file name of the development daemon's socket.
+const socketName = "plaitway.sock"
+
+// DefaultPath is where an unprivileged development daemon listens, in the
+// directory developmentDir picks. macOS limits sun_path to 104 bytes, so there
+// it lives in the short per-user $TMPDIR rather than under the project. The
+// Swift client derives the same path from $TMPDIR (DaemonLocation.swift); its
+// integration test starts the daemon without -socket to keep the two in
+// agreement.
+func DefaultPath() string { return filepath.Join(developmentDir(), socketName) }
 
 // Listen binds the socket so that it has exactly mode from the moment the inode
 // exists. bind(2) creates the inode with 0777 &^ umask, so the umask is

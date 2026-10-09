@@ -18,15 +18,15 @@ import (
 	"github.com/KoukeNeko/Plaitway/internal/transport"
 )
 
-// The real wiring (macOS adapters, Reconciler, both engines) starts without
-// root. It only reads the routing table and the resolver keys until a tunnel is
-// brought up, so this touches nothing on the host.
+// The real wiring (macOS or Linux adapters, Reconciler, both engines) starts
+// without root. It only reads the routing table and the resolver keys until a
+// tunnel is brought up, so this touches nothing on the host.
 func TestRunWithTheRealEnginesStartsWithoutRoot(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("the real wiring is not exercised as root")
 	}
-	if runtime.GOOS != "darwin" {
-		t.Skip("the real engines are only linked on macOS")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("the real engines are only linked on macOS and Linux")
 	}
 	dir := shortDir(t)
 	socket := filepath.Join(dir, "d.sock")
@@ -62,7 +62,7 @@ func TestRunWithTheRealEnginesStartsWithoutRoot(t *testing.T) {
 		t.Errorf("OpenVPN engine: %v, want unavailable with a reason for a missing binary", e)
 	}
 
-	// The Reconciler read this Mac's network through the real adapters.
+	// The Reconciler read this machine's network through the real adapters.
 	diag, err := client.GetDiagnostics(ctx, &pb.GetDiagnosticsRequest{})
 	if err != nil {
 		t.Fatalf("GetDiagnostics: %v", err)
@@ -84,8 +84,8 @@ func TestRunWithTheRealEnginesRefusesAnOpenVPNThatIsNotTheBuiltOne(t *testing.T)
 	if os.Geteuid() == 0 {
 		t.Skip("the real wiring is not exercised as root")
 	}
-	if runtime.GOOS != "darwin" {
-		t.Skip("the real engines are only linked on macOS")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("the real engines are only linked on macOS and Linux")
 	}
 	defer func(old string) { openvpnSHA256 = old }(openvpnSHA256)
 	openvpnSHA256 = sha256Hex("the openvpn that was built")

@@ -1,12 +1,6 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package main
-
-import (
-	"log/slog"
-
-	"github.com/KoukeNeko/Plaitway/internal/fsperm"
-)
 
 const (
 	// Where the LaunchDaemon keeps its state, sockets and logs.
@@ -17,10 +11,4 @@ const (
 
 func productionLocations() (locations, error) {
 	return locations{stateDir: productionStateDir, runDir: productionRunDir, logFile: productionLogFile}, nil
-}
-
-// ensureRunDir creates the run directory. It stays open to every user: the
-// control socket is created in it, and the clients have to reach that.
-func ensureRunDir(_ *slog.Logger, dir string) error {
-	return fsperm.MkdirAll(dir, runDirMode)
 }

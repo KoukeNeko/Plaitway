@@ -14,17 +14,17 @@ const nobody = 4_000_000_000
 // everyone is the policy under which the test process may do everything: its
 // own primary group counts as the administrator group.
 func everyone() caller {
-	return caller{pol: &policy{adminGID: uint32(os.Getgid()), consoleUID: func() (uint32, error) { return uint32(os.Getuid()), nil }}}
+	return caller{pol: &policy{administrator: inGroup(uint32(os.Getgid())), consoleUIDs: func() ([]uint32, error) { return []uint32{uint32(os.Getuid())}, nil }}}
 }
 
 // consoleUserOnly lets the test process read and connect but not modify.
 func consoleUserOnly() caller {
-	return caller{pol: &policy{adminGID: nobody, consoleUID: func() (uint32, error) { return uint32(os.Getuid()), nil }}}
+	return caller{pol: &policy{administrator: inGroup(nobody), consoleUIDs: func() ([]uint32, error) { return []uint32{uint32(os.Getuid())}, nil }}}
 }
 
 // stranger lets the test process do nothing.
 func stranger() caller {
-	return caller{pol: &policy{adminGID: nobody, consoleUID: func() (uint32, error) { return uint32(os.Getuid()) + 1, nil }}}
+	return caller{pol: &policy{administrator: inGroup(nobody), consoleUIDs: func() ([]uint32, error) { return []uint32{uint32(os.Getuid()) + 1}, nil }}}
 }
 
 func skipIfEveryoneIsAuthorized(t *testing.T) {

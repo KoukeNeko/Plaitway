@@ -29,8 +29,8 @@ func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard,
 
 func testPolicy() *policy {
 	return &policy{
-		adminGID:       adminGID,
-		consoleUID:     func() (uint32, error) { return consoleOwner, nil },
+		administrator:  inGroup(adminGID),
+		consoleUIDs:    func() ([]uint32, error) { return []uint32{consoleOwner}, nil },
 		consoleSession: func() (uint32, error) { return consoleSession, nil },
 	}
 }
@@ -159,7 +159,7 @@ func TestPolicyDeniesWithPermissionDenied(t *testing.T) {
 }
 
 func TestPolicyFailsClosedWhenTheConsoleUserIsUnknown(t *testing.T) {
-	p := &policy{adminGID: adminGID, consoleUID: func() (uint32, error) { return 0, errors.New("no console") }}
+	p := &policy{administrator: inGroup(adminGID), consoleUIDs: func() ([]uint32, error) { return nil, errors.New("no console") }}
 	if err := p.check(identity(consoleOwner, 20), pb.DaemonService_ListProfiles_FullMethodName); err == nil {
 		t.Fatal("a non-administrator was allowed although the console user could not be read")
 	}

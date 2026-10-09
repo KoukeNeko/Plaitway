@@ -16,13 +16,8 @@ import (
 	"github.com/KoukeNeko/Plaitway/internal/peercred"
 )
 
-const (
-	// adminGroupGID is the macOS "admin" group.
-	adminGroupGID = 80
-
-	consoleDevice  = "/dev/console"
-	consoleRefresh = time.Second
-)
+// consoleRefresh is how long the answer about who is at the console is kept.
+const consoleRefresh = time.Second
 
 // accessLevel is what a caller has to be to make a call. It follows the policy
 // in the header of proto/plaitway/v1/plaitway.proto.
@@ -60,18 +55,24 @@ var methodLevels = map[string]accessLevel{
 }
 
 // policy decides per call from the peer's identity, which the OS reports for the
-// process that connected: uid and groups on Unix, the token on Windows.
+// process that connected: uid and groups on Unix, the token on Windows. Each OS
+// builds it in newPolicy.
 type policy struct {
-	adminGID uint32
-	// consoleUID returns the user at the console.
-	consoleUID func() (uint32, error)
+	// administrator says whether a Unix caller other than root is an
+	// administrator: a member of the administrators' group of this OS. The error
+	// is for a caller whose groups could not be read, who then counts as none.
+	administrator func(peercred.AuthInfo) (bool, error)
+	// consoleUIDs returns the users at the console.
+	consoleUIDs func() ([]uint32, error)
 	// consoleSession returns the logon session at the console, which is what
 	// stands for "the user at the console" on Windows.
 	consoleSession func() (uint32, error)
 }
 
-func newPolicy() *policy {
-	return &policy{adminGID: adminGroupGID, consoleUID: newConsoleUser().uid, consoleSession: activeConsoleSession}
+// inGroup is the administrator rule of a system with one administrators' group:
+// the groups the kernel reports for the caller include gid.
+func inGroup(gid uint32) func(peercred.AuthInfo) (bool, error) {
+	return func(ai peercred.AuthInfo) (bool, error) { return slices.Contains(ai.Groups, gid), nil }
 }
 
 // check fails closed: an identity the OS could not tell is refused.
@@ -83,10 +84,14 @@ func (p *policy) check(ai peercred.AuthInfo, fullMethod string) error {
 	if !ai.Known {
 		return status.Error(codes.PermissionDenied, "peer identity unavailable")
 	}
-	if p.isAdministrator(ai) {
+	administrator, adminErr := p.isAdministrator(ai)
+	if administrator {
 		return nil
 	}
 	caller := describeCaller(ai)
+	if adminErr != nil {
+		caller += " (" + adminErr.Error() + ")"
+	}
 	if level == levelModify {
 		return status.Errorf(codes.PermissionDenied, "%s is not an administrator, which %s requires", caller, fullMethod)
 	}
@@ -102,11 +107,14 @@ func (p *policy) check(ai peercred.AuthInfo, fullMethod string) error {
 
 // isAdministrator looks at the Windows identity first: its UID is 0, which
 // would be root anywhere else.
-func (p *policy) isAdministrator(ai peercred.AuthInfo) bool {
+func (p *policy) isAdministrator(ai peercred.AuthInfo) (bool, error) {
 	if windows := ai.Windows; windows != nil {
-		return windows.Administrator
+		return windows.Administrator, nil
 	}
-	return ai.UID == 0 || slices.Contains(ai.Groups, p.adminGID)
+	if ai.UID == 0 {
+		return true, nil
+	}
+	return p.administrator(ai)
 }
 
 func (p *policy) isConsoleUser(ai peercred.AuthInfo) (bool, error) {
@@ -114,8 +122,8 @@ func (p *policy) isConsoleUser(ai peercred.AuthInfo) (bool, error) {
 		session, err := p.consoleSession()
 		return err == nil && windows.SessionID == session, err
 	}
-	console, err := p.consoleUID()
-	return err == nil && ai.UID == console, err
+	console, err := p.consoleUIDs()
+	return err == nil && slices.Contains(console, ai.UID), err
 }
 
 func describeCaller(ai peercred.AuthInfo) string {
@@ -154,10 +162,6 @@ type consoleUser struct {
 	readAt  time.Time
 	cached  uint32
 	cachedE error
-}
-
-func newConsoleUser() *consoleUser {
-	return &consoleUser{stat: func() (uint32, error) { return fileOwner(consoleDevice) }, now: time.Now}
 }
 
 func (c *consoleUser) uid() (uint32, error) {

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/KoukeNeko/Plaitway/internal/manager/fake"
@@ -50,5 +53,34 @@ func TestUntrustedOpenVPNMakesTheBackendUnavailableWithTheReason(t *testing.T) {
 				t.Errorf("kind %d was made unavailable: %+v", b.Kind, info)
 			}
 		}
+	}
+}
+
+// A daemon that starts says once which engines it has, and why not.
+func TestLogEngineProbesSaysWhichEnginesCanRunAndWhyNot(t *testing.T) {
+	var out bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&out, nil))
+	backends := openvpnUnavailable(fake.Backends(fake.Config{}), errors.New("openvpn at /x cannot be trusted: /x belongs to uid 1000, not to root"))
+
+	logEngineProbes(log, backends)
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("%d lines, want one for each engine:\n%s", len(lines), out.String())
+	}
+	var openvpn, wireguard string
+	for _, line := range lines {
+		switch {
+		case strings.Contains(line, "engine=openvpn"):
+			openvpn = line
+		case strings.Contains(line, "engine=wireguard"):
+			wireguard = line
+		}
+	}
+	if !strings.Contains(openvpn, "level=WARN") || !strings.Contains(openvpn, "engine unavailable") || !strings.Contains(openvpn, "belongs to uid 1000") {
+		t.Errorf("OpenVPN line %q, want a warning with the reason", openvpn)
+	}
+	if !strings.Contains(wireguard, "level=INFO") || !strings.Contains(wireguard, "engine available") {
+		t.Errorf("WireGuard line %q, want an available engine at info", wireguard)
 	}
 }
