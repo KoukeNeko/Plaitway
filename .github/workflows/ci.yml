@@ -37,7 +37,7 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
       - name: shellcheck
-        run: shellcheck -x -S warning packaging/*.sh scripts/*.sh packaging/linux/*.sh packaging/linux/debian/postinst packaging/linux/debian/prerm packaging/linux/debian/postrm scripts/linux/*.sh
+        run: shellcheck -x -S warning packaging/*.sh scripts/*.sh packaging/linux/*.sh packaging/linux/debian/postinst packaging/linux/debian/prerm packaging/linux/debian/postrm packaging/linux/openrc/plaitwayd scripts/linux/*.sh
 
   # The helper and the command line client build and test on each system they run on.
   # The tests that change the routing table need root and the rootintegration tag, and are

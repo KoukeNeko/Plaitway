@@ -1,0 +1,64 @@
+#!/sbin/openrc-run
+# shellcheck shell=sh disable=SC2034 # the variables are read by openrc-run
+# The Plaitway helper as an OpenRC service: the daemon and the arguments of
+# plaitwayd.service, which says why each is there (packaging/linux/lib_test.sh
+# checks that the two agree). OpenRC has no notify protocol, no sandbox of the
+# unit's kind and no journal, so this script waits for the socket itself, runs
+# the daemon under supervise-daemon, and keeps the log in a file that only root
+# reads. What the unit also restricts, and this cannot: the capability bounding
+# set (supervise-daemon would need every other capability listed to drop it),
+# the system call filter and the read-only file system. The daemon runs as root
+# with no new privileges.
+#
+# The path is that of a package (/usr). packaging/linux/install.sh --openrc
+# rewrites /usr/libexec for another --prefix.
+
+description="Plaitway helper"
+command=/usr/libexec/plaitway/plaitwayd
+command_args="-socket /run/plaitway/plaitwayd.sock -socket-mode 0666 -state-dir /var/lib/plaitway -run-dir /run/plaitway -openvpn /usr/sbin/openvpn"
+
+# A crash or a kill is followed by a start that repairs the routes from the
+# journal, as Restart=on-failure does. More than five within a minute and
+# supervise-daemon gives up, as StartLimitBurst=5 does.
+supervisor=supervise-daemon
+respawn_delay=3
+respawn_max=5
+respawn_period=60
+supervise_daemon_args="--no-new-privs"
+
+# On SIGTERM the daemon stops its clients and then its tunnels, 17 s at most
+# (serverStopTimeout and shutdownTimeout in cmd/plaitwayd/daemon.go); SIGKILL
+# leaves routes and interfaces for the next start to repair, so the first
+# timeout must stay above that. packaging/linux/lib_test.sh checks it.
+retry="TERM/30/KILL/5"
+
+# The log names endpoints and users, so only root reads it.
+output_log=/var/log/plaitwayd.log
+error_log=/var/log/plaitwayd.log
+
+depend() {
+	need localmount
+	after modules
+}
+
+start_pre() {
+	# A failure here does not stop the daemon, which says what is wrong with
+	# the device.
+	modprobe -q tun || true
+	# The run directory holds the socket and the files of openvpn, and goes
+	# when the service stops; the state directory holds the profiles with
+	# their keys.
+	checkpath --directory --mode 0755 /run/plaitway || return 1
+	checkpath --directory --mode 0700 /var/lib/plaitway || return 1
+	checkpath --file --mode 0600 /var/log/plaitwayd.log || return 1
+}
+
+start_post() {
+	# supervise-daemon returns when the daemon is started, not when its socket
+	# is up, and the app's Start Helper and `plaitway` need the socket.
+	ewaitfile 10 /run/plaitway/plaitwayd.sock
+}
+
+stop_post() {
+	rm -rf /run/plaitway
+}

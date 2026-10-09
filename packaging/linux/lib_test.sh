@@ -156,6 +156,36 @@ mkdir "$TMP/empty-build"
 run sh "$HERE/install.sh" --destdir "$TMP/e" --build "$TMP/empty-build" --prefix /usr --version 1.2.3
 expect "a build directory without the programs is refused, naming build.sh" 'test "$STATUS" -ne 0 && output_has "build.sh"'
 
+# --- the OpenRC script ----------------------------------------------------------
+
+OPENRC="$HERE/openrc/plaitwayd"
+unit_args() { sed -n 's|^ExecStart=/usr/libexec/plaitway/plaitwayd ||p' "$HERE/plaitwayd.service"; }
+openrc_args() { sed -n 's|^command_args="\(.*\)"$|\1|p' "$OPENRC"; }
+# The helpers run in a subshell: lib.sh sets variables of its own.
+openrc_stop_budget() (
+    # shellcheck source=lib.sh
+    . "$HERE/lib.sh"
+    retry="$(sed -n 's|^retry="TERM/\([0-9]*\)/KILL/[0-9]*"$|\1|p' "$OPENRC")"
+    daemon="$(daemon_stop_budget "$ROOT/cmd/plaitwayd/daemon.go")"
+    [ -n "$retry" ] && [ -n "$daemon" ] && [ "$daemon" -lt "$retry" ]
+)
+expect "the OpenRC script is a valid shell script" 'sh -n "$OPENRC"'
+expect "the OpenRC script starts the daemon with the arguments of the unit" '[ -n "$(unit_args)" ] && [ "$(unit_args)" = "$(openrc_args)" ]'
+expect "the OpenRC script restarts as often as the unit does" \
+    '[ "$(sed -n "s/^respawn_max=//p" "$OPENRC")" = "$(sed -n "s/^StartLimitBurst=//p" "$HERE/plaitwayd.service")" ] && [ "$(sed -n "s/^respawn_period=//p" "$OPENRC")" = "$(sed -n "s/^StartLimitIntervalSec=//p" "$HERE/plaitwayd.service")" ]'
+run openrc_stop_budget
+expect "the OpenRC script waits for the daemon's shutdown budget before it kills" 'test "$STATUS" -eq 0'
+
+run install_into "$TMP/openrc" --prefix /usr --openrc
+expect "install.sh --openrc succeeds" 'test "$STATUS" -eq 0'
+expect "the OpenRC script is in /etc/init.d below DESTDIR, mode 0755" \
+    'test -x "$TMP/openrc/etc/init.d/plaitwayd" -a "$(mode_of "$TMP/openrc/etc/init.d/plaitwayd")" = 755 -a ! -e "$TMP/openrc/usr/etc"'
+expect "it names the daemon by the package path, and is the script of the repository" 'cmp -s "$TMP/openrc/etc/init.d/plaitwayd" "$OPENRC"'
+run install_into "$TMP/openrc-local" --prefix /opt/plaitway --python-dir /opt/plaitway/lib/python3/site-packages --openrc
+expect "with another prefix it names the daemon below the prefix and changes nothing else" \
+    'grep -qx "command=/opt/plaitway/libexec/plaitway/plaitwayd" "$TMP/openrc-local/etc/init.d/plaitwayd" && sed "s|/opt/plaitway/libexec|/usr/libexec|" "$TMP/openrc-local/etc/init.d/plaitwayd" | cmp -s - "$OPENRC"'
+expect "without --openrc nothing goes to /etc" 'test ! -e "$TMP/usr/etc" -a ! -e "$TMP/local/etc"'
+
 # --- the maintainer scripts, against fakes -----------------------------------
 
 # The scripts call the tools by name and look for them by absolute path: the

@@ -4,7 +4,7 @@
 # verify-deb.sh compares the package with what it installs.
 #
 #   packaging/linux/install.sh [--prefix PREFIX] [--destdir DIR] [--build DIR]
-#                              [--python-dir DIR] [--version X.Y.Z]
+#                              [--python-dir DIR] [--version X.Y.Z] [--openrc]
 #
 # It lays out, below DESTDIR and PREFIX (default /usr/local):
 #
@@ -12,6 +12,8 @@
 #   bin/plaitway                              the command line client
 #   bin/plaitway-app                          the GTK app's launcher
 #   lib/systemd/system/plaitwayd.service      the unit
+#   (DESTDIR)/etc/init.d/plaitwayd            with --openrc only: the OpenRC script,
+#                                             below DESTDIR and not PREFIX
 #   lib/python3/dist-packages/plaitway/       the app's Python package
 #   share/                                    linux/data/share: desktop entry,
 #                                             metainfo, MIME types, icons
@@ -30,6 +32,7 @@ PREFIX=/usr/local
 DESTDIR=""
 PYTHON_DIR=""
 VERSION=""
+OPENRC=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --prefix) need_arg "$1" $#; PREFIX="$2"; shift 2 ;;
@@ -37,7 +40,8 @@ while [ $# -gt 0 ]; do
         --build) need_arg "$1" $#; BUILD_DIR="$2"; shift 2 ;;
         --python-dir) need_arg "$1" $#; PYTHON_DIR="$2"; shift 2 ;;
         --version) need_arg "$1" $#; VERSION="$2"; shift 2 ;;
-        *) die "usage: $0 [--prefix PREFIX] [--destdir DIR] [--build DIR] [--python-dir DIR] [--version X.Y.Z]" ;;
+        --openrc) OPENRC=1; shift ;;
+        *) die "usage: $0 [--prefix PREFIX] [--destdir DIR] [--build DIR] [--python-dir DIR] [--version X.Y.Z] [--openrc]" ;;
     esac
 done
 case "$PREFIX" in /*) ;; *) die "--prefix must be an absolute path, got '$PREFIX'" ;; esac
@@ -100,6 +104,17 @@ make_dir "$(dirname "$unit_dest")"
 sed "s|^ExecStart=/usr/libexec/|ExecStart=$PREFIX/libexec/|" "$PACKAGING_LINUX/$UNIT_NAME" >"$unit_dest"
 chmod 0644 "$unit_dest"
 grep -q "^ExecStart=$PREFIX/libexec/$LIBEXEC_NAME/plaitwayd " "$unit_dest" || die "$UNIT_NAME has no ExecStart for $PREFIX/libexec/$LIBEXEC_NAME/plaitwayd"
+
+# The OpenRC service, for a system without systemd (Gentoo). It goes to /etc/init.d
+# whatever the prefix, which is where OpenRC looks, and names the daemon by its
+# package path like the unit does.
+if [ "$OPENRC" -eq 1 ]; then
+    openrc_dest="$DESTDIR/etc/init.d/plaitwayd"
+    make_dir "$(dirname "$openrc_dest")"
+    sed "s|^command=/usr/libexec/|command=$PREFIX/libexec/|" "$PACKAGING_LINUX/openrc/plaitwayd" >"$openrc_dest"
+    chmod 0755 "$openrc_dest"
+    grep -q "^command=$PREFIX/libexec/$LIBEXEC_NAME/plaitwayd\$" "$openrc_dest" || die "the OpenRC script has no command for $PREFIX/libexec/$LIBEXEC_NAME/plaitwayd"
+fi
 
 # The Python package, without caches. The release version replaces the
 # development one in the installed copy only; the app compares it with the
