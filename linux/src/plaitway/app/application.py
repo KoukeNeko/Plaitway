@@ -97,7 +97,9 @@ class PlaitwayApplication(Adw.Application):
                 disconnect_all=lambda: self.activate_action("disconnect-all", None),
                 quit=lambda: self.activate_action("quit", None),
             ),
-            str(paths.data_dir() / "icons") if paths.from_checkout() else "",
+            # GNOME's tray extension searches only this directory, for files named like the icon, and
+            # does not read a theme tree below it.
+            str(paths.data_dir() / "icons" / "hicolor" / "symbolic" / "apps") if paths.from_checkout() else "",
             self._tray_availability,
         )
         self.model.start()
