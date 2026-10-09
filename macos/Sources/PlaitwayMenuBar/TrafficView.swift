@@ -12,10 +12,12 @@ struct TrafficView: View {
         let samples = model.traffic.samples[profile.id] ?? []
         let rate = model.traffic.rate(for: profile.id)
         VStack(alignment: .leading, spacing: 10) {
+            // Two columns of one width, so that the numbers of one do not push the other.
             HStack(alignment: .firstTextBaseline, spacing: 20) {
                 Direction(symbol: "arrow.down", name: Text("Received", bundle: .module), rate: rate?.received, total: profile.status.rxBytes)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Direction(symbol: "arrow.up", name: Text("Sent", bundle: .module), rate: rate?.sent, total: profile.status.txBytes)
-                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             TrafficChart(samples: samples)
                 .frame(height: 56)
