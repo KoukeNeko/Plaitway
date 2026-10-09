@@ -162,6 +162,9 @@ func TestLinuxPolicyDecisions(t *testing.T) {
 // The tests above take the accounts from a fake. This one reads the account
 // database of the machine that runs the tests.
 func TestSystemAccountsAgreeWithTheKernel(t *testing.T) {
+	if os.Getuid() < 0 {
+		t.Skip("this system has no uids")
+	}
 	accounts := systemAccounts()
 	groups, err := accounts.groupIDs(uint32(os.Getuid()))
 	if err != nil {
