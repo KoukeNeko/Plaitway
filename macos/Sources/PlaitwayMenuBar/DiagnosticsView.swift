@@ -46,6 +46,7 @@ struct DiagnosticsView: View {
             case .daemonLog: LogView(profileID: "")
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(Text("Diagnostics", bundle: .module))
         .confirmationDialog(
             Text("Remove route \(staleRoutePrefix)?", bundle: .module),

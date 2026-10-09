@@ -114,7 +114,11 @@ struct LogView: View {
                     }
                 }
             }
+            // Fills what the bar leaves, so that the empty state is centred in it and the page
+            // does not depend on how many lines there are.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: model.searchRequest) { isSearching = true }
         .task(id: profileID) { await tail.run(store: model.store, profileID: profileID) }
         .task(id: profileID) {

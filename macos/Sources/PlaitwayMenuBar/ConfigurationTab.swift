@@ -35,11 +35,14 @@ struct ConfigurationTab: View {
                 ContentUnavailableView {
                     Label { Text(verbatim: message) } icon: { Image(systemName: "lock") }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .ready:
                 Notices(editor: editor)
                 ConfigEditorView(text: $editor.text, kind: profile.kind, markedLine: editor.diagnostic?.line, isEditable: !editor.isSaving)
             }
         }
+        // The bar stays at the top whatever is below it.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: profile.id) { await editor.load(from: model.store) }
         .onDisappear { editor.hideSecrets() }
         .onChange(of: profile.status.connectedSince) { editor.noteRestart() }
