@@ -258,7 +258,8 @@ class WindowTests(SmokeTestCase):
                   "view-conceal-symbolic", "list-add-symbolic", "open-menu-symbolic", "dialog-warning-symbolic",
                   "dialog-error-symbolic", "dialog-information-symbolic", "changes-prevent-symbolic",
                   "applications-engineering-symbolic", "text-x-generic-symbolic", "network-workgroup-symbolic",
-                  "view-list-symbolic", "document-edit-symbolic", "emblem-system-symbolic", "preferences-system-symbolic"}
+                  "view-list-symbolic", "document-edit-symbolic", "emblem-system-symbolic", "system-search-symbolic",
+                  "plaitway-arrow-down-symbolic", "plaitway-arrow-up-symbolic"}
         missing = sorted(name for name in names if not theme.has_icon(name))
         self.assertEqual(missing, [])
 

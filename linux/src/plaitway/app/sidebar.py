@@ -86,7 +86,7 @@ class Sidebar(Gtk.Box):
         self.append(Gtk.Separator())
         self._footer = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self._footer.add_css_class("navigation-sidebar")
-        self._diagnostics = FooterRow(DIAGNOSTICS, "preferences-system-symbolic", self._strings.diagnostics)
+        self._diagnostics = FooterRow(DIAGNOSTICS, "system-search-symbolic", self._strings.diagnostics)
         self._settings = FooterRow(SETTINGS, "emblem-system-symbolic", self._strings.settings)
         self._footer.append(self._diagnostics)
         self._footer.append(self._settings)
