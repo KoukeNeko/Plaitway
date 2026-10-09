@@ -66,9 +66,8 @@ for name in Plaitway PlaitwayMenuBar; do
 done
 [ -n "$APP_EXECUTABLE" ] || die "no Plaitway or PlaitwayMenuBar executable in $SWIFT_BIN_DIR"
 
-log "drawing the icon"
-swift "$PACKAGING_DIR/make-icon.swift" "$STAGE/Plaitway.iconset"
-iconutil --convert icns "$STAGE/Plaitway.iconset" --output "$STAGE/Plaitway.icns"
+log "making the icon"
+"$PACKAGING_DIR/make-icon.sh" "$STAGE/Plaitway.icns"
 
 log "generating third-party notices"
 (
