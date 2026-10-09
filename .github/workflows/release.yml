@@ -3,7 +3,9 @@ name: Release
 # Pushing a tag vX.Y.Z, where X.Y.Z is the VERSION file, builds, signs and notarizes the macOS app,
 # publishes the GitHub release, and then updates the Homebrew cask (packages.yml). Run by hand it
 # does everything up to publishing and keeps the files as an artifact, which is how to try the
-# pipeline. Windows is not released: it has no app yet.
+# pipeline. Linux is built beside macOS (the linux job) and its .deb files are attached to the release
+# afterwards (publish-linux), so a problem of the Linux job never holds back the macOS release or the
+# Homebrew cask. Windows is not released: it has no app yet.
 on:
   push:
     tags: ['v*']
@@ -128,6 +130,54 @@ jobs:
             build/Plaitway-${{ env.VERSION }}.dmg
           if-no-files-found: error
 
+  # The Debian package of the Linux version, for each architecture it is built for (cgo needs the C
+  # library of the target, so arm64 is built on an arm64 runner), checked without installing it. The
+  # container is Ubuntu 26.04 for the GTK 4 and libadwaita that the check of the app's modules
+  # imports.
+  linux:
+    name: linux package (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Install the build and check tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates build-essential dpkg-dev systemd \
+            desktop-file-utils appstream libxml2-utils shellcheck dash \
+            python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-secret-1 python3-grpcio python3-protobuf
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # The repository belongs to another user than the container's root.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Check the version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+            exit 1
+          fi
+      - run: make test-packaging-linux
+      - run: make deb
+      - run: make verify-deb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.arch }}
+          path: build/linux/plaitway_*.deb
+          if-no-files-found: error
+
   publish:
     if: github.ref_type == 'tag'
     needs: macos
@@ -139,8 +189,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
+          name: macos
           path: dist
-          merge-multiple: true
       # The Homebrew cask reads its hash from here.
       - name: Checksums
         working-directory: dist
@@ -153,6 +203,29 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Plaitway ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md"
+
+  # The Linux files are attached to the release that publish made. Nothing here is needed by publish or
+  # by the Homebrew cask, so a failed Linux job leaves the macOS release as it is.
+  publish-linux:
+    if: github.ref_type == 'tag'
+    needs: [publish, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: linux-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS-linux
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
 
   packages:
     needs: publish
