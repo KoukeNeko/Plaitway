@@ -1,0 +1,111 @@
+name: Publish apt repository
+
+# Rebuilds the apt repository of the Linux packages from the .deb files of every stable release and
+# deploys it to GitHub Pages, https://koukeneko.github.io/Plaitway/. It runs when the release workflow
+# of a tag has finished, whatever its result (a run that attached no packages leaves the repository as
+# it was), on the default branch (the github-pages environment refuses a run on a tag), and by hand, to
+# make the repository the first time or again, for example after the key was replaced. Without the
+# signing key in the secrets it says so and publishes nothing, and a failure here never touches the release.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A deployment in progress is not abandoned for a newer one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # A release workflow started by hand publishes nothing, so there is nothing to add.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      ready: ${{ steps.key.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the signing key
+        id: key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$APT_GPG_PRIVATE_KEY" ]; then
+            echo "::notice::APT_GPG_PRIVATE_KEY is not set, so the apt repository was not published"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install the tools
+        if: steps.key.outputs.ready == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends apt-utils
+      - name: Collect the packages of the releases
+        if: steps.key.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Every stable release that has packages, each checked against the checksums that the release
+          # workflow published with them, which catches a package that is damaged or half uploaded.
+          mkdir -p "$RUNNER_TEMP/debs"
+          while read -r tag; do
+            case "$tag" in v[0-9]*.[0-9]*.[0-9]*) ;; *) continue ;; esac
+            assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+            case "$assets" in *plaitway_*_*.deb*) ;; *) continue ;; esac
+            gh release download "$tag" --pattern 'plaitway_*.deb' --pattern SHA256SUMS-linux --dir "$RUNNER_TEMP/debs/$tag"
+            (cd "$RUNNER_TEMP/debs/$tag" && sha256sum --check --strict SHA256SUMS-linux)
+          done < <(gh release list --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName')
+          ls "$RUNNER_TEMP/debs"
+      - name: Build and sign the repository
+        if: steps.key.outputs.ready == 'true'
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          fingerprint="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ {print $10; exit}')"
+          packaging/linux/make-apt-repo.sh --debs "$RUNNER_TEMP/debs" --out "$RUNNER_TEMP/apt" --key "$fingerprint"
+          gpgconf --kill gpg-agent
+      - uses: actions/upload-pages-artifact@v5
+        if: steps.key.outputs.ready == 'true'
+        with:
+          path: ${{ runner.temp }}/apt
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
+      - name: Check what is published
+        env:
+          PAGE_URL: ${{ steps.deploy.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          # The files are served from a cache that may take a moment: curl tries again.
+          base="${PAGE_URL%/}"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --retry 10 --retry-delay 6 --retry-all-errors "$base/key.asc" -o key.asc
+          curl --fail --silent --show-error --location --retry 10 --retry-delay 6 --retry-all-errors "$base/dists/stable/InRelease" -o InRelease
+          export GNUPGHOME="$RUNNER_TEMP/verify"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --import key.asc
+          gpg --batch --verify InRelease
