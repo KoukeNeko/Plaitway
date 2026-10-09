@@ -88,14 +88,18 @@ jobs:
         run: PLAITWAY_DAEMON="$PWD/bin/plaitwayd" swift test --package-path macos
 
   # The Linux app against the real daemon on its in-memory backend, under a
-  # virtual display and a private session bus. libadwaita 1.7 is the oldest the
-  # app can use and Ubuntu 24.04 has 1.5, so the job runs on Ubuntu 26.04, in a
-  # container. The tests that need what the container lacks skip and say why.
+  # virtual display and a private session bus, on the oldest and the newest Ubuntu
+  # it supports (libadwaita 1.5 and 1.9, Python 3.12 and 3.14), in a container. The
+  # tests that need what the container lacks skip and say why.
   linux-app:
-    name: linux app
+    name: linux app (Ubuntu ${{ matrix.release }})
     runs-on: ubuntu-latest
-    container: ubuntu:26.04
+    container: ubuntu:${{ matrix.release }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ['24.04', '26.04']
     steps:
       - name: Install the app's requirements
         env:
@@ -148,7 +152,7 @@ jobs:
   # The Debian package for each architecture it is built for, checked without
   # installing it (packaging/linux/verify-deb.sh), and kept as an artifact. cgo
   # needs the C library of the target, so arm64 is built on an arm64 runner. The
-  # container is Ubuntu 26.04 for the GTK 4 and libadwaita 1.7 that the check of
+  # container is Ubuntu 26.04 for the GTK 4 and libadwaita that the check of
   # the app's modules imports; there is no systemd user instance in it, so the
   # check that runs the unit's settings as a transient user service skips.
   linux-package:
