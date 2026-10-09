@@ -103,12 +103,12 @@ func TestTunnelRoutesCarryTheAdapterIndexAndAMetric(t *testing.T) {
 		switch rt.Dst {
 		case pfx("0.0.0.0/1"), pfx("128.0.0.0/1"):
 			seen++
-			if rt.IfIndex != e.host.ifIndex("utun10") || rt.Metric != windowsTunnelMetric {
+			if rt.IfIndex != e.host.ifIndex("utun10") || rt.Metric != tunnelMetric {
 				t.Errorf("%s: %+v", rt.Dst, rt)
 			}
 		case pfx("203.0.113.10/32"):
 			seen++
-			if rt.IfIndex != e.host.ifIndex("en0") || rt.Metric != windowsBypassMetric || rt.Gateway != ip("192.168.51.1") {
+			if rt.IfIndex != e.host.ifIndex("en0") || rt.Metric != bypassMetric || rt.Gateway != ip("192.168.51.1") {
 				t.Errorf("bypass route: %+v", rt)
 			}
 		}
@@ -160,7 +160,7 @@ func TestRoutesToOnePrefixOnDifferentInterfacesAreNeighbours(t *testing.T) {
 func TestMetricTieWithAnotherProgramsRoute(t *testing.T) {
 	e := newEnv(t, windowsCase)
 	e.addTunnel("utun11", "10.8.0.6/24")
-	e.host.Routes.SetInterfaceMetric("en0", windowsTunnelMetric+tunnelAdapterMetric)
+	e.host.Routes.SetInterfaceMetric("en0", tunnelMetric+tunnelAdapterMetric)
 	e.host.Sync()
 	foreign := osnet.Route{Dst: pfx("10.50.0.0/16"), Gateway: ip("192.168.51.254"), Iface: "en0", Static: true}
 	e.host.Inject(foreign)
@@ -370,7 +370,7 @@ func TestWindowsBypassForAnIPv6Endpoint(t *testing.T) {
 		"8000::/1 dev utun10",
 	)
 	rt, ok := e.host.Routes.Get(pfx("2001:db8::10/128"))
-	if !ok || rt.IfIndex != e.host.ifIndex("en0") || rt.Metric != windowsBypassMetric {
+	if !ok || rt.IfIndex != e.host.ifIndex("en0") || rt.Metric != bypassMetric {
 		t.Errorf("bypass route: %+v", rt)
 	}
 	if got := e.journalFor(kindRoute, "2001:db8::10/128"); !slices.Equal(got, []string{"pending fe80::1", "applied fe80::1"}) {
@@ -554,5 +554,18 @@ func TestSameRoute(t *testing.T) {
 				t.Errorf("Windows: %v, want %v", got, tt.winOS)
 			}
 		})
+	}
+}
+
+// A table the Reconciler synced every record for before Linux existed keeps doing
+// so: only the Linux table skips the sync of the records that follow a change.
+func TestOnlyTheLinuxTableSyncsPendingRecordsOnly(t *testing.T) {
+	for _, k := range []RouteKeying{KeyByPrefix, KeyByPrefixInterfaceNextHop} {
+		if k.syncsPendingOnly() {
+			t.Errorf("keying %d syncs pending records only, it syncs every record", k)
+		}
+	}
+	if !KeyLinux.syncsPendingOnly() {
+		t.Error("the Linux table syncs every record")
 	}
 }

@@ -29,11 +29,15 @@ const overriddenState = tunnel.RouteFailed
 // the host's traffic, and a foreign route is never ours to delete. When the other
 // route goes, ours is in use at once, and the next pass says so.
 //
-// Only a table keyed by interface and next hop can hold such a pair. The
-// verdict is the one Windows reaches:
+// Only a table that gives routes a metric and keeps those of one prefix apart
+// can hold such a pair. The verdict is the one Windows and Linux reach:
 //   - Among routes to one prefix, the lowest effective metric wins: the metric of
-//     the route plus the metric of its interface. A tie is not a loss, because
-//     the system breaks it in a way that cannot be read.
+//     the route plus, on Windows, the metric of its interface. A tie is not a
+//     loss, because the system breaks it in a way that cannot be read.
+//   - A route that leads where ours does is no rival. The kernel's own on-link
+//     route of a tunnel's subnet has the metric 0 on Linux and the same interface
+//     as a route of ours to that subnet, which a profile asks for whenever it
+//     routes the tunnel's own network.
 //   - A more specific route wins whatever its metric. That is how every route of
 //     another program is meant to work, except for a default route: our two
 //     halves are all that stands between the traffic and the physical
@@ -41,8 +45,8 @@ const overriddenState = tunnel.RouteFailed
 //     the internet (the full tunnel of a profile with the private ranges taken
 //     out) takes all of it.
 //
-// An interface metric of zero is one the network state did not give; the detail
-// says so when it takes part in a verdict.
+// On Windows an interface metric of zero is one the network state did not give;
+// the detail says so when it takes part in a verdict.
 func (r *Reconciler) markOverridden(table map[routeKey]osnet.Route, out map[netip.Prefix]outcome) {
 	if !r.keying.byInterface() {
 		return
@@ -90,7 +94,7 @@ func (r *Reconciler) overrideReason(ours osnet.Route, foreign []osnet.Route) str
 	var winner *osnet.Route
 	winnerMetric := oursMetric
 	for i, rival := range foreign {
-		if rival.Dst.Masked() != ours.Dst.Masked() {
+		if rival.Dst.Masked() != ours.Dst.Masked() || leadsSameWay(ours, rival) {
 			continue
 		}
 		if metric := r.effectiveMetric(rival); metric < winnerMetric {
@@ -99,7 +103,7 @@ func (r *Reconciler) overrideReason(ours osnet.Route, foreign []osnet.Route) str
 	}
 	if winner != nil {
 		reason := fmt.Sprintf("overridden by %s: effective metric %d, ours %d", describe(*winner), winnerMetric, oursMetric)
-		if !r.interfaceMetricKnown(ours) || !r.interfaceMetricKnown(*winner) {
+		if r.keying.addsInterfaceMetric() && (!r.interfaceMetricKnown(ours) || !r.interfaceMetricKnown(*winner)) {
 			reason += "; interface metric unknown"
 		}
 		return reason
@@ -112,8 +116,19 @@ func (r *Reconciler) overrideReason(ours osnet.Route, foreign []osnet.Route) str
 
 // effectiveMetric is what the system compares between routes of one prefix.
 func (r *Reconciler) effectiveMetric(rt osnet.Route) uint64 {
+	if !r.keying.addsInterfaceMetric() {
+		return uint64(rt.Metric)
+	}
 	ifc, _ := routeInterface(r.netState, rt)
 	return uint64(rt.Metric) + uint64(ifc.Metric)
+}
+
+// leadsSameWay says whether two routes to one prefix send the traffic through
+// the same interface and the same next hop, which makes the one no rival of the
+// other whatever their metrics.
+func leadsSameWay(a, b osnet.Route) bool {
+	sameInterface := a.IfIndex == b.IfIndex && (a.IfIndex != 0 || a.Iface != "" && a.Iface == b.Iface)
+	return sameInterface && a.Gateway.WithZone("") == b.Gateway.WithZone("")
 }
 
 func (r *Reconciler) interfaceMetricKnown(rt osnet.Route) bool {

@@ -48,10 +48,13 @@ type record struct {
 	Gateway string `json:"gateway,omitempty"`
 	Iface   string `json:"iface,omitempty"`
 	// IfIndex is the interface index of a route that a table keyed by interface
-	// holds (Windows). Together with Key and Gateway it is the route's identity,
-	// since one prefix can have several routes there. Records written for the
-	// macOS table have none, which is how a Windows start tells them apart.
-	IfIndex     uint32 `json:"ifindex,omitempty"`
+	// holds (Windows, Linux). Together with Key and Gateway it is the route's
+	// identity, since one prefix can have several routes there. Records written
+	// for the macOS table have none, which is how a Windows or Linux start tells
+	// them apart.
+	IfIndex uint32 `json:"ifindex,omitempty"`
+	// Metric is the metric of a route on Linux, where it is part of the key.
+	Metric      uint32 `json:"metric,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Note        string `json:"note,omitempty"`
 }
@@ -62,7 +65,11 @@ func (r record) id() string {
 	if r.IfIndex == 0 {
 		return liveKey(r.Kind, r.Key)
 	}
-	return fmt.Sprintf("%s if%d via %s", liveKey(r.Kind, r.Key), r.IfIndex, r.Gateway)
+	id := fmt.Sprintf("%s if%d via %s", liveKey(r.Kind, r.Key), r.IfIndex, r.Gateway)
+	if r.Metric != 0 {
+		id += fmt.Sprintf(" metric %d", r.Metric)
+	}
+	return id
 }
 
 func (r record) view() tunnel.JournalRecord {
@@ -84,6 +91,9 @@ type journal struct {
 	compactAfter int
 	// noSync skips the disk sync; tests that write thousands of records set it.
 	noSync bool
+	// pendingOnly syncs pending records only. The Reconciler sets it for a table
+	// whose routes do not outlive a reboot; every other table syncs every record.
+	pendingOnly bool
 	// torn is set when a write failed and may have left half a line behind,
 	// which the next record must not be glued onto.
 	torn bool
@@ -141,7 +151,11 @@ func (j *journal) unresolved() []record {
 }
 
 // append writes the record and syncs it to disk before returning, so that
-// whatever happens next, the journal is at least as new as the host.
+// whatever happens next, the journal is at least as new as the host. With
+// pendingOnly only a pending record is synced: the records that follow a change
+// are not, and if one is lost with the machine the journal is merely older than
+// the host, and replay copes. A sync costs about a millisecond on a disk, which
+// adds up over a list of thousands of routes.
 func (j *journal) append(rec record) error {
 	j.seq++
 	rec.Seq, rec.Time = j.seq, j.now()
@@ -158,7 +172,7 @@ func (j *journal) append(rec record) error {
 		return fmt.Errorf("writing journal: %w", err)
 	}
 	j.torn = false
-	if !j.noSync {
+	if !j.noSync && (!j.pendingOnly || rec.State == statePending) {
 		if err := j.file.Sync(); err != nil {
 			return fmt.Errorf("syncing journal: %w", err)
 		}

@@ -155,6 +155,7 @@ func cloneEntries(in []osnet.DNSEntry) []osnet.DNSEntry {
 			Servers:      slices.Clone(e.Servers),
 			MatchDomains: slices.Clone(e.MatchDomains),
 			Order:        e.Order,
+			Iface:        e.Iface,
 		}
 	}
 	return out

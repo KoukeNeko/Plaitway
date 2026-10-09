@@ -328,7 +328,7 @@ func TestRecoveryLeavesARouteThatWasChangedSince(t *testing.T) {
 
 // The next hop is part of what the journal remembers about a route.
 func TestFingerprintAndKeyIncludeTheGateway(t *testing.T) {
-	base := osnet.Route{Dst: pfx("0.0.0.0/1"), Gateway: ip("10.8.0.1"), Iface: "utun11", IfIndex: 31, Metric: windowsTunnelMetric, Static: true}
+	base := osnet.Route{Dst: pfx("0.0.0.0/1"), Gateway: ip("10.8.0.1"), Iface: "utun11", IfIndex: 31, Metric: tunnelMetric, Static: true}
 	other := base
 	other.Gateway = ip("10.8.0.2")
 	onLink := base

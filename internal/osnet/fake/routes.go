@@ -1,7 +1,8 @@
 // Package fake holds in-memory stand-ins for the osnet adapters, for tests that
 // cannot run as root. The route table follows macOS semantics closely enough
 // that the bugs the Reconciler exists for (stale gateway routes, EEXIST, no
-// metrics) can happen in it.
+// metrics) can happen in it, and can be switched to the semantics of the
+// Windows and the Linux routing table (WindowsKeying, LinuxKeying).
 package fake
 
 import (
@@ -64,16 +65,21 @@ type routeKey struct {
 	dst netip.Prefix
 	// scope is the interface name of a scoped route, empty otherwise.
 	scope string
-	// iface and gateway complete the key in Windows mode (see WindowsKeying).
+	// iface and gateway complete the key in Windows mode (see WindowsKeying), and
+	// in Linux mode together with the metric (see LinuxKeying).
 	iface   string
 	gateway netip.Addr
+	metric  uint32
 }
 
 func (t *RouteTable) keyOf(r osnet.Route) routeKey {
 	k := routeKey{dst: r.Dst.Masked()}
-	if t.windows {
+	switch {
+	case t.linux:
+		k.iface, k.gateway, k.metric = r.Iface, r.Gateway.WithZone(""), r.Metric
+	case t.windows:
 		k.iface, k.gateway = r.Iface, r.Gateway.WithZone("")
-	} else if r.Scoped {
+	case r.Scoped:
 		k.scope = r.Iface
 	}
 	return k
@@ -82,7 +88,7 @@ func (t *RouteTable) keyOf(r osnet.Route) routeKey {
 // RouteTable is an osnet.RouteTable with macOS semantics: a route's key is its
 // destination plus scope, adding an existing key fails with ErrExists, deleting
 // a missing one with ErrNotFound, and there are no metrics, so the longest
-// prefix wins.
+// prefix wins. WindowsKeying and LinuxKeying switch it to the other two tables.
 //
 // It also models the interfaces the routes hang off, because that is where
 // stale routes come from: routes bound to an interface vanish with it, while a
@@ -98,6 +104,10 @@ type RouteTable struct {
 	pickIface string
 	// windows selects the Windows key (see WindowsKeying).
 	windows bool
+	// linux selects the Linux key (see LinuxKeying).
+	linux bool
+	// lastIndex is the last interface index handed out in Linux mode.
+	lastIndex int
 	// ifaceMetric is the interface metric Windows adds to a route metric.
 	ifaceMetric map[string]uint32
 }
@@ -135,11 +145,56 @@ const windowsLoopbackIndex = 1
 func (t *RouteTable) WindowsKeying() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.routes) > 0 {
-		panic("fake route table: WindowsKeying on a table that has routes")
+	if len(t.routes) > 0 || t.linux {
+		panic("fake route table: WindowsKeying on a table that has routes or Linux keying")
 	}
 	t.windows = true
 }
+
+// linuxConnectedMetricV6 is the metric of the route the kernel adds for the
+// prefix of an IPv6 address. IPv4 ones have the metric 0.
+const linuxConnectedMetricV6 = 256
+
+// LinuxKeying switches the table from macOS to Linux semantics, which the
+// Reconciler has to handle as well. It must be called on an empty table.
+//
+//   - The kernel tells routes apart by destination and metric alone: adding a
+//     route whose destination and metric exist is ErrExists, whatever interface
+//     and next hop it has. Routes with other metrics lie side by side, each with
+//     an interface and a next hop of its own. Inject takes the place of the routes
+//     with its destination and metric, as ip route replace does; Append puts a
+//     second route beside them, as ip route append does.
+//   - Delete names the route by destination, metric, next hop and interface (by
+//     index, or by name when the index is not known). Without an interface it
+//     deletes the route to that destination, metric and next hop if exactly one
+//     matches, and fails when several do.
+//   - Among routes of equal prefix length the lowest metric wins; there is no
+//     interface metric. A metric is taken as it is: the defaults the kernel
+//     gives a route added without one (0 for IPv4, 1024 for IPv6) are not
+//     modelled.
+//   - Routes carry IfIndex. An interface added without an index gets the next
+//     free one, and never an index it had before. A route that names an index is
+//     added to that interface, whatever Iface says, as with netlink.
+//   - The kernel never picks another interface than the one the route names: the
+//     next hop must be on a connected subnet of it (any IPv6 link-local address
+//     is), and an interface that does not exist or is down is ErrUnreachable.
+//     Tunnel interfaces are point-to-point devices and take on-link routes of
+//     both address families.
+//   - Dump reports a link-local IPv6 next hop with the interface as its zone.
+//   - The connected routes of an interface have the metric 0 (IPv4) and 256
+//     (IPv6).
+func (t *RouteTable) LinuxKeying() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.routes) > 0 || t.windows {
+		panic("fake route table: LinuxKeying on a table that has routes or Windows keying")
+	}
+	t.linux = true
+}
+
+// metricAware says whether routes of one prefix are told apart by their metric
+// and the lowest wins.
+func (t *RouteTable) metricAware() bool { return t.windows || t.linux }
 
 // SetInterfaceMetric sets the interface metric that is added to the metric of
 // every route through the interface when routes are compared (Windows mode).
@@ -163,8 +218,8 @@ func (t *RouteTable) effectiveMetricLocked(r osnet.Route) uint32 {
 	return r.Metric + t.ifaceMetric[r.Iface]
 }
 
-// Dump returns every route, sorted by family, destination, scope, interface
-// and gateway.
+// Dump returns every route, sorted by family, destination, scope, interface,
+// gateway and metric.
 func (t *RouteTable) Dump() ([]osnet.Route, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -194,6 +249,9 @@ func (t *RouteTable) Add(r osnet.Route) (err error) {
 		return fmt.Errorf("fake route table: invalid destination %v", r.Dst)
 	}
 	r.Dst = r.Dst.Masked()
+	if t.linux {
+		return t.addLinuxLocked(r)
+	}
 	if err := t.resolveLocked(&r); err != nil {
 		return err
 	}
@@ -210,7 +268,7 @@ func (t *RouteTable) Add(r osnet.Route) (err error) {
 }
 
 // Delete matches on destination and scope only, not on gateway or interface,
-// like RTM_DELETE on macOS. In Windows mode see deleteKeyLocked.
+// like RTM_DELETE on macOS. In Windows and Linux mode see deleteKeyLocked.
 func (t *RouteTable) Delete(r osnet.Route) (err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -233,13 +291,18 @@ func (t *RouteTable) Delete(r osnet.Route) (err error) {
 }
 
 // deleteKeyLocked is the key Delete removes: the route's own key on macOS, and
-// on Windows the one route that the interface (name or index), destination and
-// gateway of r single out.
+// on Windows and Linux the one route that the interface (name or index),
+// destination and gateway of r single out, on Linux also its metric.
 func (t *RouteTable) deleteKeyLocked(r osnet.Route) (routeKey, error) {
-	if !t.windows {
+	if !t.metricAware() {
 		return t.keyOf(r), nil
 	}
-	if r.Iface == "" && r.IfIndex != 0 {
+	switch {
+	case t.linux && r.IfIndex != 0:
+		if name := t.nameOfIndexLocked(r.IfIndex); name != "" {
+			r.Iface = name
+		}
+	case r.Iface == "" && r.IfIndex != 0:
 		r.Iface = t.nameOfIndexLocked(r.IfIndex)
 	}
 	if r.Iface != "" {
@@ -247,7 +310,7 @@ func (t *RouteTable) deleteKeyLocked(r osnet.Route) (routeKey, error) {
 	}
 	var matches []routeKey
 	for key := range t.routes {
-		if key.dst == r.Dst.Masked() && (!r.Gateway.IsValid() || key.gateway == r.Gateway.WithZone("")) {
+		if key.dst == r.Dst.Masked() && (!r.Gateway.IsValid() || key.gateway == r.Gateway.WithZone("")) && (!t.linux || key.metric == r.Metric) {
 			matches = append(matches, key)
 		}
 	}
@@ -261,7 +324,7 @@ func (t *RouteTable) deleteKeyLocked(r osnet.Route) (routeKey, error) {
 }
 
 func (t *RouteTable) nameOfIndexLocked(index uint32) string {
-	if index == windowsLoopbackIndex {
+	if t.windows && index == windowsLoopbackIndex {
 		return WindowsLoopback
 	}
 	for name, ifc := range t.ifaces {
@@ -296,6 +359,65 @@ func (t *RouteTable) resolveLocked(r *osnet.Route) error {
 		}
 	}
 	return nil
+}
+
+// addLinuxLocked adds a route to a Linux table. Destination and metric are what
+// the kernel refuses a second time.
+func (t *RouteTable) addLinuxLocked(r osnet.Route) error {
+	if err := t.resolveLinuxLocked(&r); err != nil {
+		return err
+	}
+	for key := range t.routes {
+		if key.dst == r.Dst && key.metric == r.Metric {
+			return osnet.ErrExists
+		}
+	}
+	r.Flags = flagsFor(r)
+	t.routes[t.keyOf(r)] = r
+	return nil
+}
+
+// resolveLinuxLocked finds the interface of r the way the kernel does: the one
+// the index names, or else the name, never another; the next hop has to be on
+// a subnet of it. Without an interface, the next hop's own subnet decides.
+func (t *RouteTable) resolveLinuxLocked(r *osnet.Route) error {
+	if r.Blackhole {
+		return nil
+	}
+	name := r.Iface
+	if r.IfIndex != 0 {
+		if name = t.nameOfIndexLocked(r.IfIndex); name == "" {
+			return osnet.ErrUnreachable
+		}
+	}
+	var ifc *osnet.Interface
+	if r.Gateway.IsValid() {
+		ifc = t.ifaceForGatewayLocked(r.Gateway, name)
+	} else if i, ok := t.ifaces[name]; ok && i.Up {
+		ifc = i
+	}
+	if ifc == nil {
+		return osnet.ErrUnreachable
+	}
+	r.Iface, r.IfIndex = ifc.Name, uint32(ifc.Index)
+	t.reportLinuxLocked(r)
+	return nil
+}
+
+// reportLinuxLocked completes a route the way Dump reports it on Linux: the
+// index of the interface that has the name or the name of the index, and the
+// interface as the zone of a link-local IPv6 next hop.
+func (t *RouteTable) reportLinuxLocked(r *osnet.Route) {
+	if r.Iface == "" && r.IfIndex != 0 {
+		r.Iface = t.nameOfIndexLocked(r.IfIndex)
+	}
+	if ifc, ok := t.ifaces[r.Iface]; ok && r.IfIndex == 0 {
+		r.IfIndex = uint32(ifc.Index)
+	}
+	r.Gateway = r.Gateway.WithZone("")
+	if r.Gateway.Is6() && r.Gateway.IsLinkLocalUnicast() && r.Iface != "" {
+		r.Gateway = r.Gateway.WithZone(r.Iface)
+	}
 }
 
 // ifaceForGatewayLocked finds the up interface a gateway is directly reachable
@@ -373,6 +495,7 @@ func compareRoutes(a, b osnet.Route) int {
 		cmp.Compare(scopeName(a), scopeName(b)),
 		cmp.Compare(a.Iface, b.Iface),
 		a.Gateway.Compare(b.Gateway),
+		cmp.Compare(a.Metric, b.Metric),
 	)
 }
 
@@ -384,7 +507,8 @@ func scopeName(r osnet.Route) string {
 }
 
 // AddInterface creates an interface, or replaces an existing one of the same
-// name, together with the connected routes its addresses imply.
+// name, together with the connected routes its addresses imply. In Linux mode
+// an Index of zero is replaced by a new one.
 func (t *RouteTable) AddInterface(ifc osnet.Interface) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -394,6 +518,12 @@ func (t *RouteTable) AddInterface(ifc osnet.Interface) {
 	ifc.Addrs = slices.Clone(ifc.Addrs)
 	if ifc.Metric != 0 {
 		t.ifaceMetric[ifc.Name] = ifc.Metric
+	}
+	if t.linux {
+		if ifc.Index == 0 {
+			ifc.Index = t.lastIndex + 1
+		}
+		t.lastIndex = max(t.lastIndex, ifc.Index)
 	}
 	t.ifaces[ifc.Name] = &ifc
 	t.addConnectedLocked(&ifc)
@@ -464,11 +594,7 @@ func (t *RouteTable) addConnectedLocked(ifc *osnet.Interface) {
 		return
 	}
 	for _, a := range ifc.Addrs {
-		r := osnet.Route{Dst: a.Masked(), Iface: ifc.Name}
-		if t.windows {
-			r.IfIndex = uint32(ifc.Index)
-		}
-		r.Flags = flagsFor(r)
+		r := t.connectedRoute(ifc, a)
 		if _, ok := t.routes[t.keyOf(r)]; !ok {
 			t.routes[t.keyOf(r)] = r
 		}
@@ -477,11 +603,24 @@ func (t *RouteTable) addConnectedLocked(ifc *osnet.Interface) {
 
 func (t *RouteTable) dropConnectedLocked(ifc *osnet.Interface) {
 	for _, a := range ifc.Addrs {
-		key := t.keyOf(osnet.Route{Dst: a, Iface: ifc.Name})
+		key := t.keyOf(t.connectedRoute(ifc, a))
 		if r, ok := t.routes[key]; ok && r.Iface == ifc.Name && isConnected(r) {
 			delete(t.routes, key)
 		}
 	}
+}
+
+// connectedRoute is the route the kernel derives from the address a of ifc.
+func (t *RouteTable) connectedRoute(ifc *osnet.Interface, a netip.Prefix) osnet.Route {
+	r := osnet.Route{Dst: a.Masked(), Iface: ifc.Name}
+	if t.metricAware() {
+		r.IfIndex = uint32(ifc.Index)
+	}
+	if t.linux && a.Addr().Is6() {
+		r.Metric = linuxConnectedMetricV6
+	}
+	r.Flags = flagsFor(r)
+	return r
 }
 
 func (t *RouteTable) dropRoutesViaLocked(name string) {
@@ -494,18 +633,43 @@ func (t *RouteTable) dropRoutesViaLocked(name string) {
 
 // Inject puts a route into the table unconditionally, the way another program
 // or an earlier run would have left it: no interface or gateway validation, and
-// an existing route with the same key is overwritten. Nothing is recorded.
+// an existing route with the same key is overwritten. Nothing is recorded. In
+// Linux mode the route takes the place of the routes with its destination and
+// metric, whatever interface and next hop they have.
 func (t *RouteTable) Inject(r osnet.Route) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	r.Dst = r.Dst.Masked()
+	if t.linux {
+		t.reportLinuxLocked(&r)
+		for key := range t.routes {
+			if key.dst == r.Dst && key.metric == r.Metric {
+				delete(t.routes, key)
+			}
+		}
+	}
+	r.Flags = flagsFor(r)
+	t.routes[t.keyOf(r)] = r
+}
+
+// Append puts a route beside the ones that have its destination and metric
+// (Linux mode), as ip route append does. The table then holds two routes that
+// Delete tells apart by interface and next hop. Nothing is recorded.
+func (t *RouteTable) Append(r osnet.Route) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.linux {
+		panic("fake route table: Append needs Linux keying")
+	}
+	r.Dst = r.Dst.Masked()
+	t.reportLinuxLocked(&r)
 	r.Flags = flagsFor(r)
 	t.routes[t.keyOf(r)] = r
 }
 
 // Remove deletes the unscoped route to dst behind the Reconciler's back, and
-// reports whether there was one. Nothing is recorded. In Windows mode it is the
-// route Get returns.
+// reports whether there was one. Nothing is recorded. With Windows or Linux
+// keying it is the route Get returns.
 func (t *RouteTable) Remove(dst netip.Prefix) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -514,8 +678,21 @@ func (t *RouteTable) Remove(dst netip.Prefix) bool {
 	return ok
 }
 
-// Get returns the unscoped route to dst; in Windows mode the one with the
-// lowest effective metric when there are several.
+// removeDefaultsVia removes every default route through the interface, behind
+// the Reconciler's back and unrecorded, as Remove does. A Linux table can hold
+// several default routes to one prefix, of which Remove takes only the best.
+func (t *RouteTable) removeDefaultsVia(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for key, r := range t.routes {
+		if r.Dst.Bits() == 0 && r.Iface == name && !r.Blackhole {
+			delete(t.routes, key)
+		}
+	}
+}
+
+// Get returns the unscoped route to dst; with Windows or Linux keying the one
+// with the lowest effective metric when there are several.
 func (t *RouteTable) Get(dst netip.Prefix) (osnet.Route, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -526,7 +703,7 @@ func (t *RouteTable) Get(dst netip.Prefix) (osnet.Route, bool) {
 // bestKeyLocked is the key of the route to dst that the kernel would use.
 func (t *RouteTable) bestKeyLocked(dst netip.Prefix) (routeKey, bool) {
 	dst = dst.Masked()
-	if !t.windows {
+	if !t.metricAware() {
 		key := routeKey{dst: dst}
 		_, ok := t.routes[key]
 		return key, ok
@@ -556,8 +733,8 @@ func (t *RouteTable) beats(a, b osnet.Route) bool {
 }
 
 // Lookup returns the unscoped route the kernel would pick for addr: the
-// longest matching prefix, and in Windows mode the lowest effective metric
-// among those.
+// longest matching prefix, and with Windows or Linux keying the lowest
+// effective metric among those.
 func (t *RouteTable) Lookup(addr netip.Addr) (osnet.Route, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -567,7 +744,7 @@ func (t *RouteTable) Lookup(addr netip.Addr) (osnet.Route, bool) {
 		if key.scope != "" || !r.Dst.Contains(addr) {
 			continue
 		}
-		if !found || r.Dst.Bits() > best.Dst.Bits() || (t.windows && r.Dst.Bits() == best.Dst.Bits() && t.beats(r, best)) {
+		if !found || r.Dst.Bits() > best.Dst.Bits() || (t.metricAware() && r.Dst.Bits() == best.Dst.Bits() && t.beats(r, best)) {
 			best, found = r, true
 		}
 	}

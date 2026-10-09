@@ -221,6 +221,10 @@ func (w *world) injectForeign() string {
 	if w.rng.IntN(3) == 0 {
 		rt = osnet.Route{Dst: dst, Iface: "en0", Static: true}
 	}
+	if e.k.linux() {
+		// Metrics that beat ours, tie with ours (a conflict) and lose to ours.
+		rt.Metric = []uint32{0, 0, bypassMetric, tunnelMetric, 100}[w.rng.IntN(5)]
+	}
 	rt = e.host.index(rt)
 	key := w.key(rt)
 	if cur, ok := w.table()[key]; ok && (!cur.Static || w.same(cur, rt)) {
@@ -427,7 +431,11 @@ func (w *world) checkInvariants(after string) {
 	wantDNS := make(map[string][]osnet.DNSEntry)
 	for _, p := range desired.DNS {
 		if p.State == tunnel.RoutePending {
-			wantDNS[string(p.Owner)] = append(wantDNS[string(p.Owner)], osnet.DNSEntry{Servers: p.Servers, MatchDomains: p.MatchDomains, Order: p.Order})
+			entry := osnet.DNSEntry{Servers: p.Servers, MatchDomains: p.MatchDomains, Order: p.Order}
+			if e.k.keying.dnsPerInterface() {
+				entry.Iface = p.Iface
+			}
+			wantDNS[string(p.Owner)] = append(wantDNS[string(p.Owner)], entry)
 		}
 	}
 	gotDNS := e.host.DNS.All()

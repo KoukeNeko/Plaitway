@@ -20,8 +20,8 @@ type ownedRoute struct {
 	route osnet.Route // as read back from the table after adding it
 	owner tunnel.OwnerID
 	kind  tunnel.RouteKind
-	// journaled routes are the ones a crash would leave behind: those through
-	// a gateway. Interface-bound routes vanish with the interface.
+	// journaled routes are the ones a crash would leave behind, see
+	// RouteKeying.journaled.
 	journaled bool
 }
 
@@ -154,6 +154,12 @@ func (r *Reconciler) reconcileLocked(intents []tunnel.Intent, forceDNS bool) pas
 
 // dumpTable reads the unscoped routes by their key. Scoped routes are a separate
 // key space that Plaitway never writes.
+//
+// Two routes can have one key where a program may append a route to a
+// destination and metric that has one (Linux, ip route append; DHCP clients do
+// it for their default routes). The table cannot show both, and the one that
+// stays must not be a rival of ours: a route we installed is the one we have to
+// find again, to see that it is still there and to delete it.
 func (r *Reconciler) dumpTable() (map[routeKey]osnet.Route, error) {
 	routes, err := r.routes.Dump()
 	if err != nil {
@@ -161,11 +167,22 @@ func (r *Reconciler) dumpTable() (map[routeKey]osnet.Route, error) {
 	}
 	table := make(map[routeKey]osnet.Route, len(routes))
 	for _, rt := range routes {
-		if !rt.Scoped {
-			table[r.keying.key(rt)] = rt
+		if rt.Scoped {
+			continue
 		}
+		key := r.keying.key(rt)
+		if prev, dup := table[key]; dup && r.isInstalled(prev) {
+			continue
+		}
+		table[key] = rt
 	}
 	return table, nil
+}
+
+// isInstalled says whether rt is a route that we installed and still own.
+func (r *Reconciler) isInstalled(rt osnet.Route) bool {
+	rec, ok := r.owned[r.keying.key(rt)]
+	return ok && r.keying.same(rt, rec.route)
 }
 
 // syncRoutes applies the route plans to the table. It returns the outcome per
@@ -219,8 +236,9 @@ func (r *Reconciler) syncRoutes(table map[routeKey]osnet.Route, res *passResult)
 			continue
 		}
 		if why := r.keying.unplaceable(p.Route); why != "" {
-			// Nothing to retry: the interface appearing is a change of the network,
-			// which brings the next pass.
+			// The interface appearing is a change of the network, which brings the
+			// next pass, unless the monitor does not report it.
+			res.retry = r.keying.retriesUnplaced()
 			out[p.Route.Dst] = outcome{tunnel.RoutePending, why}
 			continue
 		}
@@ -266,11 +284,12 @@ func (r *Reconciler) doomedRoutes(want map[routeKey]RoutePlan) []routeKey {
 
 // splitReplaced separates the doomed tunnel routes whose destination is wanted
 // by a route with another key (the same prefix through another next hop, after
-// the tunnel announced another gateway) from the others. Only a table keyed by
-// interface and next hop can hold both at once; on macOS one prefix has one
-// route, so the old one has to go first. A bypass route is not kept: it carries
-// no traffic of the user's, and the old one is stale, which is why it is
-// replaced.
+// the tunnel announced another gateway; on Linux the same prefix with another
+// metric) from the others. Only a table that can hold both at once can keep the
+// old one until the new one is in: on macOS one prefix has one route, and on
+// Linux one prefix and metric, so a new route with the key of the old one makes
+// the old one go first. A bypass route is not kept: it carries no traffic of the
+// user's, and the old one is stale, which is why it is replaced.
 func (r *Reconciler) splitReplaced(doomed []routeKey, want map[routeKey]RoutePlan) (replaced, removedNow []routeKey) {
 	if !r.keying.byInterface() {
 		return nil, doomed
@@ -353,6 +372,12 @@ func (r *Reconciler) addRoute(p RoutePlan, res *passResult) (o outcome, ok bool)
 		res.retry = true
 		abandon("network unreachable")
 		return outcome{tunnel.RoutePending, "network unreachable"}, false
+	case errors.Is(err, errors.ErrUnsupported):
+		// The host's configuration refuses the route (IPv6 is switched off on the
+		// interface). Neither a retry nor a rebuild changes that, so the pass has
+		// not failed; the next full pass tries again.
+		abandon("not supported here")
+		return outcome{tunnel.RouteFailed, err.Error()}, false
 	default:
 		res.fail(fmt.Errorf("adding route %s: %w", rt.Dst, err))
 		abandon("add failed")
@@ -432,8 +457,11 @@ func addrString(a netip.Addr) string {
 // via names where a route sends traffic: the gateway, or the interface for a
 // route bound to one.
 func via(rt osnet.Route) string {
-	if rt.Gateway.IsValid() {
+	switch {
+	case rt.Gateway.IsValid():
 		return rt.Gateway.String()
+	case rt.Blackhole:
+		return "blackhole"
 	}
 	return rt.Iface
 }
@@ -465,8 +493,28 @@ func sortedKeys[V any](m map[routeKey]V) []routeKey {
 	return keys
 }
 
+// appliedDNS is what was written for an owner: the entries and the interfaces
+// they were written to, as the system numbered them then.
+type appliedDNS struct {
+	entries   []osnet.DNSEntry
+	ifIndexes []uint32
+}
+
+// dnsIfIndexes are the indexes of the interfaces the entries name. Where the
+// system keeps resolver settings per interface (Linux, systemd-resolved) they
+// belong to an interface by its index: one that was made again under the same
+// name has another and none of the settings of the old one, which the entries
+// alone do not show.
+func (r *Reconciler) dnsIfIndexes(entries []osnet.DNSEntry) []uint32 {
+	indexes := make([]uint32, len(entries))
+	for i, e := range entries {
+		indexes[i] = interfaceIndex(r.netState, e.Iface)
+	}
+	return indexes
+}
+
 func entryEqual(a, b osnet.DNSEntry) bool {
-	return a.Order == b.Order && slices.Equal(a.Servers, b.Servers) && slices.Equal(a.MatchDomains, b.MatchDomains)
+	return a.Order == b.Order && a.Iface == b.Iface && slices.Equal(a.Servers, b.Servers) && slices.Equal(a.MatchDomains, b.MatchDomains)
 }
 
 // dnsWanted turns the DNS plans into the entries to apply, by owner.
@@ -474,11 +522,15 @@ func (r *Reconciler) dnsWanted() map[tunnel.OwnerID][]osnet.DNSEntry {
 	want := make(map[tunnel.OwnerID][]osnet.DNSEntry)
 	for _, p := range r.desired.DNS {
 		if p.State == tunnel.RoutePending {
-			want[p.Owner] = append(want[p.Owner], osnet.DNSEntry{
+			entry := osnet.DNSEntry{
 				Servers:      slices.Clone(p.Servers),
 				MatchDomains: slices.Clone(p.MatchDomains),
 				Order:        p.Order,
-			})
+			}
+			if r.keying.dnsPerInterface() {
+				entry.Iface = p.Iface
+			}
+			want[p.Owner] = append(want[p.Owner], entry)
 		}
 	}
 	return want
@@ -511,7 +563,8 @@ func (r *Reconciler) applyDNS(want map[tunnel.OwnerID][]osnet.DNSEntry, force, c
 	for _, owner := range sortedOwners(want) {
 		entries := want[owner]
 		prev, had := r.dnsApplied[owner]
-		same := had && slices.EqualFunc(prev, entries, entryEqual)
+		ifIndexes := r.dnsIfIndexes(entries)
+		same := had && slices.EqualFunc(prev.entries, entries, entryEqual) && slices.Equal(prev.ifIndexes, ifIndexes)
 		if same && !force {
 			out[owner] = installed
 			continue
@@ -528,7 +581,7 @@ func (r *Reconciler) applyDNS(want map[tunnel.OwnerID][]osnet.DNSEntry, force, c
 			// stays, and the next pass writes it again. Until then the owner is
 			// listed with nothing known about its entries, so that removing it
 			// removes whatever is there.
-			r.dnsApplied[owner] = nil
+			r.dnsApplied[owner] = appliedDNS{}
 			failed = true
 			res.fail(fmt.Errorf("applying resolver entries of %s: %w", owner, err))
 			out[owner] = outcome{tunnel.RouteFailed, err.Error()}
@@ -537,7 +590,7 @@ func (r *Reconciler) applyDNS(want map[tunnel.OwnerID][]osnet.DNSEntry, force, c
 		if !same {
 			r.journalResolverBestEffort(stateApplied, owner, "")
 		}
-		r.dnsApplied[owner] = entries
+		r.dnsApplied[owner] = appliedDNS{entries, ifIndexes}
 		out[owner] = installed
 		changed = true
 	}
@@ -619,6 +672,7 @@ func (r *Reconciler) buildReports(routeOut map[netip.Prefix]outcome, dnsOut map[
 		}
 		if o, ok := routeOut[p.Route.Dst]; ok && p.Install {
 			rep.State, rep.Detail = o.state, o.detail
+			rep.Overridden = o.state == overriddenState && r.overridden[p.Route.Dst] == o.detail
 		}
 		r.routeReports = append(r.routeReports, rep)
 	}

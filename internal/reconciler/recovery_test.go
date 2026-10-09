@@ -132,7 +132,7 @@ func testRecoveryComparesTheFlagsInTheFingerprint(t *testing.T, k keyingCase) {
 	// Same router and interface, but another program owns it now: not static.
 	replacement := osnet.Route{Dst: pfx("203.0.113.10/32"), Gateway: ip("192.168.51.1"), Iface: "en0"}
 	if k.windows() {
-		replacement.Metric = windowsBypassMetric // so that the flags are all that differs
+		replacement.Metric = bypassMetric // so that the flags are all that differs
 	}
 	e.host.Inject(replacement)
 

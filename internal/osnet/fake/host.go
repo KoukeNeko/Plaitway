@@ -18,6 +18,11 @@ type Host struct {
 	// kinds is what each interface connects to; an interface that is not in it
 	// is osnet.LinkOther.
 	kinds map[string]osnet.LinkKind
+	// linux is set when the route table has Linux semantics (see NewLinuxHost).
+	linux bool
+	// defaultMetrics are the metrics of the default routes of an interface in
+	// Linux mode (see SetDefaultMetric).
+	defaultMetrics map[string]uint32
 }
 
 func NewHost() *Host {
@@ -30,6 +35,30 @@ func NewWindowsHost() *Host {
 	h := NewHost()
 	h.Routes.WindowsKeying()
 	return h
+}
+
+// NewLinuxHost is a Host whose route table has Linux semantics (see
+// RouteTable.LinuxKeying). Its interfaces get indexes, and the default route of
+// a physical interface has the metric 100 unless SetDefaultMetric says
+// otherwise: the kernel does not take two default routes with one metric.
+func NewLinuxHost() *Host {
+	h := NewHost()
+	h.Routes.LinuxKeying()
+	h.linux = true
+	h.defaultMetrics = make(map[string]uint32)
+	return h
+}
+
+// defaultMetricDHCP is the metric DHCP clients and NetworkManager give the
+// default route of a wired interface.
+const defaultMetricDHCP = 100
+
+// SetDefaultMetric sets the metric of the default routes that AddPhysical and
+// MoveNetwork give the interface name, in Linux mode. Call it before the
+// interface gets its default route; two physical interfaces need different
+// metrics.
+func (h *Host) SetDefaultMetric(name string, metric uint32) {
+	h.defaultMetrics[name] = metric
 }
 
 var (
@@ -79,9 +108,13 @@ func (h *Host) DestroyInterface(name string) {
 // setDefault replaces the system default route of an interface. The route table
 // refuses a gateway that is not on the interface's subnet, like the kernel.
 func (h *Host) setDefault(name string, gateway netip.Addr) {
-	for _, dst := range []netip.Prefix{defaultV4, defaultV6} {
-		if r, ok := h.Routes.Get(dst); ok && r.Iface == name {
-			h.Routes.Remove(dst)
+	if h.linux {
+		h.Routes.removeDefaultsVia(name)
+	} else {
+		for _, dst := range []netip.Prefix{defaultV4, defaultV6} {
+			if r, ok := h.Routes.Get(dst); ok && r.Iface == name {
+				h.Routes.Remove(dst)
+			}
 		}
 	}
 	if !gateway.IsValid() {
@@ -91,7 +124,14 @@ func (h *Host) setDefault(name string, gateway netip.Addr) {
 	if gateway.Is6() {
 		dst = defaultV6
 	}
-	if err := h.Routes.Add(osnet.Route{Dst: dst, Gateway: gateway, Iface: name, Static: true}); err != nil {
+	rt := osnet.Route{Dst: dst, Gateway: gateway, Iface: name, Static: true}
+	if h.linux {
+		rt.Metric = defaultMetricDHCP
+		if metric, ok := h.defaultMetrics[name]; ok {
+			rt.Metric = metric
+		}
+	}
+	if err := h.Routes.Add(rt); err != nil {
 		panic("fake host: system default route: " + err.Error())
 	}
 }

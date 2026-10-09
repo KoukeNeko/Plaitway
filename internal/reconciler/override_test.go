@@ -24,8 +24,8 @@ const (
 	foreignRouteMetric   = 1
 	// ourTunnelMetric is what a Plaitway tunnel route adds up to: the metric of
 	// its route and of its adapter.
-	ourTunnelMetric = windowsTunnelMetric + tunnelAdapterMetric
-	ourBypassMetric = windowsBypassMetric + physicalInterfaceMetric
+	ourTunnelMetric = tunnelMetric + tunnelAdapterMetric
+	ourBypassMetric = bypassMetric + physicalInterfaceMetric
 )
 
 // addForeignVPN connects the other program's adapter, with the metric it has.
@@ -127,7 +127,7 @@ func TestForeignDefaultRoutesWinByMetric(t *testing.T) {
 		"8000::/1 dev utun10",
 	)
 	if ours, _ := e.host.Routes.Dump(); !slices.ContainsFunc(ours, func(rt osnet.Route) bool {
-		return rt.Dst == pfx("0.0.0.0/1") && rt.Iface == "utun10" && rt.Metric == windowsTunnelMetric
+		return rt.Dst == pfx("0.0.0.0/1") && rt.Iface == "utun10" && rt.Metric == tunnelMetric
 	}) {
 		t.Errorf("our metric was changed: %+v", ours)
 	}
@@ -350,7 +350,7 @@ func TestVerdictSaysWhenAnInterfaceMetricIsUnknown(t *testing.T) {
 
 		e.announce(wgIntent())
 
-		want := e.overriddenBy("0.0.0.0/1", "10.9.0.1", foreignRouteMetric+foreignAdapterMetric, windowsTunnelMetric) + "; interface metric unknown"
+		want := e.overriddenBy("0.0.0.0/1", "10.9.0.1", foreignRouteMetric+foreignAdapterMetric, tunnelMetric) + "; interface metric unknown"
 		e.expectOverridden("0.0.0.0/1", "wg", want)
 	})
 }

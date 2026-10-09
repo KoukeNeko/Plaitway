@@ -126,6 +126,8 @@ type Intent struct {
 	// macOS utun). A tunnel that names one family's next hop and not the other's
 	// is an adapter of the first kind, and carries nothing of the other family
 	// except the halves of a default route, which then lead nowhere on purpose.
+	// macOS and Linux ignore both: a tunnel device there is point-to-point, and
+	// every route of a tunnel is bound to its interface.
 	Gateway, GatewayV6 netip.Addr
 	DNS                []DNSIntent
 }

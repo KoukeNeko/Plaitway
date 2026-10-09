@@ -48,11 +48,17 @@ type keyingCase struct {
 	keying RouteKeying
 }
 
-func (k keyingCase) windows() bool { return k.keying.byInterface() }
+func (k keyingCase) windows() bool { return k.keying == KeyByPrefixInterfaceNextHop }
+
+func (k keyingCase) linux() bool { return k.keying == KeyLinux }
 
 var (
 	macosCase   = keyingCase{"macos", KeyByPrefix}
 	windowsCase = keyingCase{"windows", KeyByPrefixInterfaceNextHop}
+	// linuxCase is not in keyingCases: the scenarios that branch on windows() were
+	// written for the other two, and the ones that matter on Linux are run with it
+	// by linux_test.go.
+	linuxCase = keyingCase{"linux", KeyLinux}
 
 	keyingCases = []keyingCase{macosCase, windowsCase}
 )
@@ -72,12 +78,16 @@ func eachKeying(t *testing.T, scenario func(*testing.T, keyingCase)) {
 type testHost struct {
 	*fake.Host
 	windows   bool
+	linux     bool
 	lastIndex int
 }
 
 func newTestHost(k keyingCase) *testHost {
-	if k.windows() {
+	switch {
+	case k.windows():
 		return &testHost{Host: fake.NewWindowsHost(), windows: true}
+	case k.linux():
+		return &testHost{Host: fake.NewLinuxHost(), linux: true}
 	}
 	return &testHost{Host: fake.NewHost()}
 }
@@ -98,7 +108,7 @@ func (h *testHost) interfaceMetric(metric uint32) uint32 {
 }
 
 // nextIndex gives a new interface its index; an interface that is created again
-// gets another one, as on Windows.
+// gets another one, as on Windows. A Linux table does that itself.
 func (h *testHost) nextIndex() int {
 	if !h.windows {
 		return 0
@@ -151,7 +161,7 @@ func (h *testHost) AddInterface(ifc osnet.Interface) {
 // index returns rt with the index of its interface, the way the system reports
 // the routes that other programs add.
 func (h *testHost) index(rt osnet.Route) osnet.Route {
-	if !h.windows || rt.IfIndex != 0 {
+	if !(h.windows || h.linux) || rt.IfIndex != 0 {
 		return rt
 	}
 	for _, ifc := range h.Routes.Interfaces() {

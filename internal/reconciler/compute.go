@@ -45,6 +45,9 @@ type RoutePlan struct {
 // DNSPlan is the fate of one DNSIntent.
 type DNSPlan struct {
 	Owner tunnel.OwnerID
+	// Iface is the interface of the owner's tunnel, which the servers are reached
+	// through.
+	Iface string
 	// Servers are the reachable ones when the plan is installed, all of them
 	// otherwise.
 	Servers []netip.Addr
@@ -624,6 +627,7 @@ func dnsPlans(live []tunnel.Intent, holder tunnel.OwnerID, routes []RoutePlan, n
 func dnsPlan(in tunnel.Intent, d tunnel.DNSIntent, holder tunnel.OwnerID, lookup func(netip.Addr) (string, bool), claimed map[string]tunnel.OwnerID) DNSPlan {
 	plan := DNSPlan{
 		Owner:        in.Owner,
+		Iface:        in.Iface,
 		Servers:      slices.Clone(d.Servers),
 		MatchDomains: normalizeDomains(d.MatchDomains),
 		Order:        in.Priority,

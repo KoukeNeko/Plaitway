@@ -7,7 +7,7 @@
 // routes through a gateway, resolver entries) is written to a journal before it
 // is applied, so that a crash leaves a record for the next run to clean up.
 //
-// # Routing tables on macOS and Windows
+// # Routing tables on macOS, Windows and Linux
 //
 // What the routing table calls "the same route" differs, and Config.Keying says
 // which table the Reconciler is talking to (RouteKeying). The zero value is the
@@ -18,64 +18,102 @@
 //     and any other route to the prefix is a conflict ("held by another
 //     program"). Windows: destination, interface index and next hop; several
 //     routes can share a prefix, so a route through another interface or router
-//     is a neighbour, not a conflict, and Plaitway adds its own beside it. The
-//     owned routes, the table read back and the planned routes are all keyed
-//     this way (routeKey), and a route is deleted by its whole key.
+//     is a neighbour, not a conflict, and Plaitway adds its own beside it.
+//     Linux: destination and metric. The kernel refuses a second route with both
+//     whatever interface and next hop it has, so a foreign route with the metric
+//     of ours is a conflict, and one with another metric is a neighbour. The
+//     interface and next hop are attributes there, compared like the gateway on
+//     macOS. The owned routes, the table read back and the planned routes are
+//     all keyed this way (routeKey), and a route is deleted by its whole key.
 //   - What a route carries. macOS: destination, gateway or interface name.
-//     Windows: also the interface index, which Compute resolves from the
-//     NetState it is given (tunnel.Intent names only the interface), and a
-//     metric: windowsTunnelMetric for tunnel routes and windowsBypassMetric,
-//     lower, for the host routes that keep endpoints reachable through the
-//     physical interface and router of the current default route. The split
-//     halves of a default route beat the system's default by their prefix length,
-//     so the metric only decides between routes of one prefix. A route whose
-//     interface is not in the NetState (just removed, not seen yet) waits as
-//     pending and is not retried on a timer: the interface appearing is a change
-//     of the network.
-//   - The next hop of a tunnel route. macOS: none, the route is bound to the
-//     interface. Windows: the tunnel's own gateway (tunnel.Intent.Gateway) when it
-//     has one of the route's family, otherwise none. A point-to-point adapter
-//     (Wintun) takes on-link routes; an Ethernet-like one (tap-windows6, OpenVPN)
-//     answers only for its gateway's address, so a route without it would
-//     blackhole while the tunnel is up. The gateway is part of the key, the
-//     journal record and the fingerprint like any next hop, and a tunnel that
-//     announces another gateway has its routes replaced: the new ones are added
-//     before the old ones are deleted, so that a full tunnel never lets traffic
-//     out in between.
-//   - Neighbours that win. On Windows a route of another program to the same
-//     prefix, which is not a conflict, can be the one in use: the lowest
-//     effective metric (route metric plus interface metric) decides, and a
-//     default route's halves are also lost to foreign routes that are more
-//     specific and cover the whole internet. Such a route of ours stays in the
-//     table, is reported RouteFailed with the winner in Detail (markOverridden),
-//     and is looked at again on every network event, route events included: the
-//     other program may disconnect or connect at any time. Plaitway never lowers
-//     its metric to win and never deletes a foreign route.
+//     Windows and Linux: also the interface index, which Compute resolves from
+//     the NetState it is given (tunnel.Intent names only the interface), and a
+//     metric: tunnelMetric for tunnel routes and bypassMetric, lower, for the
+//     host routes that keep endpoints reachable through the physical interface
+//     and router of the current default route. The split halves of a default
+//     route beat the system's default by their prefix length, so the metric only
+//     decides between routes of one prefix. A route whose interface is not in
+//     the NetState (just removed, not seen yet) waits as pending. On Windows it
+//     is not retried on a timer: the interface appearing is a change of the
+//     network. On Linux it is, since the monitor reports no event for the
+//     devices of tunnels (see retriesUnplaced).
+//   - The next hop of a tunnel route. macOS and Linux: none, the route is bound
+//     to the interface; a tunnel device there is point-to-point and takes
+//     on-link routes in both address families, whatever gateways the tunnel
+//     announced. Windows: the tunnel's own gateway (tunnel.Intent.Gateway) when
+//     it has one of the route's family, otherwise none. A point-to-point adapter
+//     (Wintun) takes on-link routes; an Ethernet-like one (tap-windows6,
+//     OpenVPN) answers only for its gateway's address, so a route without it
+//     would blackhole while the tunnel is up. The gateway is part of the key,
+//     the journal record and the fingerprint like any next hop, and a tunnel
+//     that announces another gateway has its routes replaced: the new ones are
+//     added before the old ones are deleted, so that a full tunnel never lets
+//     traffic out in between.
+//   - Neighbours that win. On Windows and Linux a route of another program to
+//     the same prefix, which is not a conflict, can be the one in use: the
+//     lowest effective metric decides (route metric plus, on Windows, interface
+//     metric), unless it leads where ours does (the kernel's own on-link route of
+//     a tunnel's subnet), and a default route's halves are also lost to foreign
+//     routes that are more specific and cover the whole internet. Such a route
+//     of ours stays in the table, is reported RouteFailed with Overridden set and
+//     the winner in Detail (markOverridden), and is looked at again on every
+//     network event, route events included: the other program may disconnect or
+//     connect at any time. Plaitway never lowers its metric to win and never
+//     deletes a foreign route.
 //   - Journal. A route is journaled (pending, then applied) before and after it
 //     is added. macOS journals only routes through a gateway, since the others go
-//     with their interface; Windows journals every route, because a tunnel
-//     adapter that survives a crash keeps its routes. A Windows record has the
-//     interface index in addition to destination and gateway, which is its
-//     identity in the journal and in the fingerprint (gateway, index, metric,
-//     flags). macOS records and fingerprints are as they always were. A Windows
-//     start that finds a record without an index (written by the macOS version)
-//     does not know which route it meant and removes nothing for it.
-//   - Stale routes. Besides the checks of macOS, a Windows endpoint route that
-//     leaves through another interface than the default route is stale, since
-//     the route is bound to the interface it names. A stale route is named by
-//     its destination on macOS and by destination, index and next hop on Windows
-//     (tunnel.StaleRoute.Key).
-//   - Interface names. At most 15 characters on macOS (IFNAMSIZ), 256 on Windows.
+//     with their interface; Windows and Linux journal every route, because a
+//     tunnel adapter or device that survives a crash keeps its routes. A record
+//     has the interface index in addition to destination and gateway, and on
+//     Linux the metric, which is its identity in the journal and, with the
+//     fingerprint (gateway, index, metric, flags), what a restart compares before
+//     it deletes anything. On Linux the interface name is compared as well, since
+//     the kernel can give the index of a removed interface to another one. macOS
+//     records and fingerprints are as they always were. A start that finds a
+//     record written for another table (no index, on Linux no metric) does not
+//     know which route it meant and removes nothing for it.
+//   - Stale routes. Besides the checks of macOS, a Windows or Linux endpoint
+//     route that leaves through another interface than the default route is
+//     stale, since the route is bound to the interface it names. A stale route is
+//     named by its destination on macOS, by destination, index and next hop on
+//     Windows, and by those and the metric on Linux (tunnel.StaleRoute.Key).
+//   - Resolver entries. Where the system keeps resolver settings per interface
+//     (Linux, systemd-resolved) an entry names the interface of the tunnel it
+//     belongs to (osnet.DNSEntry.Iface), and a tunnel that moves to another
+//     interface has its entry written again. macOS and Windows entries name none.
+//   - Interface names. At most 15 characters on macOS (IFNAMSIZ) and Linux, 256
+//     on Windows.
 //
-// What a vanished interface does to its routes is the same on both: they go with
+// What a vanished interface does to its routes is the same on all: they go with
 // it, the Reconciler finds them gone and says nothing about another program.
 //
 // Not yet per platform, and written for macOS: the lookup that decides whether a
 // nameserver is reached through the tunnel breaks a tie between prefixes of equal
-// length by the order the kernel acquired them in (Windows uses the metric, which
-// the lookup does not read); and a tunnel route that names the same prefix as an
-// endpoint is shadowed by that endpoint's bypass route, although a Windows table
-// could hold both.
+// length by the order the kernel acquired them in (Windows and Linux use the
+// metric, which the lookup does not read); and a tunnel route that names the same
+// prefix as an endpoint is shadowed by that endpoint's bypass route, although a
+// Windows or Linux table could hold both. Neither reads policy routing (ip rule)
+// either: a program that sends traffic around the main table cannot be seen.
+//
+// # Policy routing on Linux
+//
+// A VPN that routes by rules instead of routes in the main table (wg-quick with
+// a Table, Cloudflare WARP: a rule that sends all traffic without its mark to a
+// table of its own, and one that suppresses the default route of the main table)
+// is invisible to the network state and to the verdict on overridden routes. The
+// kernel tests (rootintegration_linux_test.go) show what that means:
+//   - The interface of such a VPN is a tunnel and the default route of the main
+//     table stays the physical one.
+//   - Routes of ours in the main table, which have a prefix length above zero,
+//     are not suppressed and win against its catch-all, the halves of a default
+//     route included. So does a more specific route of the main table that
+//     another program added for a network of its own.
+//   - A tunnel's endpoint that one of our routes captures has a host route
+//     through the physical router, and the tunnel's own traffic keeps out of both
+//     VPNs. An endpoint that none of our routes captures has none, and the
+//     traffic to it follows the catch-all of the other VPN: for the Reconciler
+//     there is nothing to protect it from.
+//   - The Reconciler neither reads nor changes its rules and its table.
 package reconciler
 
 import (
@@ -112,7 +150,8 @@ type Config struct {
 	JournalPath string
 	Log         *slog.Logger
 	// Keying is how the routing table identifies a route. The zero value is the
-	// macOS table; a Windows daemon sets KeyByPrefixInterfaceNextHop.
+	// macOS table; a Windows daemon sets KeyByPrefixInterfaceNextHop and a Linux
+	// one KeyLinux.
 	Keying RouteKeying
 
 	// Now stamps journal records; time.Now when nil.
@@ -160,11 +199,11 @@ type Reconciler struct {
 	lastChange osnet.Change
 
 	// What this process has installed. owned holds the routes it will delete;
-	// a route in the table that is not in owned is somebody else's. A nil entry
-	// in dnsApplied is an owner whose last write failed: it may have left
-	// entries behind, so they are removed when the owner has none to want.
+	// a route in the table that is not in owned is somebody else's. An empty
+	// appliedDNS in dnsApplied is an owner whose last write failed: it may have
+	// left entries behind, so they are removed when the owner has none to want.
 	owned      map[routeKey]ownedRoute
-	dnsApplied map[tunnel.OwnerID][]osnet.DNSEntry
+	dnsApplied map[tunnel.OwnerID]appliedDNS
 	// overridden says, by destination, why a route we installed is not the one in
 	// use (markOverridden), so that a change is logged once.
 	overridden map[netip.Prefix]string
@@ -219,7 +258,7 @@ func New(cfg Config) (*Reconciler, error) {
 		recheck:    make(chan struct{}, 1),
 		intents:    make(map[tunnel.OwnerID]tunnel.Intent),
 		owned:      make(map[routeKey]ownedRoute),
-		dnsApplied: make(map[tunnel.OwnerID][]osnet.DNSEntry),
+		dnsApplied: make(map[tunnel.OwnerID]appliedDNS),
 	}
 	if r.log == nil {
 		r.log = slog.New(slog.DiscardHandler)
@@ -241,6 +280,7 @@ func New(cfg Config) (*Reconciler, error) {
 	if r.journal, err = openJournal(cfg.JournalPath, r.now, r.log); err != nil {
 		return nil, err
 	}
+	r.journal.pendingOnly = r.keying.syncsPendingOnly()
 	if err := r.recover(); err != nil {
 		r.journal.close()
 		return nil, err
@@ -397,9 +437,10 @@ func (r *Reconciler) handleChange(c osnet.Change, external bool) (rebind func())
 	underlay := underlayChanged(r.netState, ns)
 	// Route events that changed nothing we look at are skipped; anything else,
 	// the periodic heartbeat included, is a full pass that also catches drift. On
-	// Windows what another program does to the table decides whether our routes
-	// are in use (markOverridden), and the NetState does not show it, so every
-	// route event is looked at. A pass on an unchanged table writes nothing.
+	// Windows and Linux what another program does to the table decides whether
+	// our routes are in use (markOverridden), and the NetState does not show it,
+	// so every route event is looked at. A pass on an unchanged table writes
+	// nothing.
 	full := netChanged(r.netState, ns) || c.Reason != osnet.ChangeRoute || r.dirty || r.keying.byInterface()
 	r.netState = ns
 	if c.Reason == osnet.ChangeWake {
