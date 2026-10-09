@@ -156,6 +156,30 @@ func TestRenderSourceOffer(t *testing.T) {
 	}
 }
 
+// The Linux package bundles no program and has no Swift code: its notices say
+// that OpenVPN comes from the distribution, and carry no source offer.
+func TestRenderWithoutBundledPrograms(t *testing.T) {
+	mit := "Permission is hereby granted, free of charge, to any person"
+	mod := component{name: "alpha", version: "1", license: "MIT", source: "src", docs: []document{{"MIT", mit}}}
+	out := render(nil, []component{mod}, nil, "")
+	for _, want := range []string{"OpenVPN is not part of this package", "## Go modules compiled into plaitwayd and plaitway", "| alpha |", "## Trademarks", "Applies to: alpha"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the notices lack %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"## Source offer", "## Bundled programs", "## Swift packages"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("the notices have %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+func TestGenerateRefusesAnUnknownPlatform(t *testing.T) {
+	if _, err := generate(t.TempDir(), "", "", "", "windows"); err == nil {
+		t.Fatal("generate() accepted the platform windows")
+	}
+}
+
 func TestRenderTrademarks(t *testing.T) {
 	out := render(offerComponents(), nil, nil, "https://example.org/plaitway")
 	trademarks := section(t, out, "## Trademarks")
