@@ -139,6 +139,10 @@ func startLoopbackServer(t *testing.T, bin string, p *pki, o serverOpts) *loopba
 		}
 	})
 	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(srv.readLog(), "Listening for incoming TCP connection"); time.Sleep(20 * time.Millisecond) {
+		// openvpn 2.6 takes --server only with a tun or tap device, and 2.7 takes it with null.
+		if strings.Contains(srv.readLog(), "--server directive only makes sense with --dev tun or --dev tap") {
+			t.Skip("this openvpn cannot run the loopback server on --dev null; openvpn 2.7 can")
+		}
 		if time.Now().After(deadline) {
 			t.Fatalf("the loopback server did not start:\n%s", srv.readLog())
 		}
