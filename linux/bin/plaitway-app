@@ -1,0 +1,14 @@
+#!/usr/bin/python3
+"""Starts Plaitway. Installed as /usr/bin/plaitway-app; from a checkout it finds its package in src/."""
+
+import os
+import sys
+
+# From a checkout the package is in ../src; installed, it is in the system's site-packages.
+SOURCE = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "src")
+if os.path.isdir(os.path.join(SOURCE, "plaitway")):
+    sys.path.insert(0, SOURCE)
+
+from plaitway.app.main import main  # noqa: E402
+
+sys.exit(main())

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OpenVPN profiles (*.ovpn) are known to shared-mime-info as application/x-openvpn-profile.
+     A wg-quick profile is a *.conf like any other, so it is told by its content and has no glob:
+     a name that ends in .conf would make every configuration file a WireGuard profile. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-wireguard-profile">
+    <comment>WireGuard profile</comment>
+    <comment xml:lang="zh_TW">WireGuard 設定檔</comment>
+    <sub-class-of type="text/plain"/>
+    <generic-icon name="text-x-generic"/>
+    <magic priority="60">
+      <match type="string" value="[Interface]" offset="0:1024"/>
+    </magic>
+  </mime-type>
+</mime-info>

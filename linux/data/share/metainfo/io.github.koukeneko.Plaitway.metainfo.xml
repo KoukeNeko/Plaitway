@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.koukeneko.Plaitway</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Plaitway</name>
+  <summary>Several OpenVPN and WireGuard profiles at once</summary>
+  <summary xml:lang="zh_TW">同時使用多個 OpenVPN 與 WireGuard 設定檔</summary>
+  <developer id="io.github.koukeneko">
+    <name>KoukeNeko</name>
+  </developer>
+  <description>
+    <p>
+      Plaitway runs OpenVPN and WireGuard profiles side by side. One helper owns the routes and
+      DNS, so profiles do not fight over them, and a network change leaves nothing stale behind.
+    </p>
+    <p xml:lang="zh_TW">
+      Plaitway 讓 OpenVPN 與 WireGuard 設定檔同時運作。由一個輔助程式管理路由與 DNS，設定檔不會互相爭奪，網路變更後也不會留下過時的項目。
+    </p>
+    <p>The app is the window and the tray item of that helper:</p>
+    <p xml:lang="zh_TW">這個應用程式是該輔助程式的視窗與系統匣圖示：</p>
+    <ul>
+      <li>Connect and disconnect each profile, and see which one holds the internet and which one holds a subnet.</li>
+      <li xml:lang="zh_TW">個別連線或中斷每個設定檔，並看出哪一個接管網際網路、哪一個接管子網路。</li>
+      <li>Edit a profile without showing its keys; secrets appear as placeholders until you ask to see them.</li>
+      <li xml:lang="zh_TW">編輯設定檔而不顯示金鑰；機密在你要求顯示之前以預留位置呈現。</li>
+      <li>Connect on demand while the primary network is Ethernet or Wi-Fi.</li>
+      <li xml:lang="zh_TW">主要網路為乙太網路或 Wi-Fi 時自動連線。</li>
+      <li>Find and remove stale routes, and copy a report for a bug report.</li>
+      <li xml:lang="zh_TW">找出並移除過時路由，並拷貝報告以便回報問題。</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.koukeneko.Plaitway.desktop</launchable>
+  <provides>
+    <binary>plaitway-app</binary>
+  </provides>
+  <url type="homepage">https://github.com/KoukeNeko/Plaitway</url>
+  <url type="bugtracker">https://github.com/KoukeNeko/Plaitway/issues</url>
+  <categories>
+    <category>Network</category>
+  </categories>
+  <keywords>
+    <keyword>VPN</keyword>
+    <keyword>OpenVPN</keyword>
+    <keyword>WireGuard</keyword>
+  </keywords>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.3.4" date="2026-10-09"/>
+  </releases>
+</component>

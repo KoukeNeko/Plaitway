@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Plaitway
+Name[zh_TW]=Plaitway
+GenericName=VPN Manager
+GenericName[zh_TW]=VPN 管理員
+Comment=Several OpenVPN and WireGuard profiles at once
+Comment[zh_TW]=同時使用多個 OpenVPN 與 WireGuard 設定檔
+Exec=plaitway-app %F
+Icon=io.github.koukeneko.Plaitway
+Terminal=false
+StartupNotify=true
+StartupWMClass=io.github.koukeneko.Plaitway
+Categories=Network;GTK;
+MimeType=application/x-openvpn-profile;application/x-wireguard-profile;
+Keywords=VPN;OpenVPN;WireGuard;Network;Tunnel;

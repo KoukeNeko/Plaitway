@@ -1,0 +1,201 @@
+{
+  "macosOnly": [
+    "Allow Plaitway in Login Items.",
+    "Approval required",
+    "Clear",
+    "Cut",
+    "Development build",
+    "Edit",
+    "Fallback: sudo scripts/dev-install-daemon.sh",
+    "File",
+    "Find…",
+    "Helper not found",
+    "Hide Others",
+    "Hide Plaitway",
+    "Install Helper",
+    "Installed externally",
+    "Minimize",
+    "Move Plaitway to the Applications folder and open it again.",
+    "Not found",
+    "Not in Applications",
+    "Open System Settings",
+    "Paste",
+    "Prefix",
+    "Profile",
+    "Profiles stay in %@, the log in %@.",
+    "Reason",
+    "Redo",
+    "Registered, not answering.",
+    "Reinstall",
+    "Reinstall Helper",
+    "Reinstall helper?",
+    "Run sudo scripts/dev-install-daemon.sh again.",
+    "Select All",
+    "Show All",
+    "Show in Menu Bar",
+    "Start plaitwayd and set PLAITWAY_SOCKET.",
+    "State",
+    "The helper is missing from this copy of Plaitway. Copy the app to Applications again.",
+    "The helper manages routes and DNS with administrator rights. macOS asks for approval once.",
+    "Toggle Sidebar",
+    "Undo",
+    "Uninstall",
+    "Uninstall Helper…",
+    "Uninstall helper?",
+    "View",
+    "Window",
+    "Zoom"
+  ],
+  "accessors": {
+    "%@/s": {
+      "name": "rate_per_second",
+      "params": [
+        "amount"
+      ]
+    },
+    "A higher priority wins overlapping routes and DNS domains.": {
+      "name": "priority_hint",
+      "params": []
+    },
+    "Cannot read %@: %@": {
+      "name": "cannot_read",
+      "params": [
+        "path",
+        "reason"
+      ]
+    },
+    "Changes to a profile's text are not saved.": {
+      "name": "unsaved_changes_message",
+      "params": []
+    },
+    "Connected profiles stay connected.": {
+      "name": "connected_profiles_stay_connected",
+      "params": []
+    },
+    "Connected: %lld": {
+      "name": "connected_count",
+      "params": [
+        "count"
+      ]
+    },
+    "Connects on the checked networks and disconnects on any other.": {
+      "name": "on_demand_footer",
+      "params": []
+    },
+    "Delete “%@”?": {
+      "name": "delete_profile_title",
+      "params": [
+        "name"
+      ]
+    },
+    "File for %@ holds no certificate or key: %@": {
+      "name": "file_holds_no_key",
+      "params": [
+        "directive",
+        "path"
+      ]
+    },
+    "File for %@ is outside the profile's folder: %@": {
+      "name": "file_outside_folder",
+      "params": [
+        "directive",
+        "path"
+      ]
+    },
+    "File for %@ not found: %@": {
+      "name": "file_not_found",
+      "params": [
+        "directive",
+        "path"
+      ]
+    },
+    "File for auth-user-pass holds no user name and password: %@": {
+      "name": "credentials_file_invalid",
+      "params": [
+        "path"
+      ]
+    },
+    "File too large: %@": {
+      "name": "file_too_large",
+      "params": [
+        "path"
+      ]
+    },
+    "Helper log: %@": {
+      "name": "helper_log_location",
+      "params": [
+        "location"
+      ]
+    },
+    "Import": {
+      "name": "import_label",
+      "params": []
+    },
+    "Install the plaitway package.": {
+      "name": "install_the_package",
+      "params": []
+    },
+    "Line %lld": {
+      "name": "line_number",
+      "params": [
+        "line"
+      ]
+    },
+    "Not a text file: %@": {
+      "name": "not_a_text_file",
+      "params": [
+        "path"
+      ]
+    },
+    "Only the console user and administrators can use the helper.": {
+      "name": "console_user_only",
+      "params": []
+    },
+    "Private address ranges stay outside the tunnel.": {
+      "name": "private_ranges_hint",
+      "params": []
+    },
+    "Quit Plaitway": {
+      "name": "quit_plaitway",
+      "params": []
+    },
+    "Quit Plaitway?": {
+      "name": "quit_plaitway_title",
+      "params": []
+    },
+    "Remove route %@?": {
+      "name": "remove_route_title",
+      "params": [
+        "prefix"
+      ]
+    },
+    "Restart helper?": {
+      "name": "restart_helper_title",
+      "params": []
+    },
+    "Secret %lld appears more than once": {
+      "name": "secret_appears_more_than_once",
+      "params": [
+        "number"
+      ]
+    },
+    "Settings…": {
+      "name": "open_settings",
+      "params": []
+    },
+    "Shadowed by %@": {
+      "name": "shadowed_by",
+      "params": [
+        "profile"
+      ]
+    },
+    "Start plaitwayd, then set PLAITWAY_DEV=1 and PLAITWAY_SOCKET.": {
+      "name": "start_development_daemon",
+      "params": []
+    },
+    "The profile and its saved credentials are removed.": {
+      "name": "delete_profile_message",
+      "params": []
+    }
+  }
+}
