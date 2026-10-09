@@ -231,8 +231,12 @@ Set it up once:
 
 ```sh
 gpg --quick-generate-key "Plaitway apt repository <you@example.org>" rsa4096 sign never
-gpg --armor --export-secret-keys FINGERPRINT | gh secret set APT_GPG_PRIVATE_KEY
+gpg --armor --export-secret-keys "Plaitway apt repository" | gh secret set APT_GPG_PRIVATE_KEY --repo KoukeNeko/Plaitway
+gh secret set APT_GPG_PASSPHRASE --repo KoukeNeko/Plaitway    # only if the key has a passphrase
 ```
+
+The name must match one key only: every key it matches is exported, and the workflow signs with the first. `--repo` is
+what lets `gh` work outside a checkout.
 
 3. Run Actions › Publish apt repository once, on the default branch, so that the releases that exist are published;
    the commands in the root README fail until it has run, and after it every release does it
