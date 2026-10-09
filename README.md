@@ -230,10 +230,10 @@ If SMAppService does not accept the helper, `sudo scripts/dev-install-daemon.sh`
 installs it as a plain LaunchDaemon and `sudo scripts/dev-uninstall-daemon.sh`
 removes it.
 
-**On Linux** (Ubuntu 26.04 or Debian 13, with systemd):
+**On Linux** (Ubuntu 24.04 or 26.04, Debian 13, with systemd):
 
 1. Build the package, `make deb`, or take the artifact of the Linux package job
-   of the CI. A release does not publish it yet
+   of the CI. A tagged release attaches it to the release page after the macOS files (the `publish-linux` job, not run yet)
 2. `sudo apt install ./build/linux/plaitway_*.deb`. This installs OpenVPN and
    the GTK libraries, and enables and starts the helper, `plaitwayd.service`
 3. Open **Plaitway** from the application menu, or run `plaitway-app`. Import a
@@ -257,12 +257,12 @@ removes it.
   as far as WireGuard is concerned, and the import says so
 - Profiles that use `pkcs12` or `secret` are refused, and so are directives
   that run programs or read files outside the profile
-- Linux with systemd, Ubuntu 26.04 and Debian 13: a kernel with `/dev/net/tun`,
+- Linux with systemd, Ubuntu 24.04 and 26.04 and Debian 13: a kernel with `/dev/net/tun`,
   `systemd-resolved` for DNS settings, and the distribution's `openvpn` (2.6 or
   later) for OpenVPN profiles; WireGuard profiles run on the embedded
   wireguard-go and need no kernel module. OpenVPN profiles with `dev tap` are
-  refused. The app needs GTK 4.14 and libadwaita 1.7, which Ubuntu 24.04 lacks
-  (it has 1.5); [Linux](#linux) says what was run where
+  refused. The app needs GTK 4.14 and libadwaita 1.5, the versions of Ubuntu
+  24.04; [Linux](#linux) says what was run where
 
 Of Windows only the helper and the command line client exist, see
 [Windows](#windows).
@@ -708,7 +708,6 @@ in the initial namespaces:
   extension provides one: Ubuntu's session ships it, on Debian it is
   `gnome-shell-extension-appindicator`). Without it closing the window quits the app,
   and the tunnels stay up
-- The package needs libadwaita 1.7, so Ubuntu 24.04 cannot install it
 
 ### Development on Linux
 

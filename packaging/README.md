@@ -252,12 +252,13 @@ architecture of the machine; the CI builds amd64 on `ubuntu-latest` and arm64 on
 26.04 container.
 
 **Dependencies** are `openvpn (>= 2.6)`, `systemd`, `python3`, `python3-gi`, `gir1.2-gtk-4.0 (>= 4.14)`,
-`gir1.2-adw-1 (>= 1.7)`, `gir1.2-secret-1`, `python3-grpcio` and `python3-protobuf`; it recommends `systemd-resolved`
+`gir1.2-adw-1 (>= 1.5)`, `gir1.2-secret-1`, `python3-grpcio` and `python3-protobuf`; it recommends `systemd-resolved`
 (DNS settings go through `resolvectl`), `polkitd` (the app's Start Helper) and `gnome-keyring | kwallet6`, and suggests
 `gnome-shell-extension-appindicator | gnome-shell-ubuntu-extensions`, the AppIndicator extension that the tray item needs
-(Debian's is the first, the session of Ubuntu ships its own in the second). libadwaita 1.7 is the oldest with the toggle
-group the app uses, so Ubuntu 24.04 (1.5) cannot install the package. `apt-get --simulate install` of the package
-resolved on Ubuntu 26.04; nothing was resolved against the package lists of Debian 13 or Ubuntu 24.04.
+(Debian's is the first, the session of Ubuntu ships its own in the second). libadwaita 1.5 is the one of Ubuntu 24.04, the
+oldest the app runs on; the page switcher and the spinner use libadwaita's own where it has them (1.7 and 1.6) and GTK's
+before. The package installed with `apt` on Debian 13 and on Ubuntu 26.04, and the app's tests passed on Debian 13 (Python
+3.13, libadwaita 1.7), Ubuntu 24.04 (Python 3.12, libadwaita 1.5) and Ubuntu 26.04 (Python 3.14, libadwaita 1.9).
 
 **Maintainer scripts.** `postinst` enables and starts `plaitwayd.service` (restarts it on an upgrade), `prerm` stops it
 on removal, `postrm` masks it on removal and, on purge only, deletes `/var/lib/plaitway` and `/run/plaitway`. They call

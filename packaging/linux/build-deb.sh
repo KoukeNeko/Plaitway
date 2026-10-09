@@ -57,8 +57,9 @@ shlibs="$(cd "$WORK" && dpkg-shlibdeps -O -edebian/plaitway/usr/libexec/plaitway
     sed -n 's/^shlibs:Depends=//p')"
 [ -n "$shlibs" ] || die "dpkg-shlibdeps found no dependency; the programs should link libc6"
 
-# gir1.2-adw-1 1.7 is the oldest libadwaita with Adw.ToggleGroup (the app's page
-# switchers); Ubuntu 24.04 has 1.5, so the app needs 25.04 or later or Debian 13.
+# gir1.2-adw-1 1.5 is the libadwaita of Ubuntu 24.04, the oldest the app runs on:
+# it has the dialogs and split views the app uses, and the app does without what
+# came later (the toggle group of 1.7, the spinner of 1.6) where it is missing.
 # python3-grpcio and python3-protobuf are the distribution's: the app builds its
 # message classes at run time from a descriptor, so it is not tied to the
 # protobuf version that made a generated module (linux/README.md).
@@ -68,7 +69,7 @@ Version: $VERSION
 Architecture: $ARCH
 Maintainer: $MAINTAINER
 Installed-Size: $(du -sk "$STAGE/usr" | cut -f1)
-Depends: $shlibs, openvpn (>= 2.6), systemd, python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.14), gir1.2-adw-1 (>= 1.7), gir1.2-secret-1 (>= 0.20), python3-grpcio (>= 1.51), python3-protobuf (>= 3.21)
+Depends: $shlibs, openvpn (>= 2.6), systemd, python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.14), gir1.2-adw-1 (>= 1.5), gir1.2-secret-1 (>= 0.20), python3-grpcio (>= 1.51), python3-protobuf (>= 3.21)
 Recommends: systemd-resolved, polkitd, gnome-keyring | kwallet6
 Suggests: gnome-shell-extension-appindicator | gnome-shell-ubuntu-extensions
 Section: net
