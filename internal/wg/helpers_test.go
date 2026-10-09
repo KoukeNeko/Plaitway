@@ -126,7 +126,7 @@ type recorder struct {
 	onAnnounce func(tunnel.Intent) error
 	onWithdraw func()
 	// onConfigure runs inside Configure and decides its result, as a slow
-	// ifconfig that exec kills when ctx ends would.
+	// command that exec kills when ctx ends would.
 	onConfigure  func(ctx context.Context) error
 	configureErr error
 	tunErr       error
@@ -327,10 +327,13 @@ func (l *logSink) log(level tunnel.LogLevel, text string) {
 	l.lines = append(l.lines, fmt.Sprintf("%d %s", level, text))
 }
 
-func (l *logSink) has(substr string) bool {
+func (l *logSink) has(substr string) bool { return l.count(substr) > 0 }
+
+// count is the number of log lines that contain substr.
+func (l *logSink) count(substr string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return slices.ContainsFunc(l.lines, func(line string) bool { return strings.Contains(line, substr) })
+	return len(slices.DeleteFunc(slices.Clone(l.lines), func(line string) bool { return !strings.Contains(line, substr) }))
 }
 
 // statusLog reads an engine's status channel until it closes.

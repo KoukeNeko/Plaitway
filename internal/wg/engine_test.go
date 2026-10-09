@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/tun/tuntest"
 
@@ -443,6 +444,111 @@ func TestRebindShakesHandsWhileTheLookupHangs(t *testing.T) {
 	}
 }
 
+// flakyBind is a bind whose Open fails on demand, as the sockets of a device do
+// while their port is still held.
+type flakyBind struct {
+	conn.Bind
+	mu    sync.Mutex
+	fail  error    // what Open returns while it is set
+	opens []uint16 // the port of every Open
+}
+
+func (b *flakyBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
+	b.mu.Lock()
+	b.opens = append(b.opens, port)
+	fail := b.fail
+	b.mu.Unlock()
+	if fail != nil {
+		return nil, 0, fail
+	}
+	return b.Bind.Open(port)
+}
+
+func (b *flakyBind) setFailure(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.fail = err
+}
+
+func (b *flakyBind) openAttempts() []uint16 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Clone(b.opens)
+}
+
+// useFlakyBinds makes the engines of the test open their sockets through
+// flakyBinds, which it returns in the order the devices were made.
+func useFlakyBinds(t *testing.T) func() []*flakyBind {
+	t.Helper()
+	var mu sync.Mutex
+	var binds []*flakyBind
+	old := newBind
+	t.Cleanup(func() { newBind = old })
+	newBind = func() conn.Bind {
+		mu.Lock()
+		defer mu.Unlock()
+		binds = append(binds, &flakyBind{Bind: old()})
+		return binds[len(binds)-1]
+	}
+	return func() []*flakyBind {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(binds)
+	}
+}
+
+// Closing the sockets and opening them again can fail. The tunnel has no sockets
+// then, and has to get them back without waiting for the next change of the network.
+func TestRebindGetsTheSocketsBackWhenOpeningThemFailsAtFirst(t *testing.T) {
+	checkLeaks(t)
+	binds := useFlakyBinds(t)
+	p := newPair(t, pairOptions{})
+	p.up()
+	clientBind := binds()[1] // the server's device was made first
+	inUse := errors.New("listen udp4: bind: address already in use")
+	clientBind.setFailure(inUse)
+
+	p.client.eng.Rebind()
+	eventually(t, "the failure to be logged", func() bool { return p.client.logs.has("rebind sockets, trying again: " + inUse.Error()) })
+	eventually(t, "more attempts", func() bool { return len(clientBind.openAttempts()) >= 4 })
+	// One line for one reason, however many times it is tried.
+	if lines := p.client.logs.count("rebind sockets"); lines != 1 {
+		t.Errorf("%d log lines about the sockets, want 1", lines)
+	}
+
+	clientBind.setFailure(nil)
+	eventually(t, "the sockets to be open again", func() bool { return p.client.logs.has("UDP sockets are open again") })
+	p.client.waitState(tunnel.StateUp)
+	sendPacket(t, p.client.rec.tun, p.server.rec.tun, ping(serverTunnel, clientTunnel))
+	sendPacket(t, p.server.rec.tun, p.client.rec.tun, ping(clientTunnel, serverTunnel))
+}
+
+// A failed update leaves wireguard-go on a random port; a profile that fixes
+// the port has to get it back.
+func TestReopeningTheSocketsKeepsTheFixedListenPort(t *testing.T) {
+	checkLeaks(t)
+	binds := useFlakyBinds(t)
+	port := freeUDPPort(t)
+	p := newPair(t, pairOptions{extraInterface: fmt.Sprintf("ListenPort = %d", port)})
+	p.up()
+	clientBind := binds()[1]
+	clientBind.setFailure(errors.New("address already in use"))
+
+	p.client.eng.Rebind()
+	eventually(t, "the sockets to be gone", func() bool { return p.client.logs.has("rebind sockets") })
+	clientBind.setFailure(nil)
+	eventually(t, "the sockets to be open again", func() bool { return p.client.logs.has("UDP sockets are open again") })
+
+	attempts := clientBind.openAttempts()
+	if last := attempts[len(attempts)-1]; last != uint16(port) {
+		t.Errorf("the last Open asked for port %d, want the fixed port %d; all: %v", last, port, attempts)
+	}
+	if got := p.client.stats().listenPort; got != uint16(port) {
+		t.Errorf("the device listens on port %d, want %d", got, port)
+	}
+	p.client.waitState(tunnel.StateUp)
+}
+
 func TestRebindBeforeStartIsForgotten(t *testing.T) {
 	checkLeaks(t)
 	resolver := loopbackResolver("127.0.0.1")
@@ -621,9 +727,9 @@ func TestStopDuringTheInterfaceSetupLeavesNothingBehind(t *testing.T) {
 	rec.onConfigure = func(ctx context.Context) error {
 		close(configuring)
 		<-ctx.Done()
-		return errors.New("signal: killed") // what exec reports for a killed ifconfig
+		return errors.New("signal: killed") // what exec reports for a killed command
 	}
-	n := newNode(t, "slow-ifconfig", clientProfile(newKeyPair(t), newKeyPair(t), "127.0.0.1:1", "", ""), nodeOptions{rec: rec})
+	n := newNode(t, "slow-configure", clientProfile(newKeyPair(t), newKeyPair(t), "127.0.0.1:1", "", ""), nodeOptions{rec: rec})
 	n.start()
 	select {
 	case <-configuring:
@@ -745,10 +851,10 @@ func TestStartFailures(t *testing.T) {
 		{
 			name: "interface cannot be configured",
 			setup: func(t *testing.T, rec *recorder) string {
-				rec.configureErr = errors.New("ifconfig failed")
+				rec.configureErr = errors.New("configure failed")
 				return clientProfile(newKeyPair(t), newKeyPair(t), "127.0.0.1:1", "", "")
 			},
-			wantErr:   []string{"configure loopbackTun1: ifconfig failed"},
+			wantErr:   []string{"configure loopbackTun1: configure failed"},
 			wantKinds: []string{"tun", "configure"},
 		},
 		{
@@ -823,7 +929,7 @@ func TestAnnounceFailureDoesNotStopTheTunnel(t *testing.T) {
 }
 
 // breakableTun is a channel TUN whose reads start failing on demand, as a
-// utun does when its interface is destroyed from outside.
+// tun device does when its interface is destroyed from outside.
 type breakableTun struct {
 	tun.Device
 	source *tuntest.ChannelTUN

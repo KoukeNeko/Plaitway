@@ -25,12 +25,12 @@ type Config struct {
 	Log *slog.Logger
 	// TunFactory creates the tunnel device with the given MTU. The default
 	// creates the platform's device, which needs root or, on Windows, an
-	// elevated process: a utun on macOS, a wintun adapter named after the
-	// profile on Windows.
+	// elevated process: a utun on macOS, a tun device named plaitwayN on Linux,
+	// a wintun adapter named after the profile on Windows.
 	TunFactory func(mtu int) (tun.Device, error)
 	// Interfaces applies addresses and MTU to the new tunnel interface. The
-	// default runs /sbin/ifconfig on macOS and calls the IP Helper API on
-	// Windows, which both need privilege.
+	// default runs /sbin/ifconfig on macOS, talks rtnetlink on Linux and calls
+	// the IP Helper API on Windows, which all need privilege.
 	Interfaces Interfaces
 
 	// Seams for tests in this package.

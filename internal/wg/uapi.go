@@ -18,6 +18,9 @@ func (p *profile) uapiConfig(endpoints []netip.AddrPort) string {
 		fmt.Fprintf(&b, "listen_port=%d\n", p.listenPort)
 	}
 	if p.fwmark != 0 {
+		// On Linux the mark goes on the UDP sockets, for the policy routing (ip rule
+		// fwmark) that the user set up around the tunnel. The Reconciler reads only the
+		// main routing table and does not see such rules.
 		fmt.Fprintf(&b, "fwmark=%d\n", p.fwmark)
 	}
 	b.WriteString("replace_peers=true\n")

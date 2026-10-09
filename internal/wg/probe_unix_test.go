@@ -8,6 +8,9 @@ import (
 )
 
 func TestProbe(t *testing.T) {
+	if err := checkPlatform(); err != nil {
+		t.Skipf("the engine is unavailable on this machine: %v", err)
+	}
 	info := Backend(Config{}).Probe()
 	if !info.Available || info.Detail != "" {
 		t.Errorf("Probe() = %+v, want an available engine without detail", info)

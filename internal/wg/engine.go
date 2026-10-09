@@ -69,6 +69,9 @@ type engine struct {
 	awaiting    bool
 	awaitSince  time.Time
 	noHandshake bool
+	// bindErr is why the device's UDP sockets could not be opened again, "" while
+	// they are open; the device has none then, and poll tries again.
+	bindErr string
 }
 
 func newEngine(cfg Config, spec tunnel.Spec, deps tunnel.Deps) (*engine, error) {
@@ -338,6 +341,9 @@ func (e *engine) checkListenPort() error {
 
 // poll reads the device's counters and handshake, and moves the status along.
 func (e *engine) poll() {
+	if e.bindErr != "" {
+		e.reopenSockets()
+	}
 	stats, err := e.readDevice()
 	if err != nil {
 		e.log(tunnel.LogWarn, err.Error())
@@ -386,9 +392,7 @@ func (e *engine) handshakeDone() {
 // now.
 func (e *engine) rebind(ctx context.Context) {
 	e.log(tunnel.LogInfo, "network changed, rebinding")
-	if err := e.dev.BindUpdate(); err != nil {
-		e.log(tunnel.LogWarn, "rebind sockets: "+err.Error())
-	}
+	e.reopenSockets()
 	if !e.initiating {
 		return
 	}
@@ -400,6 +404,34 @@ func (e *engine) rebind(ctx context.Context) {
 		s.Err = ""
 	})
 	e.refreshEndpoints(ctx)
+}
+
+// reopenSockets makes the device close its UDP sockets and open them again, on
+// the same port. That can fail, and then the device has no sockets and the
+// tunnel is dead until it works: on Unix a process that was forked while the
+// sockets were open keeps their port until it executes, and a port that the
+// profile fixes may have been taken since. So poll tries again, and sets the
+// port again where the profile fixes it, since a failed update leaves
+// wireguard-go on a random one.
+func (e *engine) reopenSockets() {
+	var err error
+	if e.bindErr != "" && e.prof.listenPort != 0 {
+		err = e.dev.IpcSet(fmt.Sprintf("listen_port=%d\n", e.prof.listenPort))
+	} else {
+		err = e.dev.BindUpdate()
+	}
+	switch {
+	case err == nil && e.bindErr != "":
+		e.bindErr = ""
+		e.log(tunnel.LogInfo, "UDP sockets are open again")
+		// The initiations sent without sockets count against wireguard-go's limit.
+		if e.initiating {
+			e.restartHandshakes()
+		}
+	case err != nil && err.Error() != e.bindErr:
+		e.bindErr = err.Error()
+		e.log(tunnel.LogWarn, "rebind sockets, trying again: "+e.bindErr)
+	}
 }
 
 // restartHandshakes drops the session of every peer that has an endpoint and
