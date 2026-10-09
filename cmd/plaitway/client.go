@@ -68,9 +68,9 @@ func (c *client) failure(err error) error {
 			}
 			switch classifyDialFailure(reason) {
 			case socketMissing:
-				return fmt.Errorf("the daemon is not running: %s does not exist", c.socket)
+				return fmt.Errorf("the daemon is not running: %s does not exist%s", c.socket, notRunningHint(c.socket))
 			case nobodyListens:
-				return fmt.Errorf("the daemon is not running: nothing listens on %s", c.socket)
+				return fmt.Errorf("the daemon is not running: nothing listens on %s%s", c.socket, notRunningHint(c.socket))
 			case accessDenied:
 				return fmt.Errorf("permission denied to open %s", c.socket)
 			}

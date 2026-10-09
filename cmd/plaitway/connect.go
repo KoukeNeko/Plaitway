@@ -90,8 +90,8 @@ func (a *app) waitConnected(ctx context.Context, c *client, p *pb.Profile, usern
 		cancel()
 		switch {
 		case status.Code(err) == codes.FailedPrecondition:
-			// Another client, such as the menu bar app with the password from
-			// its Keychain, answered first; the state tells how it went.
+			// Another client, such as an app with a saved password, answered
+			// first; the state tells how it went.
 		case err != nil:
 			return c.failure(err)
 		default:

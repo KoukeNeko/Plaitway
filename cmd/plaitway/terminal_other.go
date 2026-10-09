@@ -1,4 +1,4 @@
-//go:build !darwin && !windows
+//go:build !darwin && !linux && !windows
 
 package main
 
@@ -7,8 +7,8 @@ import (
 	"os"
 )
 
-// Only macOS runs the daemon; elsewhere the client is for development and
-// takes passwords from stdin only.
+// Only macOS, Linux and Windows run the daemon; elsewhere the client is for
+// development and takes passwords from stdin only.
 func isTerminal(*os.File) bool { return false }
 
 func disableEcho(*os.File) (func(), error) {

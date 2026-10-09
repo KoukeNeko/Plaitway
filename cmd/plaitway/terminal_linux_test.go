@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"io"
 	"os"
+	"strconv"
 	"syscall"
 	"testing"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -21,23 +20,19 @@ func openPTY(t *testing.T) (master *os.File, slave *os.File, output *syncBuffer)
 		t.Skipf("no pseudo terminal: %v", err)
 	}
 	t.Cleanup(func() { master.Close() })
-	fd := uintptr(master.Fd())
-	if err := unix.IoctlSetInt(int(fd), unix.TIOCPTYGRANT, 0); err != nil {
+	fd := int(master.Fd())
+	if err := unix.IoctlSetPointerInt(fd, unix.TIOCSPTLCK, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := unix.IoctlSetInt(int(fd), unix.TIOCPTYUNLK, 0); err != nil {
+	number, err := unix.IoctlGetInt(fd, unix.TIOCGPTN)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var name [128]byte
-	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, fd, unix.TIOCPTYGNAME, uintptr(unsafe.Pointer(&name[0]))); errno != 0 {
-		t.Fatal(errno)
-	}
-	slave, err = os.OpenFile(string(name[:bytes.IndexByte(name[:], 0)]), os.O_RDWR|syscall.O_NOCTTY, 0)
+	slave, err = os.OpenFile("/dev/pts/"+strconv.Itoa(number), os.O_RDWR|syscall.O_NOCTTY, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { slave.Close() })
-
 	output = &syncBuffer{}
 	go io.Copy(output, master)
 	return master, slave, output
@@ -45,7 +40,7 @@ func openPTY(t *testing.T) (master *os.File, slave *os.File, output *syncBuffer)
 
 func echoes(t *testing.T, f *os.File) bool {
 	t.Helper()
-	termios, err := unix.IoctlGetTermios(int(f.Fd()), unix.TIOCGETA)
+	termios, err := unix.IoctlGetTermios(int(f.Fd()), unix.TCGETS)
 	if err != nil {
 		t.Fatal(err)
 	}
