@@ -296,9 +296,11 @@ func TestResolvedEndToEnd(t *testing.T) {
 		s.expect(t, "tun1",
 			[]string{"10.7.0.52", "10.7.0.53", "10.7.0.54"},
 			[]string{"~_srv.example", "~lan", "~corp.example.com"}, "no")
-		// Read the way an administrator would.
+		// Read the way an administrator would. systemd 255 shows the default route setting
+		// among the protocols ("-DefaultRoute"), later versions on a line of its own.
 		status, err := s.resolvectl("status", "tun1")
-		if err != nil || !strings.Contains(status, "Default Route: no") || !strings.Contains(status, "~corp.example.com") {
+		noDefaultRoute := strings.Contains(status, "Default Route: no") || strings.Contains(status, "-DefaultRoute")
+		if err != nil || !noDefaultRoute || !strings.Contains(status, "~corp.example.com") {
 			t.Errorf("status = %q, %v", status, err)
 		}
 		owned(t, "plaitway:lab:tun1")
