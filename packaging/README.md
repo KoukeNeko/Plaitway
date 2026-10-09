@@ -264,6 +264,7 @@ None of it needs Swift.
 | `linux/debian/` | `postinst`, `prerm` and `postrm` |
 | `linux/copyright` | the copyright file of the package |
 | `linux/lib.sh`, `linux/lib_test.sh` | shared helpers, and the tests of the scripts against fakes (`make test-packaging-linux`) |
+| `linux/openrc/plaitwayd` | the OpenRC service for systems without systemd (Gentoo); `install.sh --openrc` puts it in `/etc/init.d`, and `lib_test.sh` checks that it has the unit's arguments, restart limit and stop timeout |
 | `linux/make-apt-repo.sh`, `linux/apt_repo_test.sh` | the signed apt repository made from the `.deb` files of the releases, and its tests with a throwaway key and the apt of the machine |
 | `../scripts/linux/dev-install-daemon.sh`, `dev-uninstall-daemon.sh` | the daemon you built, as the system service, without the package |
 | `../scripts/linux/root-tests.sh` | the tests that change routes, links and DNS, each in a private namespace (`make linux-root-test`) |

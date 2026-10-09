@@ -310,7 +310,11 @@ the steps for a helper installed with `scripts/dev-install-daemon.sh`.
    `~/.config/autostart/io.github.koukeneko.Plaitway.desktop`
 
 Installed with `make install`, there is no uninstall target: delete the files of the
-table in [Linux](#linux) from below `/usr/local`. A helper installed with
+table in [Linux](#linux) from below `/usr/local`. On OpenRC, update by building and running
+`install.sh` again and `sudo rc-service plaitwayd restart`; to uninstall,
+`sudo rc-service plaitwayd stop && sudo rc-update del plaitwayd default`, delete
+`/etc/init.d/plaitwayd` and the files of the table, and, to delete the profiles with their
+private keys as well, `sudo rm -rf /var/lib/plaitway /var/log/plaitwayd.log`. A helper installed with
 `scripts/linux/dev-install-daemon.sh` is removed by
 `sudo scripts/linux/dev-uninstall-daemon.sh`, and `--purge` deletes the profiles as well.
 
@@ -332,7 +336,9 @@ table in [Linux](#linux) from below `/usr/local`. A helper installed with
   later) for OpenVPN profiles; WireGuard profiles run on the embedded
   wireguard-go and need no kernel module. OpenVPN profiles with `dev tap` are
   refused. The app needs GTK 4.14 and libadwaita 1.5, the versions of Ubuntu
-  24.04; [Linux](#linux) says what was run where
+  24.04; [Linux](#linux) says what was run where. Gentoo with OpenRC runs the
+  helper from the source, without DNS settings:
+  [Linux without systemd](#linux-without-systemd-gentoo-openrc)
 
 Of Windows only the helper and the command line client exist, see
 [Windows](#windows).
@@ -647,6 +653,62 @@ follows the other VPN's catch-all.
 (0666) so that the app, run by any user, can reach it; the helper decides per call from
 the caller's uid and groups.
 
+### Linux without systemd (Gentoo, OpenRC)
+
+The helper does not need systemd to run: it sends its readiness notice only when systemd
+gives it a socket, and it takes its paths and its `openvpn` on the command line.
+`packaging/linux/openrc/plaitwayd` is an OpenRC service with the arguments of the unit,
+run by `supervise-daemon`: a crash is followed by a start that repairs the routes, and
+more than five in a minute stop it, as the unit's start limit does. It sets no new
+privileges, keeps the log in `/var/log/plaitwayd.log` where only root reads it, and
+removes the run directory when it stops. Build and install it from the source, with the
+Python directory of the system's Python (Gentoo's does not look below `/usr/local`):
+
+```sh
+make linux-build
+```
+
+```sh
+sudo packaging/linux/install.sh --prefix /usr --openrc --python-dir "$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+```
+
+```sh
+sudo rc-update add plaitwayd default && sudo rc-service plaitwayd start
+```
+
+Building needs Go 1.27.1 and a C compiler. The helper needs `/dev/net/tun` and, for
+OpenVPN profiles, the distribution's `openvpn` 2.6 or later; the app needs GTK 4.14,
+libadwaita 1.5, PyGObject, grpcio, protobuf and libsecret. What is not as with systemd:
+
+- **No DNS settings.** The helper asks systemd-resolved through `resolvectl`, which an
+  OpenRC system does not have. The routes work, the DNS entries of a profile stay pending
+  and the profile says so. With a full tunnel, DNS goes to the resolver the network gave
+  the machine (`dhcpcd`, which the stage3 has, writes `/etc/resolv.conf` through its hook), and a resolver on the
+  local network is reached outside the tunnel; point `/etc/resolv.conf` at the tunnel's
+  resolver yourself while it is up
+- **Console users.** The people at the console are read from the seats of systemd-logind
+  in `/run/systemd/seats`. Without that directory only administrators (root and the
+  members of `sudo`, `wheel` or `admin`) can use the helper; whether `elogind` provides the
+  directory was not checked
+- **No sandbox of the unit's kind.** The helper runs as root with no new privileges, and
+  without the capability bounding set, the system call filter and the read-only file
+  system that the unit adds. `supervise-daemon` could drop capabilities only by listing
+  every other one
+- **The app cannot start the helper:** **Start Helper** asks systemd. Start it with
+  `rc-service plaitwayd start`, or at boot with `rc-update`
+
+Run on Gentoo's own OpenRC (stage3 `amd64-openrc` of 2026-10-04, OpenRC 0.63.3, glibc 2.43)
+in a booted container, with Gentoo's own init: the service starts at boot and is the child of
+`supervise-daemon`; the socket is 0666, the run directory 0755, the state directory and the
+log 0700 and 0600; `plaitway diagnostics` reaches it; a SIGKILL is followed by a new daemon
+within seconds, and seven in a row stop the service; stop and restart leave no process, and
+stop removes the run directory. With a WireGuard profile against a kernel peer: it connected,
+carried traffic, its route had `proto 199` and metric 5, its DNS entry stayed pending with
+"resolvectl not found", a SIGKILL left no interface and no route after the restart, and a stop
+with the tunnel up left none. `install.sh --openrc` laid out the files there and Gentoo's Python
+imported the package. Not run: OpenVPN (the stage3 has no `openvpn`), the app, `elogind`, and
+`dhcpcd` or NetworkManager beside a tunnel.
+
 ### Troubleshooting on Linux
 
 ```bash
@@ -767,8 +829,10 @@ in the initial namespaces:
 ### Known limitations on Linux
 
 - DNS settings need systemd-resolved and `resolvectl`. There is no `resolvconf` or
-  `/etc/resolv.conf` backend: without resolved the routes work and the DNS entries of
-  profiles fail, and the profile says so
+  `/etc/resolv.conf` backend: without resolved, as on OpenRC, the routes work and the DNS
+  entries of profiles stay pending, and the profile says so. The design for one that is
+  safe is open: it would use `resolvconf` where it exists, take a catch-all entry as the
+  exclusive one of its interface, and say that a split entry cannot be applied
 - Only the main routing table is read and written. Policy routing (`ip rule`) and other
   tables are neither read nor changed, so a program that sends traffic around the main
   table cannot be seen
