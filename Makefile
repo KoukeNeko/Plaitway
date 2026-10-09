@@ -76,10 +76,11 @@ linux-test: go-daemon go-test
 linux-root-test:
 	scripts/linux/root-tests.sh
 
-# The scripts against fakes (systemctl, install, the Debian tools) and the Go
-# tests of the notices generator.
+# The scripts against fakes (systemctl, install, the Debian tools), the apt
+# repository script with a real apt, and the Go tests of the notices generator.
 test-packaging-linux:
 	packaging/linux/lib_test.sh
+	packaging/linux/apt_repo_test.sh
 	go test -race -count=1 ./packaging/...
 
 # build/linux/plaitway_<version>_<arch>.deb, for the architecture of this machine.
