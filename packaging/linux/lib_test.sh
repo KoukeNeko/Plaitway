@@ -352,6 +352,11 @@ expect "dev-uninstall with nothing installed succeeds" 'test "$STATUS" -eq 0'
 dev dev-uninstall-daemon.sh --purge
 expect "dev-uninstall --purge deletes the profiles" 'test "$STATUS" -eq 0 -a ! -e "$DEVROOT/var/lib/plaitway"'
 
+# The commands that add the apt repository are in the README and on every release page.
+source_line() { grep -h '^ *echo "deb \[signed-by=' "$1" | sed 's/^ *//'; }
+expect "the apt source of the release page is the one of the README" \
+    '[ -n "$(source_line "$ROOT/README.md")" ] && [ "$(source_line "$ROOT/README.md")" = "$(source_line "$ROOT/packaging/release-notes.md")" ]'
+
 if [ "$FAILURES" -ne 0 ]; then
     printf '%s checks failed\n' "$FAILURES"
     exit 1

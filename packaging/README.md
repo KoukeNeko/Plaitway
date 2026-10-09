@@ -192,7 +192,9 @@ Mac, or a script install next to an app registration, compete for one launchd la
 ## Releasing
 
 `.github/workflows/release.yml` makes a release. Write what changed in `releases/X.Y.Z.md` (the text of the release page,
-before the install text and the checksums that `scripts/render-release-notes.sh` adds), set `VERSION`, commit and push
+before the install and update text of `packaging/release-notes.md` and the checksums, which `scripts/render-release-notes.sh`
+adds to every release: do not repeat them in the notes, and change `release-notes.md` when the way to install or update
+changes), set `VERSION`, commit and push
 both, then push a tag that matches it:
 
 ```bash

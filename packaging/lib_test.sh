@@ -272,6 +272,7 @@ notes() { OUTPUT="$("$PACKAGING_DIR/../scripts/render-release-notes.sh" "$@" 2>&
 notes v0.3.0 "$TMP/SHA256SUMS"
 expect "release notes start with what changed in the release" test "$STATUS" -eq 0 -a "$(head -n 1 <<<"$OUTPUT")" = "$(head -n 1 "$PACKAGING_DIR/../releases/0.3.0.md")"
 expect "release notes hold the install text" grep -q '^## Install' <<<"$OUTPUT"
+expect "release notes hold the update text" grep -q '^## Update' <<<"$OUTPUT"
 expect "release notes end with the checksums" grep -q 'abc123  Plaitway-0.3.0.zip' <<<"$OUTPUT"
 notes 0.3.0 "$TMP/SHA256SUMS"
 expect "the version may be given without the v" test "$STATUS" -eq 0
