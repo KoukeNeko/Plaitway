@@ -29,7 +29,8 @@
 </p>
 
 <p align="center">
-  <img width="1062" height="710" alt="image" src="https://github.com/user-attachments/assets/16fd3456-c51d-438b-aec6-844dd074dc93" />
+  <img width="1062" height="710" alt="image" src="https://github.com/user-attachments/assets/2cd5e4b3-3c74-4280-b840-f17570b9b7bd" />
+
 </p>
 
 Plaitway keeps your OpenVPN and WireGuard profiles in the macOS menu bar.
