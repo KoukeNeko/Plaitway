@@ -113,6 +113,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # The repository belongs to another user than the container's root.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: go build -o bin/plaitwayd ./cmd/plaitwayd
       - name: Python tests
         env:
