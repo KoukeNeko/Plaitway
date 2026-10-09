@@ -143,6 +143,15 @@ else
 fi
 
 echo "== programs"
+# The home directory is looked for only where it names something of the machine that built the
+# package: "/root" is a word of the Go standard library, and a build as root in a container has it
+# for a home.
+case "${HOME:-}" in
+    "" | / | /root) HOME_PATH="$ROOT" ;;
+    *) HOME_PATH="$HOME" ;;
+esac
+# shellcheck disable=SC2034 # read by the commands that check evaluates
+HOME_PATH="$HOME_PATH"
 for program in "$LIBEXEC" "$CLI"; do
     name="$(basename "$program")"
     if have readelf; then
@@ -150,7 +159,7 @@ for program in "$LIBEXEC" "$CLI"; do
     else
         skip "$name links nothing but the C library" "readelf is not installed"
     fi
-    check "$name contains no path of the machine that built it" '! grep -aF -e "$ROOT" -e "$HOME" "$program"'
+    check "$name contains no path of the machine that built it" '! grep -aF -e "$ROOT" -e "$HOME_PATH" "$program"'
 done
 
 echo "== maintainer scripts"
