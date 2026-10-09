@@ -5,10 +5,10 @@
 <h1 align="center">Plaitway</h1>
 
 <p align="center">
-  <strong>Several VPNs at once, from one menu bar item.</strong><br>
-  Run OpenVPN and WireGuard profiles side by side on your Mac. One component
-  owns the routes and DNS, so profiles do not fight over them and a network
-  change leaves nothing stale behind.
+  <strong>Several VPNs at once, without them fighting over your routes.</strong><br>
+  Run OpenVPN and WireGuard profiles side by side on macOS and Linux. One
+  component owns the routing table and DNS, so a new Wi-Fi network or a changed
+  gateway leaves nothing stale behind.
 </p>
 
 <p align="center">
@@ -18,40 +18,97 @@
   <img alt="Go 1.27" src="https://img.shields.io/badge/GO-1.27-00ADD8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="OpenVPN" src="https://img.shields.io/badge/OPENVPN-2.7-EA7E20?style=for-the-badge&logo=openvpn&logoColor=white">
   <img alt="WireGuard" src="https://img.shields.io/badge/WIREGUARD-88171A?style=for-the-badge&logo=wireguard&logoColor=white">
+  <a href="https://github.com/KoukeNeko/Plaitway/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/KoukeNeko/Plaitway?style=for-the-badge&label=RELEASE&color=2196F3"></a>
 </p>
 
 <p align="center">
-  <a href="#getting-started"><strong>Getting started</strong></a>
-  · <a href="#what-it-looks-like">What it looks like</a>
+  <a href="#install"><strong>Install</strong></a>
+  · <a href="#what-you-get">What you get</a>
+  · <a href="#from-the-command-line">Command line</a>
   · <a href="#update-and-uninstall">Update and uninstall</a>
   · <a href="#compatibility">Compatibility</a>
-  · <a href="#linux">Linux</a>
   · <a href="#technical-reference">Technical reference</a>
 </p>
 
 <p align="center">
-  <img width="1062" height="710" alt="image" src="https://github.com/user-attachments/assets/2cd5e4b3-3c74-4280-b840-f17570b9b7bd" />
-
+  <img width="900" alt="The Plaitway window: three connected profiles in the sidebar, with Diagnostics and Settings below them, and the Overview of one profile with its uptime, traffic and addresses" src="https://github.com/user-attachments/assets/2cd5e4b3-3c74-4280-b840-f17570b9b7bd">
 </p>
 
-Plaitway keeps your OpenVPN and WireGuard profiles in the macOS menu bar.
-Switch an office network on while a personal WireGuard tunnel stays up, see
-which one holds the internet and which one holds `192.168.1.0/24`, and open a
-window for the details when something is not working.
+Run an office OpenVPN and a personal WireGuard tunnel together, see which one
+holds the internet and which one holds `192.168.1.0/24`, and open the window for
+the details when something is not working. Every tunnel that is up wants the
+default route and the DNS; one Reconciler decides who gets what, writes it down
+before it changes anything, and puts it right again after a network change.
 
-It is built on a small root helper and Apple's own `utun` devices — no kernel
-extension and no Network Extension. The official OpenVPN and the WireGuard Go
-implementation run under the helper, and a single Reconciler decides what goes
-in the routing table and in DNS, writes it down, and puts it right again after
-a new Wi-Fi network or a changed gateway.
+## Install
 
-On Linux the same helper runs as a systemd service. The window is a GTK 4 and
-libadwaita app with a tray item, tunnels are `tun` devices, routes go through
-netlink, DNS through systemd-resolved, and OpenVPN is the distribution's. The
-sections down to Getting started were written for the macOS app;
-[Linux](#linux) says what differs there.
+**macOS 15 or later, Apple silicon**
+
+```sh
+brew install --cask koukeneko/tap/plaitway
+```
+
+Or take the dmg from the [latest release](https://github.com/KoukeNeko/Plaitway/releases/latest).
+Open **Plaitway**; the first run offers **Install Helper**, and macOS asks you to allow it in
+**System Settings › General › Login Items & Extensions**.
+
+**Linux with systemd** (Ubuntu 24.04 and 26.04, Debian 13)
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo curl -fsSL https://koukeneko.github.io/Plaitway/key.asc -o /etc/apt/keyrings/plaitway.asc
+echo "deb [signed-by=/etc/apt/keyrings/plaitway.asc] https://koukeneko.github.io/Plaitway stable main" | sudo tee /etc/apt/sources.list.d/plaitway.list
+sudo chmod 0644 /etc/apt/keyrings/plaitway.asc /etc/apt/sources.list.d/plaitway.list
+sudo apt update && sudo apt install plaitway
+```
+
+It installs OpenVPN and the GTK libraries and starts the helper, `plaitwayd.service`. Open
+**Plaitway** from the application menu, or run `plaitway-app`. `sudo apt upgrade` brings the later versions.
+
+**Windows** is in development and has no release yet, see [Windows](#windows).
+
+**Then, on either system:**
+
+1. Import a profile: the **+** in the toolbar, a file dropped on the window, or `plaitway import file.ovpn`
+2. Press **Connect**, or choose the profile's row in the menu bar or tray. A profile that needs a username and
+   password asks at the first connection; the login Keychain (macOS) or the Secret Service (Linux) remembers them
+3. Add a second profile and connect it too. The sidebar order is the priority, and the Routes and DNS page says what each one holds
+
+<details>
+<summary><strong>Other ways to install</strong></summary>
+
+- **macOS, without Homebrew:** copy `Plaitway.app` from the dmg or the zip to `/Applications`. To get the command
+  line tool onto your path: `ln -s /Applications/Plaitway.app/Contents/Resources/bin/plaitway /usr/local/bin/plaitway`
+  (Homebrew does it for you)
+- **macOS, if SMAppService does not accept the helper:** `sudo scripts/dev-install-daemon.sh` installs it as a
+  plain LaunchDaemon and `sudo scripts/dev-uninstall-daemon.sh` removes it
+- **Linux, without the apt repository:** `sudo apt install ./plaitway_*.deb` with the `.deb` of the
+  release page (it is attached a few minutes after the macOS files), or build it with `make deb`, which writes it
+  to `build/linux`
+- **From source:** see [Development](#development) and [Release](#release)
+
+</details>
+
+## What you get
+
+- **[Several profiles at the same time](#several-profiles-at-the-same-time).** Each enabled profile gets its own
+  tunnel. A full tunnel takes the internet, a split tunnel takes only its prefixes, and where they would collide
+  the profile higher in the list wins
+- **[Routes and DNS that clean up after themselves](#routes-and-dns-that-clean-up-after-themselves).** Every route
+  is written down before it is added, so a crash, a new gateway or a wake from sleep is repaired and nothing is
+  left behind. **Diagnostics** shows what is owned and what is stale
+- **[Edit a profile without showing its keys](#edit-a-profile-without-showing-its-keys).** Private keys appear as
+  placeholders until you ask, and the editor marks the line the helper refuses
+- **[Connect when the network says so](#connect-when-the-network-says-so).** Auto-connect, on-demand activation by
+  Ethernet or Wi-Fi, and leaving the private ranges out of a WireGuard tunnel
+- **[A window, a menu bar item and a command line](#from-the-command-line).** All three talk to the same helper, so
+  what you start in one is what the other shows
+- **[A helper that is held to a short list](#know-what-the-helper-may-do).** It listens on a local socket only,
+  checks who is calling, and on macOS runs only the OpenVPN it has checked against a hash
 
 ## What it looks like
+
+The sections down to Compatibility describe the macOS app; [Linux](#linux) says what differs there.
 
 The menu bar item is a menu. It says how many profiles are connected and lists
 each one with its state; choosing a row connects, disconnects or retries it.
@@ -210,52 +267,6 @@ helper further; [Linux](#linux) lists how.
 
 English and 繁體中文, following the system. Messages that come from the helper
 itself, such as why a connection is stuck, are in English.
-
-## Getting started
-
-1. Install it with Homebrew, `brew install --cask koukeneko/tap/plaitway`;
-   download the dmg or the zip from the
-   [latest release](https://github.com/KoukeNeko/Plaitway/releases/latest); or
-   build the app yourself (see [Release](#release))
-2. Copy `Plaitway.app` to `/Applications` and open it. The first run offers to
-   install the helper: **Install Helper**, then allow Plaitway in **System
-   Settings › General › Login Items & Extensions**. The app carries on by
-   itself once macOS has approved it
-3. Import a profile — the **+** in the toolbar, a dropped file, or
-   `plaitway import`. If it needs a username and password, the first
-   connection asks, and the login Keychain remembers them
-4. Choose the profile and press **Connect**, or choose its row in the menu bar
-5. Optional: link the command line tool,
-   `ln -s /Applications/Plaitway.app/Contents/Resources/bin/plaitway /usr/local/bin/plaitway`
-
-If SMAppService does not accept the helper, `sudo scripts/dev-install-daemon.sh`
-installs it as a plain LaunchDaemon and `sudo scripts/dev-uninstall-daemon.sh`
-removes it.
-
-**On Linux** (Ubuntu 24.04 or 26.04, Debian 13, with systemd):
-
-1. Add the apt repository once, so that `apt upgrade` brings the later versions:
-
-   ```sh
-   sudo install -d -m 0755 /etc/apt/keyrings
-   sudo curl -fsSL https://koukeneko.github.io/Plaitway/key.asc -o /etc/apt/keyrings/plaitway.asc
-   echo "deb [signed-by=/etc/apt/keyrings/plaitway.asc] https://koukeneko.github.io/Plaitway stable main" | sudo tee /etc/apt/sources.list.d/plaitway.list
-   sudo chmod 0644 /etc/apt/keyrings/plaitway.asc /etc/apt/sources.list.d/plaitway.list
-   sudo apt update
-   ```
-
-   Without it, take the `.deb` of the release page (it is attached a few minutes after
-   the macOS files), or build it with `make deb`, which writes it to `build/linux`
-2. `sudo apt install plaitway`, or `sudo apt install ./plaitway_*.deb` for a file in
-   the current directory. This installs OpenVPN and the GTK libraries, and enables and
-   starts the helper, `plaitwayd.service`
-3. Open **Plaitway** from the application menu, or run `plaitway-app`. Import a
-   profile with **+**, by dropping the file on the window, or with
-   `plaitway import`. A username and password are asked for at the first
-   connection, and the Secret Service (GNOME Keyring, KWallet) remembers them
-4. Choose the profile and press **Connect**
-
-[Linux](#linux) has the details.
 
 ## Update and uninstall
 
