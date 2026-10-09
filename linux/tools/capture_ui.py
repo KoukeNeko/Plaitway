@@ -25,6 +25,8 @@ LINUX_DIR = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(LINUX_DIR / "src"), str(LINUX_DIR)]
 
 SIZES = {"wide": (1040, 660), "narrow": (400, 720)}
+# A picture of the window that compresses to less than this is one flat colour.
+BLANK_PICTURE_BYTES = 3000
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -161,19 +163,25 @@ def run(arguments: argparse.Namespace, daemon) -> None:
             yield 0.7
             # The window's first child holds the content and the dialogs above it.
             content = window.get_first_child()
-            width, height = content.get_width(), content.get_height()
-            snapshot = Gtk.Snapshot()
-            # The window paints its own background, which the content does not carry.
-            found, background = window.get_style_context().lookup_color("window_bg_color")
-            if found:
-                snapshot.append_color(background, Graphene.Rect().init(0, 0, width, height))
-            Gtk.WidgetPaintable.new(content).snapshot(snapshot, width, height)
-            node = snapshot.to_node()
-            if node is None:
-                print(f"nothing was drawn for {name}")
-                return
-            renderer = window.get_native().get_renderer()
-            texture = renderer.render_texture(node, Graphene.Rect().init(0, 0, width, height))
+            # A machine under load can be slow to draw the first page: a picture that is
+            # one flat colour compresses to a few hundred bytes, and is taken again.
+            for attempt in range(6):
+                width, height = content.get_width(), content.get_height()
+                snapshot = Gtk.Snapshot()
+                # The window paints its own background, which the content does not carry.
+                found, background = window.get_style_context().lookup_color("window_bg_color")
+                if found:
+                    snapshot.append_color(background, Graphene.Rect().init(0, 0, width, height))
+                Gtk.WidgetPaintable.new(content).snapshot(snapshot, width, height)
+                node = snapshot.to_node()
+                if node is None:
+                    print(f"nothing was drawn for {name}")
+                    return
+                renderer = window.get_native().get_renderer()
+                texture = renderer.render_texture(node, Graphene.Rect().init(0, 0, width, height))
+                if texture.save_to_png_bytes().get_size() > BLANK_PICTURE_BYTES or attempt == 5:
+                    break
+                yield 0.7
             path = out / f"{size}-{scheme}-{name}.png"
             texture.save_to_png(str(path))
             print(path)
