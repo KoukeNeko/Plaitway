@@ -15,6 +15,7 @@ State of the branch `windows-phase3` on 2026-10-09. The machine of the verificat
 | The real daemon in an elevated process on a scratch pipe | `-Include Daemon` | 1 of 1 |
 | The service: registration, the pipe served as SYSTEM, stop, restart after a crash, uninstall | `-Include Service -TestMachine` | 4 of 4 |
 | C# client library and app model | `dotnet test` from `windows/` | Client 898 of 900 (2 need a daemon with real engines), AppCore 344 of 344 |
+| UI tests: the window opened on the screen | `dotnet test Tests/Plaitway.App.UiTests` from `windows/`, after the drop and the trust check were wired and the branch was rebased onto v0.5.0 | 8 of 8 |
 | The MSI of both languages | `build-installer.ps1`, then `Test-Installer.ps1` (tables, the order of the Helper actions, the unpacked files, the signature of `wintun.dll`) | pass |
 | Installing the MSI for real, on the development PC (the PC had no Plaitway, no `%ProgramData%\Plaitway`, and a restore timer was armed) | install, `plaitwayd status`, `plaitway status` through the pipe, `layoutcheck`, repair (also of a deleted `wintun.dll` and with the service stopped), the zh-TW package over the en-US one, removal with `PLAITWAY_PURGE_DATA=1` | pass; the service is LocalSystem, automatic, restarts on failure; after the removal nothing is left |
 
@@ -50,7 +51,6 @@ restarts after a crash.
 | The `OpenVpn` group of the elevated tests (3 tests: the engine on a tap-windows6 adapter against a loopback server) | An OpenVPN installation with nothing connected, or a decision to run next to the owner's connection (`-IAcceptOpenVpnInterruption`). The PC of the verification had a connected OpenVPN, so the group was not run |
 | An IPv6 gateway on a tap-windows6 adapter (unknown 4) | A test that pushes IPv6 from the loopback server |
 | Dropping profile files on the window | The drop is wired in `ShellView`; a drag from Explorer has not been tried |
-| The UI tests (`Plaitway.App.UiTests`) | They open the window on the screen of whoever runs them; not run since the drop and the trust check were wired |
 | Windows 10, arm64 | Machines |
 
 ## Not done
@@ -62,4 +62,3 @@ restarts after a crash.
 - OpenVPN is the user's own installation, not part of the package.
 - Polish listed by the reviewers: tab stops of the sidebar, the columns of the log page, a test of the zh-TW strings through
   UI Automation.
-- Linux: a native version is planned and is handed over after Windows.
