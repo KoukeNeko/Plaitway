@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-Builds the Plaitway MSI: stages the payload, then builds one package per language.
+Builds the Plaitway MSI: stages the payload, then builds the package.
 
 .DESCRIPTION
 1. Builds plaitwayd.exe and plaitway.exe with the version of the VERSION file.
@@ -8,15 +8,11 @@ Builds the Plaitway MSI: stages the payload, then builds one package per languag
 3. Publishes the app self-contained, so the machine needs no Windows App Runtime.
 4. Writes the notices and the licence of the package.
 5. Signs the programs of Plaitway and the packages when -CertificateThumbprint is given.
-6. Builds windows\installer for each language. The ProductCode is derived from the
-   upgrade code, the version, the language and the files of the payload, so a build
-   with other files is an upgrade of the earlier one and the same files give the
-   same code.
+6. Builds windows\installer. The ProductCode is derived from the upgrade code, the
+   version, the platform and the files of the payload, so a build with other files is
+   an upgrade of the earlier one and the same files give the same code.
 
 Nothing is installed and nothing outside the repository's build folder is written.
-
-.PARAMETER Culture
-en-US, zh-TW or All. Default: All.
 
 .PARAMETER OutputDirectory
 Where the stage and the finished packages go. Default: build\windows below the
@@ -42,9 +38,6 @@ a change of the installer itself.
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('en-US', 'zh-TW', 'All')]
-    [string] $Culture = 'All',
-
     [string] $OutputDirectory,
 
     [switch] $SkipAppPublish,
@@ -63,7 +56,9 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\Sign.ps1')
 
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$AllCultures = @('en-US', 'zh-TW')
+# The language of the setup dialog and of its messages. The app has its own, which follows Windows or the person's choice in
+# its settings, so there is one package for everyone.
+$InstallerCulture = 'en-US'
 $WindowsArchitecture = 'amd64'
 $GoMachine = 'amd64'
 $InstallerPlatform = 'x64'
@@ -200,8 +195,8 @@ function Get-PayloadFingerprint([string] $Directory) {
 }
 
 # A name-based GUID: the same inputs give the same ProductCode, other files give another.
-function Get-ProductCode([string] $Version, [string] $CultureName, [string] $Fingerprint) {
-    $seed = '{0}|{1}|{2}|{3}|{4}|{5}' -f $ProductCodeNamespace, $UpgradeCode, $Version, $InstallerPlatform, $CultureName, $Fingerprint
+function Get-ProductCode([string] $Version, [string] $Fingerprint) {
+    $seed = '{0}|{1}|{2}|{3}|{4}' -f $ProductCodeNamespace, $UpgradeCode, $Version, $InstallerPlatform, $Fingerprint
     $hash = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($seed))
     $guidBytes = New-Object byte[] 16
     [Array]::Copy($hash, $guidBytes, 16)
@@ -210,16 +205,16 @@ function Get-ProductCode([string] $Version, [string] $CultureName, [string] $Fin
     return ([Guid] $guidBytes).ToString('B').ToUpperInvariant()
 }
 
-function Build-Package([string] $Version, [string] $CultureName, [string] $Fingerprint) {
-    Write-Step "msi $CultureName"
-    $productCode = Get-ProductCode $Version $CultureName $Fingerprint
+function Build-Package([string] $Version, [string] $Fingerprint) {
+    Write-Step 'msi'
+    $productCode = Get-ProductCode $Version $Fingerprint
     $project = Join-Path $RepositoryRoot 'windows\installer\Plaitway.Installer.wixproj'
     Invoke-Native 'dotnet' @(
         'build', $project, '-c', 'Release', '-nologo',
         "-p:InstallerPlatform=$InstallerPlatform", "-p:ProductVersion=$Version", "-p:ProductCode=$productCode",
-        "-p:PayloadDir=$PayloadDirectory", "-p:Cultures=$CultureName")
-    $built = Join-Path $RepositoryRoot "windows\installer\bin\$InstallerPlatform\Release\$CultureName\Plaitway.msi"
-    $target = Join-Path $OutputDirectory ("Plaitway-{0}-{1}-{2}.msi" -f $Version, $InstallerPlatform, $CultureName)
+        "-p:PayloadDir=$PayloadDirectory", "-p:Cultures=$InstallerCulture")
+    $built = Join-Path $RepositoryRoot "windows\installer\bin\$InstallerPlatform\Release\$InstallerCulture\Plaitway.msi"
+    $target = Join-Path $OutputDirectory ("Plaitway-{0}-{1}.msi" -f $Version, $InstallerPlatform)
     Copy-Item -LiteralPath $built -Destination $target -Force
     if ($script:SigningCertificate) { Add-Signature -Path $target -Certificate $script:SigningCertificate @SigningOptions }
     return [pscustomobject]@{ Path = $target; ProductCode = $productCode }
@@ -250,7 +245,6 @@ if ($CertificateThumbprint) {
     $SigningOptions['AllowUntrustedRoot'] = [bool] $AllowUntrustedRoot
     if ($TimestampServer) { $SigningOptions['TimestampServer'] = $TimestampServer }
 }
-$cultures = if ($Culture -eq 'All') { $AllCultures } else { @($Culture) }
 
 [void] (New-Item -ItemType Directory -Force -Path $OutputDirectory)
 if ($SkipAppPublish) {
@@ -278,8 +272,8 @@ if ($script:SigningCertificate) {
 }
 $fingerprint = Get-PayloadFingerprint $PayloadDirectory
 
-$packages = foreach ($cultureName in $cultures) { Build-Package $version $cultureName $fingerprint }
-foreach ($package in $packages) { Assert-Package $package $version }
+$package = Build-Package $version $fingerprint
+Assert-Package $package $version
 
 Write-Step 'done'
-$packages | ForEach-Object { Write-Host ("{0}  {1}" -f $_.ProductCode, $_.Path) }
+Write-Host ("{0}  {1}" -f $package.ProductCode, $package.Path)

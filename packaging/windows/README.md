@@ -1,36 +1,36 @@
 # Packaging for Windows
 
 Build, check and sign the MSI of Plaitway. The package is per machine, x64 only (the app is not built for arm64
-yet), Windows 10 version 1809 or later, one file per language (`en-US`, `zh-TW`).
+yet), Windows 10 version 1809 or later, one file for everyone: its setup dialog is in English, and the app has its own
+language (it follows Windows, or the choice in its Settings).
 
 | Path | Purpose |
 |---|---|
-| `build-installer.ps1` | Stages the payload and builds `build\windows\Plaitway-<version>-x64-<culture>.msi` |
-| `Test-Installer.ps1` | Reads the packages and unpacks them with an administrative install (`msiexec /a`); installs nothing |
+| `build-installer.ps1` | Stages the payload and builds `build\windows\Plaitway-<version>-x64.msi` |
+| `Test-Installer.ps1` | Reads the package and unpacks it with an administrative install (`msiexec /a`); installs nothing |
 | `lib\Msi.ps1`, `lib\Sign.ps1` | Reading a package through the Windows Installer COM API; Authenticode signing |
 | `fetch-wintun.ps1`, `wintun\` | `wintun.dll`, checked by pinned hashes and by its signature (WireGuard LLC) |
 | `layoutcheck\` | Runs the check that `plaitwayd install` makes of its own location, for the installer's tests |
 | `service\` | The contract of the `PlaitwayHelper` service and `plaitwayd install` / `uninstall` |
 | `openvpn\` | What the daemon needs from the OpenVPN installation it finds |
 | `dev\` | Running the daemon and the tests that need elevation, by hand |
-| `..\..\windows\installer\` | The WiX project (`Package.wxs`, the languages) and `INSTALL-TEST.md`, the test in a virtual machine |
+| `..\..\windows\installer\` | The WiX project (`Package.wxs`, the setup's messages) and `INSTALL-TEST.md`, the test in a virtual machine |
 
 ## Build
 
 ```powershell
-powershell -File packaging\windows\build-installer.ps1                  # both languages, unsigned
-powershell -File packaging\windows\build-installer.ps1 -Culture zh-TW
+powershell -File packaging\windows\build-installer.ps1                  # unsigned
 powershell -File packaging\windows\Test-Installer.ps1
 ```
 
 The version is the `VERSION` file. The script builds `plaitwayd.exe` and `plaitway.exe` with it, fetches `wintun.dll`,
 publishes the app self-contained (`-p:PlaitwaySelfContained=true`, so the machine needs no Windows App Runtime and no
-.NET), writes the licence and `THIRD_PARTY_NOTICES.md` (`go run ./packaging/notices -windows`), and builds the package
-once per language, because each has its own ProductCode. Everything goes below `build\windows`, which git ignores:
-`payload\` is what the package holds, the finished packages are beside it. `-SkipAppPublish` reuses the app of the last
+.NET), writes the licence and `THIRD_PARTY_NOTICES.md` (`go run ./packaging/notices -windows`), and builds the package.
+Everything goes below `build\windows`, which git ignores: `payload\` is what the package holds, the finished package is
+beside it. `-SkipAppPublish` reuses the app of the last
 run, for trying out a change of `Package.wxs`.
 
-The ProductCode is derived from the upgrade code, the version, the language and the hash of every payload file: the same
+The ProductCode is derived from the upgrade code, the version and the hash of every payload file: the same
 files give the same code, other files give another one, and the package replaces the installed one as an upgrade
 (`AllowSameVersionUpgrades`). The upgrade code never changes.
 

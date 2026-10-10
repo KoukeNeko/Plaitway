@@ -243,7 +243,7 @@ virtual service account and a restricted service SID cannot create adapters or w
 (packaging/windows/service/README.md, "Not done").
 
 **The installer is an MSI built with WiX.** `windows/installer` holds the WiX project: per machine, one package per
-language (`en-US`, `zh-TW`), one per platform, with the payload `plaitwayd.exe`, `plaitway.exe`, `wintun.dll`, the app
+platform for every language (its setup dialog is English; the app chooses its own language), with the payload `plaitwayd.exe`, `plaitway.exe`, `wintun.dll`, the app
 and the licenses. The reasons are those of a service that has to be installed, upgraded (stop, replace, `install
 -update -start`) and removed (`uninstall`, which keeps `%ProgramData%\Plaitway` because the profiles hold keys) by an
 administrator, which is what an MSI does and an unpackaged app does not (windows/docs/ui-toolkit.md).

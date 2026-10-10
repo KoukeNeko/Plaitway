@@ -6,7 +6,7 @@ virtual machine** (the Windows 11 test VM, restored to a clean snapshot first), 
 installed or runs `PlaitwayHelper`: the installer registers a LocalSystem service, and an uninstall with `-purge`
 deletes `%ProgramData%\Plaitway`, where the profiles with their private keys live.
 
-Build the packages on the development PC and copy them over:
+Build the package on the development PC and copy it over:
 
 ```powershell
 powershell -File packaging\windows\build-installer.ps1
@@ -16,7 +16,7 @@ powershell -File packaging\windows\Test-Installer.ps1        # the read-only che
 The commands below run in an elevated PowerShell in the VM. `$msi` is the package, `$log` a path for the verbose log:
 
 ```powershell
-$msi = 'C:\Test\Plaitway-0.3.4-x64-en-US.msi'
+$msi = 'C:\Test\Plaitway-0.6.1-x64.msi'
 $log = 'C:\Test\msi.log'
 ```
 

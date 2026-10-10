@@ -11,7 +11,7 @@ set -euo pipefail
 tag="$1"
 sums="$2"
 version="${tag#v}"
-asset="Plaitway-$version-x64-en-US.msi"
+asset="Plaitway-$version-x64.msi"
 sha="$(awk -v f="$asset" '$2 == f || $2 == "*" f { print $1 }' "$sums")"
 [[ ${#sha} -eq 64 ]] || { echo "no SHA-256 for $asset in $sums" >&2; exit 1; }
 
@@ -27,7 +27,7 @@ template="$(cat <<'JSON'
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/KoukeNeko/Plaitway/releases/download/v@VERSION@/Plaitway-@VERSION@-x64-en-US.msi#/Plaitway.dl",
+            "url": "https://github.com/KoukeNeko/Plaitway/releases/download/v@VERSION@/Plaitway-@VERSION@-x64.msi#/Plaitway.dl",
             "hash": "@SHA@"
         }
     },
@@ -51,7 +51,7 @@ template="$(cat <<'JSON'
     "autoupdate": {
         "architecture": {
             "64bit": {
-                "url": "https://github.com/KoukeNeko/Plaitway/releases/download/v$version/Plaitway-$version-x64-en-US.msi#/Plaitway.dl"
+                "url": "https://github.com/KoukeNeko/Plaitway/releases/download/v$version/Plaitway-$version-x64.msi#/Plaitway.dl"
             }
         },
         "hash": {

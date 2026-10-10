@@ -222,9 +222,9 @@ The same tag builds the Linux packages (the `linux` job, amd64 and arm64) and `p
 and `SHA256SUMS-linux` to the release, after the macOS files. Neither holds back the macOS release or the cask.
 
 The same tag builds the Windows packages (the `windows` job: the Go tests, `packaging/windows/build-installer.ps1`, then
-`Test-Installer.ps1`) and `publish-windows` attaches the MSI of each language and `SHA256SUMS-windows` to the release. They are
+`Test-Installer.ps1`) and `publish-windows` attaches the MSI and `SHA256SUMS-windows` to the release. They are
 unsigned until a code signing certificate is given to `build-installer.ps1`. After that `packages.yml` writes
-`bucket/plaitway.json` in `KoukeNeko/scoop-bucket` (`scripts/render-scoop-manifest.sh`), which installs the English package.
+`bucket/plaitway.json` in `KoukeNeko/scoop-bucket` (`scripts/render-scoop-manifest.sh`), which installs the MSI.
 A Windows problem holds back neither the macOS release nor the cask.
 
 **The apt repository.** When the release workflow of a tag has finished, whatever its result, `.github/workflows/apt.yml` downloads the `.deb`

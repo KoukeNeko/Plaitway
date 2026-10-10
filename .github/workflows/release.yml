@@ -5,7 +5,7 @@ name: Release
 # does everything up to publishing and keeps the files as an artifact, which is how to try the
 # pipeline. Linux is built beside macOS (the linux job) and its .deb files are attached to the release
 # afterwards (publish-linux), so a problem of the Linux job never holds back the macOS release or the
-# Homebrew cask. The same goes for Windows: the MSI of each language is built beside macOS (the windows
+# Homebrew cask. The same goes for Windows: the MSI is built beside macOS (the windows
 # job, unsigned until there is a code signing certificate) and attached by publish-windows, after which
 # the Scoop manifest is updated.
 on:
@@ -180,7 +180,7 @@ jobs:
           path: build/linux/plaitway_*.deb
           if-no-files-found: error
 
-  # The MSI of each language, built and checked as packaging/windows/README.md describes. The Go tests
+  # The MSI, built and checked as packaging/windows/README.md describes. The Go tests
   # run first, as in the macOS job; the app's tests and the elevated tests are not part of a release.
   windows:
     runs-on: windows-latest
@@ -210,7 +210,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: windows
-          path: build/windows/Plaitway-${{ env.VERSION }}-x64-*.msi
+          path: build/windows/Plaitway-${{ env.VERSION }}-x64.msi
           if-no-files-found: error
 
   publish:

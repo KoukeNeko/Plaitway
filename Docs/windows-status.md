@@ -14,10 +14,10 @@ State on 2026-10-11, at release 0.6.0. The machine of the verification is a Wind
 | WireGuard engine on wintun: two tunnels, handshake, a datagram through the adapter, the removal of leftover and of crashed adapters | `-Include Wintun` | 4 of 4 |
 | The real daemon in an elevated process on a scratch pipe | `-Include Daemon` | 1 of 1 |
 | The service: registration, the pipe served as SYSTEM, stop, restart after a crash, uninstall | `-Include Service -TestMachine` | 4 of 4 |
-| C# client library and app model | `dotnet test` from `windows/` | Client 898 of 900 (2 need a daemon with real engines), AppCore 344 of 344 |
-| UI tests: the window opened on the screen | `dotnet test Tests/Plaitway.App.UiTests` from `windows/`, after the drop and the trust check were wired and the branch was rebased onto v0.5.0 | 8 of 8 |
+| C# client library and app model | `dotnet test` from `windows/` | Client 898 of 900 (2 need a daemon with real engines), AppCore 361 of 361 |
+| UI tests: the window opened on the screen | `dotnet test Tests/Plaitway.App.UiTests` from `windows/`, after the drop and the trust check were wired and the branch was rebased onto v0.5.0 | 9 of 9; the new one chooses Traditional Chinese in Settings, restarts the app and reads the sidebar of the new window |
 | The `windows` job of the release workflow on a GitHub runner (`windows-latest`) | Release run by hand: the Go tests, `build-installer.ps1`, `Test-Installer.ps1`; then `Test-Installer.ps1` again on the two MSIs of the artifact | pass. The first run failed two tests that assumed a process that is not elevated (`fsperm`: the owner of a new file; `transport`: the restricted token of an ordinary user kept the Administrators group); the tests are fixed |
-| The MSI of both languages | `build-installer.ps1`, then `Test-Installer.ps1` (tables, the order of the Helper actions, the unpacked files, the signature of `wintun.dll`) | pass |
+| The MSI | `build-installer.ps1`, then `Test-Installer.ps1` (tables, the order of the Helper actions, the unpacked files, the signature of `wintun.dll`) | pass |
 | Installing the MSI for real, on the development PC (the PC had no Plaitway, no `%ProgramData%\Plaitway`, and a restore timer was armed) | install, `plaitwayd status`, `plaitway status` through the pipe, `layoutcheck`, repair (also of a deleted `wintun.dll` and with the service stopped), the zh-TW package over the en-US one, removal with `PLAITWAY_PURGE_DATA=1` | pass; the service is LocalSystem, automatic, restarts on failure; after the removal nothing is left |
 
 The first two attempts to install failed and rolled back cleanly, which found three defects that the read-only checks could not:
@@ -48,7 +48,7 @@ restarts after a crash.
 
 | What | What it needs |
 |---|---|
-| What of the MSI is still untried: the rollback of a failed install, the block of a downgrade, `PLAITWAY_FORCE_UNINSTALL`, a removal while a tunnel is up, starting the app from the Start menu entry, an install over a machine that has the service from `plaitwayd install` | A virtual machine restored to a clean snapshot: [windows/installer/INSTALL-TEST.md](../windows/installer/INSTALL-TEST.md) |
+| What of the MSI is still untried: the rollback of a failed install, the block of a downgrade, `PLAITWAY_FORCE_UNINSTALL`, a removal while a tunnel is up, starting the app from the Start menu entry, an install over a machine that has the service from `plaitwayd install`, the single package over an installed 0.6.0 of either language | A virtual machine restored to a clean snapshot: [windows/installer/INSTALL-TEST.md](../windows/installer/INSTALL-TEST.md) |
 | The `OpenVpn` group of the elevated tests (3 tests: the engine on a tap-windows6 adapter against a loopback server) | An OpenVPN installation with nothing connected, or a decision to run next to the owner's connection (`-IAcceptOpenVpnInterruption`). The PC of the verification had a connected OpenVPN, so the group was not run |
 | An IPv6 gateway on a tap-windows6 adapter (unknown 4) | A test that pushes IPv6 from the loopback server |
 | Dropping profile files on the window | The drop is wired in `ShellView`; a drag from Explorer has not been tried |

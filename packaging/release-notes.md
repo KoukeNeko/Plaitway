@@ -34,10 +34,11 @@ sudo rc-update add plaitwayd default && sudo rc-service plaitwayd start
 
 - DNS settings of a full tunnel go through openresolv, which the ebuild installs; with NetworkManager set `rc-manager=resolvconf` in its `[main]` section
 
-**Windows 11, x64.** Windows 10 1809 is the lowest the package accepts; it has not been tried. `Plaitway-<version>-x64-en-US.msi` or `Plaitway-<version>-x64-zh-TW.msi`, with `SHA256SUMS-windows`, attached a few minutes after the macOS files. The packages are not signed yet, so SmartScreen asks for confirmation at the first run.
+**Windows 11, x64.** Windows 10 1809 is the lowest the package accepts; it has not been tried. `Plaitway-<version>-x64.msi`, with `SHA256SUMS-windows`, is attached a few minutes after the macOS files. The package is not signed yet, so SmartScreen asks for confirmation at the first run.
 
-- Run the MSI, or `msiexec /i Plaitway-<version>-x64-en-US.msi /qn` from an elevated shell; it installs the helper as the service `PlaitwayHelper` and puts **Plaitway** in the Start menu
-- Or with Scoop, which installs the English package and asks Windows for administrator rights: `scoop bucket add koukeneko https://github.com/KoukeNeko/scoop-bucket`, then `scoop install koukeneko/plaitway`
+- Run the MSI, or `msiexec /i Plaitway-<version>-x64.msi /qn` from an elevated shell; it installs the helper as the service `PlaitwayHelper` and puts **Plaitway** in the Start menu
+- Or with Scoop, which asks Windows for administrator rights: `scoop bucket add koukeneko https://github.com/KoukeNeko/scoop-bucket`, then `scoop install koukeneko/plaitway`
+- The app follows the language of Windows; **Settings › Language** changes it
 - WireGuard profiles need nothing else. OpenVPN profiles need an OpenVPN installation with the TAP-Windows6 driver, which is not part of the package
 - `plaitway` is the command line client, in `C:\Program Files\Plaitway`
 
@@ -47,7 +48,7 @@ sudo rc-update add plaitwayd default && sudo rc-service plaitwayd start
 
 **Linux.** With the apt repository added, `sudo apt update && sudo apt upgrade`. Without it, `sudo apt install ./plaitway_<version>_<arch>.deb` over the old one. The upgrade restarts the helper, which disconnects running profiles; the stored profiles stay. Quit **Plaitway** and open it again to get the new window.
 
-**Windows.** `scoop update plaitway`, or run the newer MSI of the same language over the old one; it stops the service, replaces the files and starts it again, which disconnects running profiles. Removing the package keeps `%ProgramData%\Plaitway`; `msiexec /x … PLAITWAY_PURGE_DATA=1` deletes it too.
+**Windows.** `scoop update plaitway`, or run the newer MSI over the old one; it stops the service, replaces the files and starts it again, which disconnects running profiles. Removing the package keeps `%ProgramData%\Plaitway`; `msiexec /x … PLAITWAY_PURGE_DATA=1` deletes it too.
 
 **Gentoo.** `sudo emerge @live-rebuild`, then `sudo rc-service plaitwayd restart`, which disconnects running profiles; the stored profiles stay.
 

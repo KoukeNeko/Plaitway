@@ -1,25 +1,25 @@
 <Project Sdk="WixToolset.Sdk/5.0.2">
 
   <!--
-    The MSI of Plaitway: per machine, one file per language (Cultures), one platform per build.
+    The MSI of Plaitway: per machine, one file for every language of the app, one platform per build.
     packaging\windows\build-installer.ps1 builds it; it stages the payload and passes the version and the folders.
 
       InstallerPlatform   x64 (default) or arm64; the payload staged for it has to match
       ProductVersion      the VERSION file, major.minor.patch
-      ProductCode         derived from the upgrade code, the version, the platform, the language and the payload
+      ProductCode         derived from the upgrade code, the version, the platform and the payload
                           by the build script, so that a build of the same version with other files is an upgrade
       UpgradeCode         the identity of the product across versions; it never changes
       PayloadDir          the staged files: plaitwayd.exe, plaitway.exe, wintun.dll, app\, licenses\
       LicenseFile         the licence of Plaitway as RTF, for the setup dialog
-      Cultures            the languages built; the build script builds one per call, because each has its own
-                          ProductCode
+      Cultures            the language of the setup dialog and of its messages, English; the app's own language
+                          is not the installer's business
   -->
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
     <Platform>$(InstallerPlatform)</Platform>
     <OutputName>Plaitway</OutputName>
-    <Cultures>en-US;zh-TW</Cultures>
+    <Cultures>en-US</Cultures>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- ICE03: the language lists in the version resources of Microsoft's libraries hold identifiers that ICE03 does not know; the
          language only matters to the installer's choice between two files of one version.

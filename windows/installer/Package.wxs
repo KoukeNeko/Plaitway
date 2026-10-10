@@ -42,9 +42,10 @@
            Language="!(loc.Language)" Codepage="65001" Scope="perMachine" Compressed="yes">
 
     <!-- A major upgrade written out, because MajorUpgrade gives the upgrade a language and a package only replaces a
-         product of its own language: the zh-TW package would then sit next to the en-US one in the same folder, with
-         the components they share. Here a product of the same upgrade code in any language, and any version up to this
-         one, is replaced after the new files are in; a newer one blocks the setup. -->
+         product of its own language: 0.6.0 had a package for each of two languages, and the zh-TW one would then sit
+         next to this one in the same folder, with the components they share. Here a product of the same upgrade code
+         in any language, and any version up to this one, is replaced after the new files are in; a newer one blocks
+         the setup. -->
     <Upgrade Id="$(UpgradeCode)">
       <UpgradeVersion Minimum="0.0.0" IncludeMinimum="yes" Maximum="$(ProductVersion)" IncludeMaximum="yes"
                       Property="WIX_UPGRADE_DETECTED" MigrateFeatures="yes" />
