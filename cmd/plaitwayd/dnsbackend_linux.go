@@ -1,0 +1,60 @@
+package main
+
+import (
+	"bufio"
+	"log/slog"
+	"os"
+	"strings"
+
+	"github.com/KoukeNeko/Plaitway/internal/osnet/linux"
+)
+
+// resolvconfConfPath is the file that configures openresolv.
+const resolvconfConfPath = "/etc/resolvconf.conf"
+
+// warnAboutDNS logs, once, which program sets the DNS settings of tunnels and
+// what would keep them from working. On a host with systemd-resolved it says
+// what warnAboutResolver says; with resolvconf it says that only the servers of
+// a full tunnel can be set, so that the host's administrator knows before the
+// first profile asks for more. It is informational and changes nothing.
+func warnAboutDNS(log *slog.Logger, resolvConf, resolvedDir, resolvconfConf string, check func() (linux.DNSBackend, error)) {
+	backend, err := check()
+	switch backend {
+	case linux.DNSResolvconf:
+		log.Info("DNS settings of tunnels go through resolvconf: the servers of a full tunnel replace the others while it is up, and a tunnel for some domains only gets none")
+		if err != nil {
+			log.Warn("DNS settings of tunnels cannot be applied", "err", err)
+		}
+		if resolvconfDisabled(resolvconfConf) {
+			log.Warn("DNS settings of tunnels have no effect: resolvconf is disabled", "path", resolvconfConf)
+		}
+	case linux.DNSNone:
+		log.Warn("DNS settings of tunnels cannot be applied", "err", err,
+			"hint", "install systemd-resolved, or openresolv to set the servers of a full tunnel")
+	default:
+		warnAboutResolver(log, resolvConf, resolvedDir, func() error { return err })
+	}
+}
+
+// resolvconfDisabled reports whether resolvconf.conf at path turns resolvconf
+// off (resolvconf=NO), in which case it writes nothing.
+func resolvconfDisabled(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(name) != "resolvconf" {
+			continue
+		}
+		return strings.EqualFold(strings.Trim(strings.TrimSpace(value), `"'`), "no")
+	}
+	return false
+}

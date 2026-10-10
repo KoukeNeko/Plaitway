@@ -26,7 +26,7 @@ type realConfig struct {
 }
 
 // wireReal builds the real backends, the Reconciler on the Linux adapters
-// (netlink and systemd-resolved), and the network monitor the Reconciler and
+// (netlink, and systemd-resolved or else resolvconf for DNS), and the network monitor the Reconciler and
 // the engines share. It is the only place that knows how the real parts fit
 // together; the daemon core sees tunnel.Backend, tunnel.Reconciler and
 // osnet.NetMonitor only.
@@ -57,8 +57,8 @@ func wireReal(cfg realConfig) ([]tunnel.Backend, tunnel.Reconciler, osnet.NetMon
 		return nil, nil, nil, fmt.Errorf("start the Reconciler: %w", err)
 	}
 	// resolvectl may take its time to answer, and the answer changes nothing.
-	go warnAboutResolver(cfg.log, resolvConfPath, resolvedDir, func() error {
-		return linux.CheckResolved(linux.DNSOptions{Logger: cfg.log})
+	go warnAboutDNS(cfg.log, resolvConfPath, resolvedDir, resolvconfConfPath, func() (linux.DNSBackend, error) {
+		return linux.CheckDNS(linux.DNSOptions{Logger: cfg.log})
 	})
 	backends := []tunnel.Backend{
 		ovpn.Backend(ovpn.Config{Binary: cfg.openvpn, RunDir: cfg.runDir, Log: cfg.log}),

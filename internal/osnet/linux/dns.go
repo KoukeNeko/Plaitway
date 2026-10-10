@@ -92,6 +92,9 @@ type dnsConfigurator struct {
 	run     CommandRunner
 	log     *slog.Logger
 	timeout time.Duration
+	// noResolvconf is set on a host that has no resolvconf either, and makes the
+	// error of a missing resolvectl say what could be installed.
+	noResolvconf bool
 
 	// mu guards applied, and serializes the resolvectl calls of one operation.
 	mu sync.Mutex
@@ -416,6 +419,9 @@ func (d *dnsConfigurator) resolvectl(args ...string) (string, error) {
 		default:
 			return string(out), fmt.Errorf("resolvectl %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
 		}
+	}
+	if d.noResolvconf {
+		return "", fmt.Errorf("%w, and there is no resolvconf to set the servers of a full tunnel", errNoResolvectl)
 	}
 	return "", errNoResolvectl
 }

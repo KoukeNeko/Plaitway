@@ -756,6 +756,19 @@ func TestResolvectlIsMissing(t *testing.T) {
 	}
 }
 
+// A host with neither resolved nor resolvconf is told what to install, in the
+// reason the profile shows.
+func TestResolvectlIsMissingAndSoIsResolvconf(t *testing.T) {
+	f := newFakeResolved("tun0")
+	clear(f.programs)
+	d := newTestDNS(f)
+	d.noResolvconf = true
+	err := d.Apply("office", []osnet.DNSEntry{dnsCatchAll("tun0", "10.6.0.1")})
+	if !errors.Is(err, errNoResolvectl) || !strings.Contains(err.Error(), "resolvectl not found") || !strings.Contains(err.Error(), "no resolvconf") {
+		t.Errorf("Apply = %v, want resolvectl not found, and no resolvconf", err)
+	}
+}
+
 func TestResolvectlInBin(t *testing.T) {
 	f := newFakeResolved("tun0")
 	delete(f.programs, resolvectlPath)

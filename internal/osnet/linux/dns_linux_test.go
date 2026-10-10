@@ -21,7 +21,8 @@ func TestRunDNSCommandEnvironment(t *testing.T) {
 	}
 	got := strings.Fields(string(out))
 	slices.Sort(got)
-	if want := []string{"LC_ALL=C", "PATH=/usr/bin:/bin"}; !slices.Equal(got, want) {
+	// /sbin is in it for resolvconf, a script that runs tools from there.
+	if want := []string{"LC_ALL=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}; !slices.Equal(got, want) {
 		t.Errorf("environment = %q, want %q", got, want)
 	}
 }
@@ -64,5 +65,28 @@ func TestLiveResolvedReadOnly(t *testing.T) {
 	}
 	if read == 0 {
 		t.Skip("resolved lists no link")
+	}
+}
+
+func TestDetectDNSBackend(t *testing.T) {
+	has := func(paths ...string) func(string) bool {
+		return func(p string) bool { return slices.Contains(paths, p) }
+	}
+	tests := []struct {
+		name  string
+		files []string
+		want  DNSBackend
+	}{
+		{"resolvectl in /usr/bin", []string{"/usr/bin/resolvectl"}, DNSResolved},
+		{"resolvectl in /bin", []string{"/bin/resolvectl"}, DNSResolved},
+		{"both: resolved is the system's own", []string{"/usr/bin/resolvectl", "/sbin/resolvconf"}, DNSResolved},
+		{"resolvconf in /sbin", []string{"/sbin/resolvconf"}, DNSResolvconf},
+		{"resolvconf in /usr/sbin", []string{"/usr/sbin/resolvconf"}, DNSResolvconf},
+		{"neither", nil, DNSNone},
+	}
+	for _, tt := range tests {
+		if got := DetectDNSBackend(has(tt.files...)); got != tt.want {
+			t.Errorf("%s: backend = %s, want %s", tt.name, got, tt.want)
+		}
 	}
 }
