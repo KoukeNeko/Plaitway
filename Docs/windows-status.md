@@ -58,7 +58,7 @@ restarts after a crash.
 - A code signing certificate: the package, the programs and the app are unsigned (`build-installer.ps1 -CertificateThumbprint`
   signs them when there is one; tried with a throw-away certificate). The app's check of the helper then falls back to the
   folder rule, which Program Files passes.
-- A release, release notes for Windows, update checking.
+- Update checking.
 - OpenVPN is the user's own installation, not part of the package.
 - Polish listed by the reviewers: tab stops of the sidebar, the columns of the log page, a test of the zh-TW strings through
   UI Automation.

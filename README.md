@@ -81,7 +81,10 @@ Open **Plaitway** from the application menu, or run `plaitway-app`. With Network
 `rc-manager=resolvconf` in the `[main]` section of a file in `/etc/NetworkManager/conf.d`, or it
 replaces the DNS servers of a full tunnel; [Linux without systemd](#linux-without-systemd-gentoo-openrc) has the details.
 
-**Windows** is in development and has no release yet, see [Windows](#windows).
+**Windows 11, x64:** download `Plaitway-<version>-x64-en-US.msi` (or `zh-TW`) from the
+[latest release](https://github.com/KoukeNeko/Plaitway/releases/latest) and run it. The package is not signed yet, so
+SmartScreen asks for confirmation. WireGuard profiles need nothing else; OpenVPN profiles use the OpenVPN installation of
+the PC. See [Windows](#windows).
 
 **Then, on either system:**
 
@@ -553,7 +556,7 @@ Files on a machine: profiles and the route journal in
 `plaitwayd` runs on Windows with the real OpenVPN and WireGuard engines, as the service `PlaitwayHelper` or in a
 console, and `plaitway` is the same command line as on macOS. The app is native: C#, .NET 10, WinUI 3, unpackaged,
 in `windows/` ([windows/README.md](windows/README.md)). `packaging/windows/build-installer.ps1` builds the MSI
-([packaging/windows/README.md](packaging/windows/README.md)); there is no release yet.
+([packaging/windows/README.md](packaging/windows/README.md)); the release attaches it, unsigned.
 [Docs/windows-status.md](Docs/windows-status.md) lists what is verified, what waits for a machine or a decision and what is
 not done; [Docs/windows-architecture.md](Docs/windows-architecture.md) says what is where, who is trusted with what and
 why the choices were made.
@@ -1169,7 +1172,7 @@ menu and the command line work without it.
 - Credentials are always remembered in the login Keychain; there is no opt-out
 - The helper's log is rotated when it starts, not while it runs
 - A corrupt `profiles.json` stops the helper instead of being recovered
-- Windows: unsigned, no release yet, the MSI has not been installed on a clean machine, and the OpenVPN engine's tests
+- Windows: unsigned, the MSI has not been installed on a clean machine, and the OpenVPN engine's tests
   that need an elevated shell have not been run; see [Docs/windows-status.md](Docs/windows-status.md) for the full list
 - Linux: the limits are listed under [Known limitations on Linux](#known-limitations-on-linux)
 
