@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Several VPNs at once, without them fighting over your routes.</strong><br>
-  Run OpenVPN and WireGuard profiles side by side on macOS and Linux. One
+  Run OpenVPN and WireGuard profiles side by side on macOS, Linux and Windows. One
   component owns the routing table and DNS, so a new Wi-Fi network or a changed
   gateway leaves nothing stale behind.
 </p>
@@ -49,62 +49,40 @@ before it changes anything, and puts it right again after a network change.
 brew install --cask koukeneko/tap/plaitway
 ```
 
-Or take the dmg from the [latest release](https://github.com/KoukeNeko/Plaitway/releases/latest).
-Open **Plaitway**; the first run offers **Install Helper**, and macOS asks you to allow it in
-**System Settings › General › Login Items & Extensions**.
+The first run offers **Install Helper**; allow it in **System Settings › General › Login Items & Extensions**.
 
-**Linux with systemd** (Ubuntu 24.04 and 26.04, Debian 13)
+**Windows 11, x64**
 
 ```sh
-sudo install -d -m 0755 /etc/apt/keyrings
+scoop bucket add koukeneko https://github.com/KoukeNeko/scoop-bucket
+scoop install koukeneko/plaitway
+```
+
+OpenVPN profiles need an OpenVPN installation on the PC; WireGuard profiles need nothing else.
+
+**Ubuntu 24.04 and 26.04, Debian 13**
+
+```sh
 sudo curl -fsSL https://koukeneko.github.io/Plaitway/key.asc -o /etc/apt/keyrings/plaitway.asc
 echo "deb [signed-by=/etc/apt/keyrings/plaitway.asc] https://koukeneko.github.io/Plaitway stable main" | sudo tee /etc/apt/sources.list.d/plaitway.list
-sudo chmod 0644 /etc/apt/keyrings/plaitway.asc /etc/apt/sources.list.d/plaitway.list
 sudo apt update && sudo apt install plaitway
 ```
 
-It installs OpenVPN and the GTK libraries and starts the helper, `plaitwayd.service`. Open
-**Plaitway** from the application menu, or run `plaitway-app`. `sudo apt upgrade` brings the later versions.
+**Gentoo with OpenRC:** [Linux without systemd](#linux-without-systemd-gentoo-openrc)
 
-**Linux with OpenRC** (Gentoo): the live ebuild of this repository builds it with the system's Go,
-installs the OpenRC service, and pulls in openresolv for DNS settings and OpenVPN for OpenVPN profiles:
-
-```sh
-git clone https://github.com/KoukeNeko/Plaitway && cd Plaitway
-printf '[plaitway]\nlocation = %s\n' "$PWD/packaging/linux/gentoo" | sudo tee /etc/portage/repos.conf/plaitway.conf
-echo '=net-vpn/plaitway-9999 **' | sudo tee -a /etc/portage/package.accept_keywords/plaitway
-sudo emerge net-vpn/plaitway
-sudo rc-update add plaitwayd default && sudo rc-service plaitwayd start
-```
-
-Open **Plaitway** from the application menu, or run `plaitway-app`. With NetworkManager, set
-`rc-manager=resolvconf` in the `[main]` section of a file in `/etc/NetworkManager/conf.d`, or it
-replaces the DNS servers of a full tunnel; [Linux without systemd](#linux-without-systemd-gentoo-openrc) has the details.
-
-**Windows 11, x64:** download `Plaitway-<version>-x64-en-US.msi` (or `zh-TW`) from the
-[latest release](https://github.com/KoukeNeko/Plaitway/releases/latest) and run it. The package is not signed yet, so
-SmartScreen asks for confirmation. Or with Scoop:
-`scoop bucket add koukeneko https://github.com/KoukeNeko/scoop-bucket`, then `scoop install koukeneko/plaitway`.
-WireGuard profiles need nothing else; OpenVPN profiles use the OpenVPN installation of the PC. See [Windows](#windows).
-
-**Then, on either system:**
-
-1. Import a profile: the **+** in the toolbar, a file dropped on the window, or `plaitway import file.ovpn`
-2. Press **Connect**, or choose the profile's row in the menu bar or tray. A profile that needs a username and
-   password asks at the first connection; the login Keychain (macOS) or the Secret Service (Linux) remembers them
-3. Add a second profile and connect it too. The sidebar order is the priority, and the Routes and DNS page says what each one holds
+Then import a profile (the **+** in the toolbar, a file dropped on the window, or `plaitway import file.ovpn`) and
+press **Connect**. A second profile connects the same way; the sidebar order is the priority.
 
 <details>
 <summary><strong>Other ways to install</strong></summary>
 
-- **macOS, without Homebrew:** copy `Plaitway.app` from the dmg or the zip to `/Applications`. To get the command
-  line tool onto your path: `ln -s /Applications/Plaitway.app/Contents/Resources/bin/plaitway /usr/local/bin/plaitway`
-  (Homebrew does it for you)
-- **macOS, if SMAppService does not accept the helper:** `sudo scripts/dev-install-daemon.sh` installs it as a
-  plain LaunchDaemon and `sudo scripts/dev-uninstall-daemon.sh` removes it
-- **Linux, without the apt repository:** `sudo apt install ./plaitway_*.deb` with the `.deb` of the
-  release page (it is attached a few minutes after the macOS files), or build it with `make deb`, which writes it
-  to `build/linux`
+- **A file from the [latest release](https://github.com/KoukeNeko/Plaitway/releases/latest):** the dmg or zip (macOS; copy
+  `Plaitway.app` to `/Applications`), `Plaitway-<version>-x64.msi` (Windows; not signed yet, so SmartScreen asks for
+  confirmation), `plaitway_<version>_<arch>.deb` (`sudo apt install ./plaitway_*.deb`)
+- **macOS, if SMAppService does not accept the helper:** `sudo scripts/dev-install-daemon.sh` installs it as a plain
+  LaunchDaemon
+- **macOS, the command line tool without Homebrew:**
+  `ln -s /Applications/Plaitway.app/Contents/Resources/bin/plaitway /usr/local/bin/plaitway`
 - **Linux with OpenRC, from a checkout without portage:** `make linux-build`, then
   `sudo packaging/linux/install.sh --prefix /usr --openrc` with the `--python-dir` of
   [Linux without systemd](#linux-without-systemd-gentoo-openrc)
@@ -288,23 +266,20 @@ helper further; [Linux](#linux) lists how.
 
 ## In your language
 
-English and 繁體中文, following the system. Messages that come from the helper
-itself, such as why a connection is stuck, are in English.
+English and 繁體中文, following the system. On Windows, **Settings › Language** chooses one, and **Restart Plaitway**
+loads it. Messages that come from the helper itself, such as why a connection is stuck, are in English.
 
 ## Update and uninstall
 
-**Update on macOS:** `brew upgrade --cask koukeneko/tap/plaitway`, or replace
-`Plaitway.app` in `/Applications` with the new one. When the helper is older than the
-app, the app offers **Reinstall Helper**, which disconnects running profiles.
+| Update | |
+|---|---|
+| macOS | `brew upgrade --cask koukeneko/tap/plaitway`; when the helper is older than the app, the app offers **Reinstall Helper** |
+| Windows | `scoop update plaitway` |
+| Ubuntu, Debian | `sudo apt update && sudo apt upgrade` |
+| Gentoo | `sudo emerge @live-rebuild`, then `sudo rc-service plaitwayd restart` |
 
-**Update on Linux:** `sudo apt update && sudo apt upgrade` with the apt repository added,
-or `sudo apt install ./plaitway_*.deb` over the old package. The upgrade restarts the
-helper, which disconnects running profiles; the stored profiles stay. Quit Plaitway and
-open it again to get the new window.
-
-**Update on Gentoo:** `sudo emerge @live-rebuild`, then `sudo rc-service plaitwayd restart`, which
-disconnects running profiles; the stored profiles stay. Installed by hand, build and run
-`install.sh` again.
+Installed from a file or by hand, install the new one over the old one. A new helper replaces the running one, which
+disconnects running profiles; the stored profiles stay. Quit Plaitway and open it again to get the new window.
 
 **Uninstall on macOS**, in this order:
 
