@@ -279,6 +279,7 @@ func goComponents(root, goos, goarch string) ([]component, error) {
 		return nil, fmt.Errorf("go list: %w", err)
 	}
 	seen := map[string]bool{}
+	moduleDirs := map[string]string{}
 	var out []component
 	for _, line := range strings.Split(string(listing), "\n") {
 		fields := strings.Fields(line)
@@ -292,6 +293,7 @@ func goComponents(root, goos, goarch string) ([]component, error) {
 			continue
 		}
 		seen[fields[0]] = true
+		moduleDirs[fields[0]] = fields[2]
 		c, err := directoryComponent(fields[0], fields[1], "https://pkg.go.dev/"+fields[0], fields[2])
 		if err != nil {
 			return nil, err
@@ -306,10 +308,9 @@ func goComponents(root, goos, goarch string) ([]component, error) {
 	if len(env) != 2 {
 		return nil, fmt.Errorf("go env: unexpected output %q", goroot)
 	}
-	licenseDir := env[0]
-	if _, err := os.Stat(filepath.Join(licenseDir, "LICENSE")); errors.Is(err, os.ErrNotExist) {
-		// Homebrew installs the toolchain in libexec and keeps LICENSE beside it.
-		licenseDir = filepath.Dir(licenseDir)
+	licenseDir, err := goLicenseDir(env[0], moduleDirs)
+	if err != nil {
+		return nil, err
 	}
 	std, err := directoryComponent("Go standard library", strings.TrimPrefix(env[1], "go"), "https://go.dev", licenseDir)
 	if err != nil {
@@ -318,6 +319,30 @@ func goComponents(root, goos, goarch string) ([]component, error) {
 	out = append(out, std)
 	sortComponents(out)
 	return out, nil
+}
+
+// goXModule is a module of the Go project that is linked into both programs.
+const goXModule = "golang.org/x/sys"
+
+// goLicenseDir returns the directory with the LICENSE of the Go standard
+// library. A Go tree has it in GOROOT, Homebrew installs the toolchain in
+// libexec and keeps it beside that, and Gentoo deletes it. The modules of the
+// Go project carry the same file, so their copy stands in, and modules maps
+// the linked modules to their directories.
+func goLicenseDir(goroot string, modules map[string]string) (string, error) {
+	for _, dir := range []string{goroot, filepath.Dir(goroot)} {
+		_, err := os.Stat(filepath.Join(dir, "LICENSE"))
+		if err == nil {
+			return dir, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	if dir := modules[goXModule]; dir != "" {
+		return dir, nil
+	}
+	return "", fmt.Errorf("the Go standard library: no LICENSE in %s or beside it, and %s is not linked", goroot, goXModule)
 }
 
 type swiftResolved struct {

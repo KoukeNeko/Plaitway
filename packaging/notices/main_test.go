@@ -222,3 +222,37 @@ func mustWrite(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestGoLicenseDir(t *testing.T) {
+	write := func(dir string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "LICENSE"), []byte("license"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	modules := func(dir string) map[string]string { return map[string]string{goXModule: dir} }
+
+	tree := t.TempDir()
+	write(filepath.Join(tree, "goroot"))
+	if got, err := goLicenseDir(filepath.Join(tree, "goroot"), nil); err != nil || got != filepath.Join(tree, "goroot") {
+		t.Errorf("a GOROOT with the file: got %q, %v", got, err)
+	}
+
+	homebrew := t.TempDir()
+	write(homebrew)
+	if got, err := goLicenseDir(filepath.Join(homebrew, "libexec"), nil); err != nil || got != homebrew {
+		t.Errorf("the file beside GOROOT: got %q, %v", got, err)
+	}
+
+	gentoo, module := t.TempDir(), t.TempDir()
+	write(module)
+	if got, err := goLicenseDir(filepath.Join(gentoo, "lib", "go"), modules(module)); err != nil || got != module {
+		t.Errorf("no file, the module of the Go project instead: got %q, %v", got, err)
+	}
+	if _, err := goLicenseDir(filepath.Join(gentoo, "lib", "go"), nil); err == nil {
+		t.Error("no file and no module of the Go project was accepted")
+	}
+}
