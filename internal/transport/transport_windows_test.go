@@ -406,6 +406,27 @@ func impersonateOrdinaryInteractiveUser(t *testing.T, action func()) {
 	action()
 }
 
+// administratorsGroupOf returns the Administrators group when the token has it,
+// elevated or not: an ordinary user is not one, and an elevated process would
+// otherwise be let in by the pipe's entry for administrators.
+func administratorsGroupOf(t *testing.T, token windows.Token) []windows.SIDAndAttributes {
+	t.Helper()
+	administrators, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := token.GetTokenGroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range groups.AllGroups() {
+		if group.Sid.Equals(administrators) {
+			return []windows.SIDAndAttributes{{Sid: group.Sid}}
+		}
+	}
+	return nil
+}
+
 var procCreateRestrictedToken = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateRestrictedToken")
 
 func restrictedImpersonationToken(t *testing.T) windows.Token {
@@ -414,17 +435,17 @@ func restrictedImpersonationToken(t *testing.T) windows.Token {
 	if err != nil {
 		t.Fatal(err)
 	}
-	disable := windows.SIDAndAttributes{Sid: user.User.Sid}
+	disable := []windows.SIDAndAttributes{{Sid: user.User.Sid}}
 	var own windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_DUPLICATE|windows.TOKEN_QUERY, &own); err != nil {
 		t.Fatal(err)
 	}
 	defer own.Close()
+	disable = append(disable, administratorsGroupOf(t, own)...)
 	var restricted windows.Token
-	const disableSidCount = 1
 	result, _, callErr := procCreateRestrictedToken.Call(
 		uintptr(own), 0,
-		disableSidCount, uintptr(unsafe.Pointer(&disable)),
+		uintptr(len(disable)), uintptr(unsafe.Pointer(&disable[0])),
 		0, 0, 0, 0,
 		uintptr(unsafe.Pointer(&restricted)))
 	if result == 0 {

@@ -206,9 +206,27 @@ func TestCheckAdminOnlyRefusesAFileWithoutAnAccessList(t *testing.T) {
 	}
 }
 
+// ownByTestUser makes the test user the owner of the three levels of an install
+// tree. An elevated process owns what it creates as the Administrators group,
+// which is trusted, so the owner has to be set for a test about an untrusted one.
+func ownByTestUser(t *testing.T, program string) {
+	t.Helper()
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := pathChain(program)
+	for _, path := range chain[len(chain)-3:] {
+		if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, user.User.Sid, nil, nil, nil); err != nil {
+			t.Fatalf("make the test user the owner of %s: %v", path, err)
+		}
+	}
+}
+
 func TestCheckAdminOnlyRefusesAnObjectOwnedByAnUntrustedAccount(t *testing.T) {
 	closed := listFor(t, allow("OICI", rightReadExecute, usersSID))
 	program := installTree(t, closed, closed, closed)
+	ownByTestUser(t, program)
 	withoutTestUser, err := adminSIDs()
 	if err != nil {
 		t.Fatal(err)
