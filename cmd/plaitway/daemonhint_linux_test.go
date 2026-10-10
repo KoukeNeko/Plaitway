@@ -12,7 +12,16 @@ func dialError(socket, reason string) error {
 	return status.Error(codes.Unavailable, `connection error: desc = "transport: Error while dialing: dial unix `+socket+`: connect: `+reason+`"`)
 }
 
+// onInit makes the client see a system whose init has the given run directory.
+func onInit(t *testing.T, runDir string) {
+	t.Helper()
+	was := isDirectory
+	isDirectory = func(path string) bool { return path == runDir }
+	t.Cleanup(func() { isDirectory = was })
+}
+
 func TestFailureNamesTheUnitWhenTheProductionDaemonIsNotRunning(t *testing.T) {
+	onInit(t, systemdRunDir)
 	const hint = `; run "systemctl status plaitwayd"`
 	for _, tt := range []struct {
 		name, socket, reason, want string
@@ -28,6 +37,27 @@ func TestFailureNamesTheUnitWhenTheProductionDaemonIsNotRunning(t *testing.T) {
 			got := (&client{socket: tt.socket}).failure(dialError(tt.socket, tt.reason))
 			if got == nil || got.Error() != tt.want {
 				t.Fatalf("failure = %v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The advice is the command of the init that runs the service: a person on
+// OpenRC has no systemctl.
+func TestFailureNamesTheCommandOfTheInit(t *testing.T) {
+	for _, tt := range []struct {
+		name, runDir, hint string
+	}{
+		{"systemd", systemdRunDir, `; run "systemctl status plaitwayd"`},
+		{"OpenRC", openrcRunDir, `; run "rc-service plaitwayd status"`},
+		{"another init", "/run/runit", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			onInit(t, tt.runDir)
+			got := (&client{socket: defaultSocket}).failure(dialError(defaultSocket, "no such file or directory"))
+			want := "the daemon is not running: " + defaultSocket + " does not exist" + tt.hint
+			if got == nil || got.Error() != want {
+				t.Fatalf("failure = %v, want %q", got, want)
 			}
 		})
 	}

@@ -753,7 +753,7 @@ resolvectl status                     # per-link DNS settings
 ```
 
 - `plaitway` says `the daemon is not running: … does not exist; run "systemctl status plaitwayd"`
-  when the socket is missing. The app shows a screen for each state (not installed, not
+  when the socket is missing (`rc-service plaitwayd status` on OpenRC). The app shows a screen for each state (not installed, not
   running, not answering, refused, not trusted); **Start Helper** asks polkit.
 - A profile that fails says why in its log and on its Overview. The helper's log at
   start lists which engines it can run and why not: without `/dev/net/tun` (`modprobe tun`)
