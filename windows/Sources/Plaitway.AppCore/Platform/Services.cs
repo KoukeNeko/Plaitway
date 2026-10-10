@@ -28,6 +28,17 @@ public interface IQuitPrompts
 /// <param name="ShowWindow">The window should come forward: there is something to look at.</param>
 public readonly record struct QuitDecision(bool CanQuit, bool ShowWindow);
 
+/// <summary>The language the person chose for the app, kept for the next start.</summary>
+public interface ILanguagePreference
+{
+    /// <summary>The tag chosen, such as <c>zh-TW</c>; null while the app follows the language of Windows.</summary>
+    string? Language { get; }
+
+    /// <summary>Keeps the choice; null to follow the language of Windows.</summary>
+    /// <exception cref="InvalidOperationException">The choice cannot be kept.</exception>
+    void Save(string? language);
+}
+
 /// <summary>Starting with Windows, which is an entry of the user's own startup list.</summary>
 public interface IStartupRegistration
 {

@@ -13,6 +13,15 @@
 
       <Border Style="{StaticResource CardStyle}">
         <StackPanel Spacing="8">
+          <ComboBox Header="{x:Bind ViewModel.Text.Language}" ItemsSource="{x:Bind ViewModel.Languages}" DisplayMemberPath="Name"
+                    SelectedItem="{x:Bind ViewModel.SelectedLanguage, Mode=OneWay}" SelectionChanged="OnLanguageChosen" MinWidth="220" />
+          <Button Content="{x:Bind ViewModel.Text.RestartPlaitway}" Command="{x:Bind ViewModel.RestartCommand}"
+                  Visibility="{x:Bind controls:Bind.Visible(ViewModel.IsRestartNeeded), Mode=OneWay}" />
+        </StackPanel>
+      </Border>
+
+      <Border Style="{StaticResource CardStyle}">
+        <StackPanel Spacing="8">
           <TextBlock Text="{x:Bind ViewModel.Text.Helper}" Style="{StaticResource SectionHeaderStyle}" />
           <controls:DetailRows Rows="{x:Bind ViewModel.Helper, Mode=OneWay}" />
           <StackPanel Orientation="Horizontal" Spacing="8" Padding="0,8,0,0" Visibility="{x:Bind controls:Bind.Visible(ViewModel.CanManageHelper), Mode=OneWay}">

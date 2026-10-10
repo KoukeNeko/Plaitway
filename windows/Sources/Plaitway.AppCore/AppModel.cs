@@ -42,12 +42,14 @@ public sealed partial class AppModel : ObservableObject, IAsyncDisposable
         IStartupRegistration startup,
         UiText text,
         AppEnvironment environment,
+        AppLanguage language,
         TimeProvider time,
         ILogger<AppModel> log)
     {
         Store = store;
         Installer = installer;
         Text = text;
+        Language = language;
         Errors = new ErrorText(text);
         Time = time;
         AppVersion = environment.AppVersion;
@@ -68,6 +70,9 @@ public sealed partial class AppModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The strings.</summary>
     public UiText Text { get; }
+
+    /// <summary>The language of the strings, and the one chosen for the next start.</summary>
+    public AppLanguage Language { get; }
 
     /// <summary>The words for failures.</summary>
     public ErrorText Errors { get; }

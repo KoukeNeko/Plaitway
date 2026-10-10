@@ -24,6 +24,10 @@ public sealed class AppWindowTests(DaemonBinary binary)
     private const string CancelButton = "Cancel";
     private const byte VkF6 = 0x75;
     private const string ImportButton = "Import Profile…";
+    private const string LanguageBox = "Language";
+    private const string RestartButton = "Restart Plaitway";
+    private const string TraditionalChineseName = "繁體中文";
+    private const string SettingsInChinese = "設定";
     private const int QuitAttempts = 3;
     private static readonly TimeSpan KeyboardGrace = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ExitTimeout = TimeSpan.FromSeconds(20);
@@ -60,6 +64,28 @@ public sealed class AppWindowTests(DaemonBinary binary)
         Check("Settings");
 
         Assert.Empty(problems);
+    }
+
+    [Fact]
+    public async Task ALanguageChosenInTheSettingsIsLoadedWhenTheAppRestartsItself()
+    {
+        await using var world = await World.StartAsync(binary);
+        await using var app = await AppProcess.StartAsync(world.Pipe, language: null, savedLanguage: "en-US");
+        var window = Uia.Window(app.WindowHandle);
+        await WaitForProfilesAsync(window);
+        await SelectAsync(window, "Settings", ControlType.ListItem);
+        await Wait.UntilAsync("the language box", () => Uia.Find(window, LanguageBox, ControlType.ComboBox) is not null);
+        Assert.Null(Uia.Find(window, RestartButton, ControlType.Button));
+
+        Uia.Choose(Uia.Find(window, LanguageBox, ControlType.ComboBox)!, TraditionalChineseName);
+
+        await Wait.UntilAsync("the restart button", () => Uia.Find(window, RestartButton, ControlType.Button) is not null);
+        Uia.Invoke(Uia.Find(window, RestartButton, ControlType.Button)!);
+        await Wait.UntilAsync("the first copy to end", () => app.Process.HasExited, ExitTimeout);
+
+        await using var restarted = await app.WaitForRestartedCopyAsync();
+        var restartedWindow = Uia.Window(restarted.WindowHandle);
+        await Wait.UntilAsync("the sidebar in Traditional Chinese", () => Uia.Find(restartedWindow, SettingsInChinese, ControlType.ListItem) is not null);
     }
 
     [Fact]

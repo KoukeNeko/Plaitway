@@ -65,6 +65,13 @@ internal sealed record AppOptions(string? Theme, string? Language, RectInt32? Bo
         return new AppOptions(theme, language, bounds, alwaysOnTop, startHidden, dataDirectory);
     }
 
+    /// <summary>
+    /// The arguments of the copy that replaces this one in a restart: the same, except the one that hides the window, because
+    /// the person who restarts is looking at it.
+    /// </summary>
+    public static IReadOnlyList<string> ArgumentsForRestart(IReadOnlyList<string> arguments) =>
+        [.. arguments.Where(argument => argument != StartHiddenSwitch)];
+
     private static RectInt32? ParseBounds(string text)
     {
         var fields = text.Split(',');

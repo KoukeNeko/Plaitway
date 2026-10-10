@@ -47,6 +47,7 @@ internal sealed class AppHarness : IAsyncDisposable
         Service = new FakeHelperService { State = options.HelperState };
         Launcher = new FakeElevatedLauncher();
         Startup = new FakeStartup();
+        LanguagePreference = new FakeLanguagePreference();
         Text = TestText.En;
         Api = new DaemonClientApi(DaemonClient.Connect(daemon.Pipe, FastBackoff));
         Calls = new RecordingDaemonApi(Api);
@@ -55,7 +56,8 @@ internal sealed class AppHarness : IAsyncDisposable
         Installer = new HelperInstaller(Service, Launcher, locator);
         Store = new ProfileStore(Calls, Credentials, Ui, NullLogger<ProfileStore>.Instance);
         Model = new AppModel(
-            Store, Installer, Startup, Text, new AppEnvironment(options.AppVersion, options.IsOverridden), TimeProvider.System, NullLogger<AppModel>.Instance);
+            Store, Installer, Startup, Text, new AppEnvironment(options.AppVersion, options.IsOverridden),
+            new AppLanguage(LanguagePreference, Text), TimeProvider.System, NullLogger<AppModel>.Instance);
     }
 
     public DaemonProcess Daemon { get; }
@@ -69,6 +71,8 @@ internal sealed class AppHarness : IAsyncDisposable
     public FakeElevatedLauncher Launcher { get; }
 
     public FakeStartup Startup { get; }
+
+    public FakeLanguagePreference LanguagePreference { get; }
 
     public UiText Text { get; }
 

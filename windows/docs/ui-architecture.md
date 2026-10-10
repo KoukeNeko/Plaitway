@@ -184,7 +184,9 @@ flowchart LR
   (`SecretAppearsMoreThanOnce(long number)`).
 - `%@`, `%lld`, `%1$@` and `%%` become `{0}`, `{1}` and `%`. A plural variation is refused with an error: say it with a
   count in the string instead, as the macOS catalog does. A key in both catalogs is an error.
-- The language follows Windows. `--language en-US|zh-TW` or `PLAITWAY_LANGUAGE` overrides it (the screenshots use it).
+- The language follows Windows, unless the person chose one in Settings: the choice is kept in `settings.json` of the app's data
+  folder and read at the next start, which the Restart button of the page brings about (`AppLanguage`, `FileLanguagePreference`,
+  `AppHost.RestartAsync`). `--language en-US|zh-TW` or `PLAITWAY_LANGUAGE` overrides both (the screenshots use it).
 
 ## Resources and theming
 
@@ -382,7 +384,7 @@ whatever the file used: `AFileWithWindowsLineEndingsIsNotDirtyUntilItIsChanged`,
 | everyStringIsTranslatedIntoTraditionalChinese | `EveryStringIsTranslatedIntoTraditionalChineseWithTheSamePlaceholders`, `BothLanguagesHaveTheSameIdsAndNoEmptyString`, `ThePlaceholdersOfEveryStringFormatInBothLanguages` |
 | theTranslationsUseTaiwanTerms | `TheTranslationsUseTaiwanTerms` |
 | theTextCarriesNoPersonality | `TheTextCarriesNoPersonality`, `LabelsAreNounsAndShortStatesAndNeverQuestionsExceptWhereTheUserDecides` |
-| theCompiledBundleHasTheTraditionalChineseStrings | **no counterpart yet.** `EveryMemberResolvesInBothLanguagesAndFormatsItsArguments` and `TheGeneratedClassHasAMemberForEveryStringOfTheCatalogs` read the catalogs through `CatalogLocalizer`; no test loads the generated `Resources.resw` or the `.pri` of the app. What is missing is a UI test that starts the app with `--language zh-TW` and reads a string from the window (`Plaitway.App.UiTests`) |
+| theCompiledBundleHasTheTraditionalChineseStrings | `AppWindowTests.ALanguageChosenInTheSettingsIsLoadedWhenTheAppRestartsItself` starts the app in English, chooses Traditional Chinese in Settings, restarts it and reads the name of the Settings item from the new window. `EveryMemberResolvesInBothLanguagesAndFormatsItsArguments` and `TheGeneratedClassHasAMemberForEveryStringOfTheCatalogs` read the catalogs through `CatalogLocalizer` |
 | sameActionSameLabel | `SameActionSameLabel` |
 
 Added: `TheCatalogsHaveNoStringInBoth`, `TheWordsOfTheMacAppAreTheWordsOfThisOne`, and the tool's own tests in

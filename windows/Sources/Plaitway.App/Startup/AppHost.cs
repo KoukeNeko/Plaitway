@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Microsoft.UI.Dispatching;
@@ -10,6 +12,7 @@ using Plaitway.AppCore;
 using Plaitway.AppCore.Daemon;
 using Plaitway.AppCore.Dialogs;
 using Plaitway.AppCore.Helper;
+using Plaitway.AppCore.Platform;
 using Plaitway.AppCore.Text;
 using Plaitway.AppCore.ViewModels;
 using Plaitway.Client;
@@ -30,6 +33,7 @@ internal sealed class AppHost : IDialogHost
     private const string DataFolderName = "Plaitway";
     private const string LogFileName = "Logs\\app.log";
     private const string PlacementFileName = "window.json";
+    private const string SettingsFileName = "settings.json";
 
     private readonly Microsoft.UI.Xaml.Application _application;
     private readonly DispatcherQueue _dispatcher;
@@ -58,7 +62,10 @@ internal sealed class AppHost : IDialogHost
         var isOverridden = DaemonLocation.Override(environment) is not null;
         var dataDirectory = options.DataDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), DataFolderName);
         var logs = new FileLoggerProvider(Path.Combine(dataDirectory, LogFileName));
-        _text = new UiText(new MrtLocalizer(options.Language));
+
+        // What the command line says wins over what the person chose in the settings, which wins over the language of Windows.
+        var preference = new FileLanguagePreference(Path.Combine(dataDirectory, SettingsFileName));
+        _text = new UiText(new MrtLocalizer(options.Language ?? AppLanguage.Known(preference.Language)));
         var scheduler = new DispatcherScheduler(_dispatcher);
 
         // A daemon behind PLAITWAY_SOCKET (debug builds) is not the helper: the Credential Manager is neither read to answer it
@@ -69,7 +76,9 @@ internal sealed class AppHost : IDialogHost
         var locator = new HelperLocator(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), File.Exists, new WindowsHelperTrust());
         var installer = new HelperInstaller(new ScmHelperService(), launcher, locator);
         var startup = new RunKeyStartup(Environment.ProcessPath ?? string.Empty, isAvailable: !DaemonLocation.OverrideEnabled);
-        _model = new AppModel(store, installer, startup, _text, new AppEnvironment(AppVersion(), isOverridden), TimeProvider.System, logs.CreateLogger<AppModel>());
+        _model = new AppModel(
+            store, installer, startup, _text, new AppEnvironment(AppVersion(), isOverridden), new AppLanguage(preference, _text),
+            TimeProvider.System, logs.CreateLogger<AppModel>());
 
         _dialogHost = new DialogHostProxy();
         var dialogs = _dialogService = new ContentDialogService(_dialogHost);
@@ -129,6 +138,7 @@ internal sealed class AppHost : IDialogHost
         _shell.ShowWindowRequested += () => _window.Show();
         _shell.ImportRequested += () => _shell.ImportCommand.Execute(null);
         _shell.QuitRequested += () => _ = QuitAsync();
+        _model.RestartRequested += () => _ = RestartAsync();
         _instance.Listen();
         _model.Start();
         _coordinator.Start();
@@ -164,7 +174,34 @@ internal sealed class AppHost : IDialogHost
     /// Ends the app once the user has said what the profiles that are on should do; a user who cancels keeps it. Windows
     /// signing out or shutting down does not wait for an answer.
     /// </summary>
-    private async Task QuitAsync()
+    private Task QuitAsync() => EndAsync(async () =>
+    {
+        var decision = await _model.RequestQuitAsync(_quitPrompts, _isPoweringOff);
+        if (decision.ShowWindow)
+        {
+            _window?.Show();
+        }
+
+        if (decision.CanQuit)
+        {
+            await ShutDownAsync(restart: false);
+        }
+    });
+
+    /// <summary>
+    /// Ends this copy and starts another, so that a language chosen in the settings is loaded. Text that was changed and not
+    /// saved is asked about; the profiles that are on stay on, because the helper keeps them.
+    /// </summary>
+    private Task RestartAsync() => EndAsync(async () =>
+    {
+        if (await _model.RequestRestartAsync(_quitPrompts))
+        {
+            await ShutDownAsync(restart: true);
+        }
+    });
+
+    /// <summary>Runs a way of ending the app, unless one is already being decided.</summary>
+    private async Task EndAsync(Func<Task> decideAndEnd)
     {
         if (_isQuitting)
         {
@@ -174,16 +211,7 @@ internal sealed class AppHost : IDialogHost
         _isQuitting = true;
         try
         {
-            var decision = await _model.RequestQuitAsync(_quitPrompts, _isPoweringOff);
-            if (decision.ShowWindow)
-            {
-                _window?.Show();
-            }
-
-            if (decision.CanQuit)
-            {
-                await ShutDownAsync();
-            }
+            await decideAndEnd();
         }
         finally
         {
@@ -192,7 +220,8 @@ internal sealed class AppHost : IDialogHost
     }
 
     /// <summary>Stops everything the app started, so that the process ends by itself.</summary>
-    private async Task ShutDownAsync()
+    /// <param name="restart">Starts the app again once this copy has let go of the instance.</param>
+    private async Task ShutDownAsync(bool restart)
     {
         _tray?.Dispose();
         _tray = null;
@@ -205,9 +234,43 @@ internal sealed class AppHost : IDialogHost
         _window?.AllowClose();
         _dialogService.Dispose();
         _instance.Dispose();
+        if (restart)
+        {
+            StartNewCopy();
+        }
+
         _report.Write("exit", "clean");
         _window?.Close();
         _application.Exit();
+    }
+
+    /// <summary>
+    /// Starts the app again. It is the first copy only now that this one has released the instance, which is why it is
+    /// started here and not before the shutdown.
+    /// </summary>
+    private void StartNewCopy()
+    {
+        var path = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(path))
+        {
+            _report.Write("restart_failed", "process_path_unknown");
+            return;
+        }
+
+        var start = new ProcessStartInfo(path) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(path)! };
+        foreach (var argument in AppOptions.ArgumentsForRestart([.. Environment.GetCommandLineArgs().Skip(1)]))
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        try
+        {
+            using var started = Process.Start(start);
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException)
+        {
+            _report.Write("restart_failed", error);
+        }
     }
 
     /// <summary>The window that dialogs are made for is made after the services that need it.</summary>

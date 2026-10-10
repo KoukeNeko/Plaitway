@@ -97,6 +97,24 @@ internal sealed class FakeStartup : IStartupRegistration
     }
 }
 
+/// <summary>The language the person chose, in memory.</summary>
+internal sealed class FakeLanguagePreference : ILanguagePreference
+{
+    public string? Language { get; set; }
+
+    public Exception? Failure { get; set; }
+
+    public void Save(string? language)
+    {
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
+
+        Language = language;
+    }
+}
+
 /// <summary>Answers the two questions of Quit and remembers that they were asked.</summary>
 internal sealed class FakeQuitPrompts : IQuitPrompts
 {

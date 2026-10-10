@@ -27,6 +27,9 @@ public enum AlertTitle
     /// <summary>Changing the start with Windows.</summary>
     LaunchAtLoginFailed,
 
+    /// <summary>Keeping the language chosen for the next start.</summary>
+    LanguageNotSaved,
+
     /// <summary>Resyncing the daemon.</summary>
     ResyncFailed,
 
@@ -50,6 +53,7 @@ public sealed record AppAlert(Guid Id, string Title, string Message)
         AlertTitle.ConnectFailed => text.ConnectFailed,
         AlertTitle.HelperFailed => text.HelperFailed,
         AlertTitle.LaunchAtLoginFailed => text.LaunchAtLoginFailed,
+        AlertTitle.LanguageNotSaved => text.LanguageNotSaved,
         AlertTitle.ResyncFailed => text.ResyncFailed,
         _ => text.RemoveFailed,
     };

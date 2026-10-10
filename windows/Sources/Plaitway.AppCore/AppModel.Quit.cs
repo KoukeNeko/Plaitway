@@ -36,4 +36,12 @@ public sealed partial class AppModel
                 return new QuitDecision(CanQuit: false, ShowWindow: false);
         }
     }
+
+    /// <summary>
+    /// Decides whether the app may end now to start again. Only text that was changed and not saved needs asking about: the
+    /// profiles stay connected through a restart, because the helper keeps them as it does when the app quits.
+    /// </summary>
+    /// <param name="prompts">The question, shown as a dialog.</param>
+    public async Task<bool> RequestRestartAsync(IQuitPrompts prompts) =>
+        !HasUnsavedEdits || await prompts.ConfirmDiscardingEditsAsync();
 }

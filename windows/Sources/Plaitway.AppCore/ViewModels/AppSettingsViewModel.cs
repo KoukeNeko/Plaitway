@@ -35,6 +35,17 @@ public sealed partial class AppSettingsViewModel : ObservableObject, IPageLifecy
     /// <summary>The app can add itself to the startup list.</summary>
     public bool CanSetLaunchAtLogin => _model.CanSetLaunchAtLogin;
 
+    /// <summary>The languages to pick from; the first follows Windows.</summary>
+    public IReadOnlyList<LanguageChoice> Languages => _model.Language.Choices;
+
+    /// <summary>The language chosen for the next start. The view writes it as the user picks; null while the picker's list is replaced.</summary>
+    [ObservableProperty]
+    public partial LanguageChoice? SelectedLanguage { get; set; }
+
+    /// <summary>The language chosen is not the one of this run: a restart shows it.</summary>
+    [ObservableProperty]
+    public partial bool IsRestartNeeded { get; private set; }
+
     /// <summary>The state of the service, the versions, the engines; only what is known.</summary>
     [ObservableProperty]
     public partial IReadOnlyList<DetailRow> Helper { get; private set; } = [];
@@ -67,6 +78,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject, IPageLifecy
         _model.Installer.PropertyChanged -= OnChanged;
     }
 
+    /// <summary>Starts the app again, so that the language chosen is the one in use.</summary>
+    [RelayCommand]
+    public void Restart() => _model.RequestRestart();
+
     /// <summary>Starts the service.</summary>
     [RelayCommand]
     public Task StartHelperAsync() => _model.StartHelperAsync();
@@ -87,6 +102,17 @@ public sealed partial class AppSettingsViewModel : ObservableObject, IPageLifecy
         }
     }
 
+    partial void OnSelectedLanguageChanged(LanguageChoice? value)
+    {
+        if (_isRefreshing || value is null)
+        {
+            return;
+        }
+
+        _model.SetLanguage(value.Tag);
+        Refresh();
+    }
+
     private void OnChanged(object? sender, PropertyChangedEventArgs args) => Refresh();
 
     private void Refresh()
@@ -95,6 +121,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject, IPageLifecy
         try
         {
             LaunchAtLogin = _model.LaunchAtLogin;
+            SelectedLanguage = Languages.First(choice => choice.Tag == _model.Language.Chosen);
+            IsRestartNeeded = _model.Language.IsRestartNeeded;
             var status = _model.Installer.Status;
             CanManageHelper = !_model.IsOverridden && !_model.IsHelperExternal && status.HasExecutable;
             CanStartHelper = CanManageHelper && status.State == HelperState.Stopped;

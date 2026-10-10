@@ -36,6 +36,18 @@ internal static class Uia
     public static void Select(AutomationElement element) =>
         ((SelectionItemPattern)element.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
 
+    /// <summary>Opens a combo box and chooses the entry with this name, as the mouse does.</summary>
+    public static void Choose(AutomationElement comboBox, string entry)
+    {
+        ((ExpandCollapsePattern)comboBox.GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand();
+
+        // The list of a combo box is a popup of its own, so it is looked for from the desktop and not from the window.
+        var item = AutomationElement.RootElement.FindFirst(TreeScope.Descendants, new AndCondition(
+            new PropertyCondition(AutomationElement.NameProperty, entry),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)));
+        Select(item ?? throw new InvalidOperationException($"no '{entry}' in the list"));
+    }
+
     /// <summary>Presses a button or a menu item.</summary>
     public static void Invoke(AutomationElement element) =>
         ((InvokePattern)element.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
