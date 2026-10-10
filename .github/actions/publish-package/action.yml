@@ -1,0 +1,102 @@
+name: Publish a package
+description: >-
+  Renders the files of a package manager from a published stable release and
+  pushes them to its repository (the Homebrew tap, the Scoop bucket).
+
+inputs:
+  version:
+    description: Published stable release tag, for example v0.6.0.
+    required: true
+  repo:
+    description: The repository that receives the files, as owner/name.
+    required: true
+  token:
+    description: A token that can push to that repository.
+    required: true
+  checksums:
+    description: The name of the release's checksum file that the renderers read.
+    required: true
+  files:
+    description: Space separated script:target pairs; each script renders the file at target.
+    required: true
+  release-token:
+    description: The token that reads the release.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.release-token }}
+        VERSION: ${{ inputs.version }}
+        CHECKSUMS: ${{ inputs.checksums }}
+      run: |
+        # The version may come from a manual run, so it is validated before it reaches any command.
+        case "$VERSION" in
+          v[0-9]*.[0-9]*.[0-9]*) ;;
+          *) echo "::error::version must look like v1.2.3" >&2; exit 1 ;;
+        esac
+        case "$VERSION" in
+          *-*) echo "::error::$VERSION is a pre-release; packages track stable releases only" >&2; exit 1 ;;
+        esac
+        if ! gh release view "$VERSION" --json isPrerelease --jq '.isPrerelease' | grep -qx false; then
+          echo "::error::$VERSION is not a published stable release" >&2
+          exit 1
+        fi
+        gh release download "$VERSION" --pattern "$CHECKSUMS" --dir "$RUNNER_TEMP"
+    - name: Check repository access
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        test -n "$GH_TOKEN" || { echo "::error::the token for $REPO is not set" >&2; exit 1; }
+        if ! push="$(gh api "repos/$REPO" --jq '.permissions.push' 2>&1)"; then
+          echo "::error::the token cannot read $REPO. Check that it grants access to it." >&2
+          exit 1
+        fi
+        if [ "$push" != "true" ]; then
+          echo "::error::the token can read $REPO but cannot push. Grant it Contents: Read and write." >&2
+          exit 1
+        fi
+    - name: Render
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        CHECKSUMS: ${{ inputs.checksums }}
+        FILES: ${{ inputs.files }}
+      run: |
+        rendered="$RUNNER_TEMP/rendered"
+        rm -rf "$rendered"
+        for entry in $FILES; do
+          script="${entry%%:*}" target="${entry#*:}"
+          mkdir -p "$rendered/$(dirname "$target")"
+          "$script" "$VERSION" "$RUNNER_TEMP/$CHECKSUMS" > "$rendered/$target"
+          cat "$rendered/$target"
+        done
+    - name: Push
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repo }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        checkout="$RUNNER_TEMP/package-repo"
+        git clone --depth 1 "https://x-access-token:$TOKEN@github.com/$REPO.git" "$checkout" 2>/dev/null
+        cp -R "$RUNNER_TEMP/rendered/." "$checkout/"
+        cd "$checkout"
+        git add -A
+        if git diff --cached --quiet; then
+          echo "$REPO already carries plaitway $VERSION."
+          exit 0
+        fi
+        git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "plaitway $VERSION"
+        git push
+    - name: Remove the checkout
+      if: always()
+      shell: bash
+      run: rm -rf "$RUNNER_TEMP/package-repo"

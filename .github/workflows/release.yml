@@ -6,7 +6,8 @@ name: Release
 # pipeline. Linux is built beside macOS (the linux job) and its .deb files are attached to the release
 # afterwards (publish-linux), so a problem of the Linux job never holds back the macOS release or the
 # Homebrew cask. The same goes for Windows: the MSI of each language is built beside macOS (the windows
-# job, unsigned until there is a code signing certificate) and attached by publish-windows.
+# job, unsigned until there is a code signing certificate) and attached by publish-windows, after which
+# the Scoop manifest is updated.
 on:
   push:
     tags: ['v*']
@@ -289,5 +290,18 @@ jobs:
     uses: ./.github/workflows/packages.yml
     with:
       version: ${{ github.ref_name }}
+      package: homebrew
     secrets:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # After the Windows files are on the release, and independent of the cask.
+  packages-scoop:
+    needs: publish-windows
+    permissions:
+      contents: read
+    uses: ./.github/workflows/packages.yml
+    with:
+      version: ${{ github.ref_name }}
+      package: scoop
+    secrets:
+      SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}

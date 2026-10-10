@@ -1,7 +1,9 @@
 name: Publish packages
 
-# Updates the Homebrew cask in KoukeNeko/homebrew-tap. The release workflow calls this after every
-# stable tag; run it by hand to backfill or repair a published release.
+# Updates the Homebrew cask in KoukeNeko/homebrew-tap and the Scoop manifest in KoukeNeko/scoop-bucket.
+# The release workflow calls this after every stable tag, once for each package manager, because the
+# Windows files arrive after the macOS ones and a problem with one must not hold back the other. Run it by
+# hand to backfill or repair a published release.
 on:
   workflow_call:
     inputs:
@@ -9,82 +11,52 @@ on:
         description: Published stable release tag, for example v0.2.0.
         required: true
         type: string
+      package:
+        description: homebrew or scoop.
+        required: true
+        type: string
     secrets:
       HOMEBREW_TAP_TOKEN:
-        required: true
+        required: false
+      SCOOP_BUCKET_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       version:
         description: Published stable release tag, for example v0.2.0.
         required: true
+      package:
+        description: Which package manager to update.
+        required: true
+        type: choice
+        options: [homebrew, scoop]
 
 permissions:
   contents: read
 
-env:
-  TAP_REPO: KoukeNeko/homebrew-tap
-
 jobs:
   homebrew:
+    if: inputs.package == 'homebrew'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Check the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          # The version may come from a manual run, so it is validated before it reaches any command.
-          case "$VERSION" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::version must look like v1.2.3" >&2; exit 1 ;;
-          esac
-          case "$VERSION" in
-            *-*) echo "::error::$VERSION is a pre-release; packages track stable releases only" >&2; exit 1 ;;
-          esac
-          if ! gh release view "$VERSION" --json isPrerelease --jq '.isPrerelease' | grep -qx false; then
-            echo "::error::$VERSION is not a published stable release" >&2
-            exit 1
-          fi
-          gh release download "$VERSION" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
-      - name: Check repository access
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          test -n "$GH_TOKEN" || { echo "::error::HOMEBREW_TAP_TOKEN is not set" >&2; exit 1; }
-          if ! push="$(gh api "repos/$TAP_REPO" --jq '.permissions.push' 2>&1)"; then
-            echo "::error::HOMEBREW_TAP_TOKEN cannot read $TAP_REPO. Check that the token grants access to it." >&2
-            exit 1
-          fi
-          if [ "$push" != "true" ]; then
-            echo "::error::HOMEBREW_TAP_TOKEN can read $TAP_REPO but cannot push. Grant it Contents: Read and write." >&2
-            exit 1
-          fi
-      - name: Render
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/rendered/Casks"
-          scripts/render-homebrew-cask.sh "$VERSION" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/rendered/Casks/plaitway.rb"
-          cat "$RUNNER_TEMP/rendered/Casks/plaitway.rb"
-      - name: Push
-        env:
-          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          checkout="$RUNNER_TEMP/package-repo"
-          git clone --depth 1 "https://x-access-token:$TOKEN@github.com/$TAP_REPO.git" "$checkout" 2>/dev/null
-          cp -R "$RUNNER_TEMP/rendered/." "$checkout/"
-          cd "$checkout"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "$TAP_REPO already carries plaitway $VERSION."
-            exit 0
-          fi
-          git -c user.name="github-actions[bot]" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "plaitway $VERSION"
-          git push
-      - name: Remove the checkout
-        if: always()
-        run: rm -rf "$RUNNER_TEMP/package-repo"
+      - uses: ./.github/actions/publish-package
+        with:
+          version: ${{ inputs.version }}
+          repo: KoukeNeko/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          checksums: SHA256SUMS
+          files: scripts/render-homebrew-cask.sh:Casks/plaitway.rb
+
+  scoop:
+    if: inputs.package == 'scoop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/publish-package
+        with:
+          version: ${{ inputs.version }}
+          repo: KoukeNeko/scoop-bucket
+          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          checksums: SHA256SUMS-windows
+          files: scripts/render-scoop-manifest.sh:bucket/plaitway.json
