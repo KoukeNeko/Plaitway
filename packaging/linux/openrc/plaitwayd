@@ -18,12 +18,13 @@ command=/usr/libexec/plaitway/plaitwayd
 command_args="-socket /run/plaitway/plaitwayd.sock -socket-mode 0666 -state-dir /var/lib/plaitway -run-dir /run/plaitway -openvpn /usr/sbin/openvpn"
 
 # A crash or a kill is followed by a start that repairs the routes from the
-# journal, as Restart=on-failure does. More than five within a minute and
-# supervise-daemon gives up, as StartLimitBurst=5 does.
+# journal, as Restart=on-failure does. Unlike the unit's start limit there is
+# none here: where DNS goes through resolvconf, the entry of a full tunnel
+# outlives the daemon that made it and sends every lookup to a tunnel that is
+# gone, and only a daemon that runs again deletes it.
 supervisor=supervise-daemon
 respawn_delay=3
-respawn_max=5
-respawn_period=60
+respawn_max=0
 supervise_daemon_args="--no-new-privs"
 
 # On SIGTERM the daemon stops its clients and then its tunnels, 17 s at most
@@ -61,4 +62,14 @@ start_post() {
 
 stop_post() {
 	rm -rf /run/plaitway
+	# What a daemon that was killed left in resolvconf, which would send every
+	# lookup to a tunnel that is gone; the next start deletes it too. Only names
+	# of ours are deleted, whatever "resolvconf -i" prints.
+	if command -v resolvconf >/dev/null 2>&1; then
+		for name in $(resolvconf -i 'plaitway:*' 2>/dev/null); do
+			case "$name" in
+			plaitway:*) resolvconf -f -d "$name" >/dev/null 2>&1 ;;
+			esac
+		done
+	fi
 }

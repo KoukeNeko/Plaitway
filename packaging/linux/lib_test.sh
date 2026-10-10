@@ -171,10 +171,12 @@ openrc_stop_budget() (
 )
 expect "the OpenRC script is a valid shell script" 'sh -n "$OPENRC"'
 expect "the OpenRC script starts the daemon with the arguments of the unit" '[ -n "$(unit_args)" ] && [ "$(unit_args)" = "$(openrc_args)" ]'
-expect "the OpenRC script restarts as often as the unit does" \
-    '[ "$(sed -n "s/^respawn_max=//p" "$OPENRC")" = "$(sed -n "s/^StartLimitBurst=//p" "$HERE/plaitwayd.service")" ] && [ "$(sed -n "s/^respawn_period=//p" "$OPENRC")" = "$(sed -n "s/^StartLimitIntervalSec=//p" "$HERE/plaitwayd.service")" ]'
+expect "the OpenRC script restarts the daemon without limit, after the unit's delay" \
+    '[ "$(sed -n "s/^respawn_max=//p" "$OPENRC")" = 0 ] && [ -z "$(sed -n "s/^respawn_period=//p" "$OPENRC")" ] && [ "$(sed -n "s/^respawn_delay=//p" "$OPENRC")" = "$(sed -n "s/^RestartSec=//p" "$HERE/plaitwayd.service")" ]'
 run openrc_stop_budget
 expect "the OpenRC script waits for the daemon's shutdown budget before it kills" 'test "$STATUS" -eq 0'
+expect "the OpenRC script deletes only names of Plaitway from resolvconf when it stops" \
+    'grep -q "resolvconf -i .plaitway:\*." "$OPENRC" && grep -q "^[[:space:]]*plaitway:\*) resolvconf -f -d" "$OPENRC"'
 
 run install_into "$TMP/openrc" --prefix /usr --openrc
 expect "install.sh --openrc succeeds" 'test "$STATUS" -eq 0'
