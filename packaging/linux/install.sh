@@ -14,6 +14,7 @@
 #   lib/systemd/system/plaitwayd.service      the unit
 #   (DESTDIR)/etc/init.d/plaitwayd            with --openrc only: the OpenRC script,
 #                                             below DESTDIR and not PREFIX
+#   (DESTDIR)/etc/logrotate.d/plaitwayd       with --openrc only: the rotation of its log
 #   lib/python3/dist-packages/plaitway/       the app's Python package
 #   share/                                    linux/data/share: desktop entry,
 #                                             metainfo, MIME types, icons
@@ -107,13 +108,15 @@ grep -q "^ExecStart=$PREFIX/libexec/$LIBEXEC_NAME/plaitwayd " "$unit_dest" || di
 
 # The OpenRC service, for a system without systemd (Gentoo). It goes to /etc/init.d
 # whatever the prefix, which is where OpenRC looks, and names the daemon by its
-# package path like the unit does.
+# package path like the unit does. Its log is a file, which the journal would
+# otherwise rotate.
 if [ "$OPENRC" -eq 1 ]; then
     openrc_dest="$DESTDIR/etc/init.d/plaitwayd"
     make_dir "$(dirname "$openrc_dest")"
     sed "s|^command=/usr/libexec/|command=$PREFIX/libexec/|" "$PACKAGING_LINUX/openrc/plaitwayd" >"$openrc_dest"
     chmod 0755 "$openrc_dest"
     grep -q "^command=$PREFIX/libexec/$LIBEXEC_NAME/plaitwayd\$" "$openrc_dest" || die "the OpenRC script has no command for $PREFIX/libexec/$LIBEXEC_NAME/plaitwayd"
+    put 0644 "$PACKAGING_LINUX/openrc/plaitwayd.logrotate" "$DESTDIR/etc/logrotate.d/plaitwayd"
 fi
 
 # The Python package, without caches. The release version replaces the

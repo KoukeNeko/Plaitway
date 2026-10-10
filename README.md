@@ -313,8 +313,8 @@ Installed with `make install`, there is no uninstall target: delete the files of
 table in [Linux](#linux) from below `/usr/local`. On OpenRC, update by building and running
 `install.sh` again and `sudo rc-service plaitwayd restart`; to uninstall,
 `sudo rc-service plaitwayd stop && sudo rc-update del plaitwayd default`, delete
-`/etc/init.d/plaitwayd` and the files of the table, and, to delete the profiles with their
-private keys as well, `sudo rm -rf /var/lib/plaitway /var/log/plaitwayd.log`. A helper installed with
+`/etc/init.d/plaitwayd`, `/etc/logrotate.d/plaitwayd` and the files of the table, and, to delete
+the profiles with their private keys as well, `sudo rm -rf /var/lib/plaitway /var/log/plaitwayd.log*`. A helper installed with
 `scripts/linux/dev-install-daemon.sh` is removed by
 `sudo scripts/linux/dev-uninstall-daemon.sh`, and `--purge` deletes the profiles as well.
 
@@ -666,7 +666,9 @@ repairs the routes and the DNS entry, and the restarts have no limit: the DNS en
 tunnel outlives the daemon that made it (see below), and only a daemon that runs again
 deletes it. The service sets no new privileges, keeps the log in `/var/log/plaitwayd.log`
 where only root reads it, and removes the run directory and the DNS entries of the daemon
-when it stops. Build and install it from the source, with the Python directory of the
+when it stops. `--openrc` also installs `/etc/logrotate.d/plaitwayd`, which rotates the log
+weekly, or at 20 MB, and keeps four compressed copies; the file is copied and emptied in
+place, since a restart would end the tunnels. Build and install it from the source, with the Python directory of the
 system's Python (Gentoo's does not look below `/usr/local`):
 
 ```sh
@@ -726,7 +728,12 @@ helper with a full tunnel up: each time OpenRC started a new helper, which delet
 the old one left, within 53 ms of `resolv.conf` being the DHCP server's again, with no
 interface and no route; the `openvpn` child of a killed helper was gone. Stopping the service
 with a tunnel up removed the entry and left no process, and with the supervisor and the
-helper both killed, `rc-service plaitwayd stop` deleted the entry that was left.
+helper both killed, `rc-service plaitwayd stop` deleted the entry that was left. The rotation
+of the log was run there too, with logrotate 3.22 and a stand-in for the daemon that writes a
+line every 20 ms: the supervisor opens the log for appending, so a rotation while the daemon
+runs leaves a compressed copy of everything before it, a live log that starts again small with
+no zero bytes in it, the same daemon process, mode 0600 on both, a rotation at 21 MB without
+waiting for the week, four copies kept, and no rotation of an empty or a missing log.
 
 On Gentoo's own stage3 (`amd64-openrc` of 2026-10-04, OpenRC 0.63.3, glibc 2.43), booted with
 Gentoo's init and with the files of openresolv 3.13.2 added (the stage3 has neither it nor

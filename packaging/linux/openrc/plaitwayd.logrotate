@@ -1,0 +1,13 @@
+# The log of the OpenRC service (packaging/linux/openrc/plaitwayd). The
+# supervisor holds the file open, so it is copied and emptied in place; the
+# lines written in between are lost. A restart would end the tunnels. The size
+# limit is for a daemon that crashes and starts again in a loop.
+/var/log/plaitwayd.log {
+	weekly
+	maxsize 20M
+	rotate 4
+	compress
+	copytruncate
+	missingok
+	notifempty
+}

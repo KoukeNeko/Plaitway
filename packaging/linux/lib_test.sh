@@ -159,6 +159,7 @@ expect "a build directory without the programs is refused, naming build.sh" 'tes
 # --- the OpenRC script ----------------------------------------------------------
 
 OPENRC="$HERE/openrc/plaitwayd"
+LOGROTATE="$HERE/openrc/plaitwayd.logrotate"
 unit_args() { sed -n 's|^ExecStart=/usr/libexec/plaitway/plaitwayd ||p' "$HERE/plaitwayd.service"; }
 openrc_args() { sed -n 's|^command_args="\(.*\)"$|\1|p' "$OPENRC"; }
 # The helpers run in a subshell: lib.sh sets variables of its own.
@@ -178,11 +179,16 @@ expect "the OpenRC script waits for the daemon's shutdown budget before it kills
 expect "the OpenRC script deletes only names of Plaitway from resolvconf when it stops" \
     'grep -q "resolvconf -i .plaitway:\*." "$OPENRC" && grep -q "^[[:space:]]*plaitway:\*) resolvconf -f -d" "$OPENRC"'
 
+expect "the logrotate file rotates the log the OpenRC script writes, in place because the supervisor holds it open" \
+    '[ -n "$(sed -n "s/^output_log=//p" "$OPENRC")" ] && [ "$(sed -n "s/^error_log=//p" "$OPENRC")" = "$(sed -n "s/^output_log=//p" "$OPENRC")" ] && grep -qx "$(sed -n "s/^output_log=//p" "$OPENRC") {" "$LOGROTATE" && grep -qx "[[:space:]]copytruncate" "$LOGROTATE"'
+
 run install_into "$TMP/openrc" --prefix /usr --openrc
 expect "install.sh --openrc succeeds" 'test "$STATUS" -eq 0'
 expect "the OpenRC script is in /etc/init.d below DESTDIR, mode 0755" \
     'test -x "$TMP/openrc/etc/init.d/plaitwayd" -a "$(mode_of "$TMP/openrc/etc/init.d/plaitwayd")" = 755 -a ! -e "$TMP/openrc/usr/etc"'
 expect "it names the daemon by the package path, and is the script of the repository" 'cmp -s "$TMP/openrc/etc/init.d/plaitwayd" "$OPENRC"'
+expect "the logrotate file is in /etc/logrotate.d below DESTDIR, mode 0644" \
+    'cmp -s "$TMP/openrc/etc/logrotate.d/plaitwayd" "$LOGROTATE" && [ "$(mode_of "$TMP/openrc/etc/logrotate.d/plaitwayd")" = 644 ]'
 run install_into "$TMP/openrc-local" --prefix /opt/plaitway --python-dir /opt/plaitway/lib/python3/site-packages --openrc
 expect "with another prefix it names the daemon below the prefix and changes nothing else" \
     'grep -qx "command=/opt/plaitway/libexec/plaitway/plaitwayd" "$TMP/openrc-local/etc/init.d/plaitwayd" && sed "s|/opt/plaitway/libexec|/usr/libexec|" "$TMP/openrc-local/etc/init.d/plaitwayd" | cmp -s - "$OPENRC"'
