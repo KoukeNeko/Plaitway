@@ -22,10 +22,24 @@ sudo apt update && sudo apt install plaitway
 - Or `sudo apt install ./plaitway_<version>_<arch>.deb` for a file you downloaded; either way it installs OpenVPN and the GTK libraries and starts the helper, `plaitwayd.service`
 - Open **Plaitway** from the application menu, or run `plaitway-app`; `plaitway` is the command line client
 
+**Linux with OpenRC (Gentoo).** No package is attached: the live ebuild in the repository builds the head of `main` with the Go of the system (`dev-lang/go` 1.27.1 or later) and fetches the Go modules while it unpacks:
+
+```sh
+git clone https://github.com/KoukeNeko/Plaitway && cd Plaitway
+printf '[plaitway]\nlocation = %s\n' "$PWD/packaging/linux/gentoo" | sudo tee /etc/portage/repos.conf/plaitway.conf
+echo '=net-vpn/plaitway-9999 **' | sudo tee -a /etc/portage/package.accept_keywords/plaitway
+sudo emerge net-vpn/plaitway
+sudo rc-update add plaitwayd default && sudo rc-service plaitwayd start
+```
+
+- DNS settings of a full tunnel go through openresolv, which the ebuild installs; with NetworkManager set `rc-manager=resolvconf` in its `[main]` section
+
 ## Update
 
 **macOS.** `brew upgrade --cask koukeneko/tap/plaitway`, or replace **Plaitway** in **Applications** with the new one. When the helper is older than the app, the app offers **Reinstall Helper**; that disconnects running profiles.
 
 **Linux.** With the apt repository added, `sudo apt update && sudo apt upgrade`. Without it, `sudo apt install ./plaitway_<version>_<arch>.deb` over the old one. The upgrade restarts the helper, which disconnects running profiles; the stored profiles stay. Quit **Plaitway** and open it again to get the new window.
+
+**Gentoo.** `sudo emerge @live-rebuild`, then `sudo rc-service plaitwayd restart`, which disconnects running profiles; the stored profiles stay.
 
 [README](https://github.com/KoukeNeko/Plaitway#readme) has the details, how to uninstall, the limitations and what is not verified on real hardware yet.

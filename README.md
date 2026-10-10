@@ -66,6 +66,21 @@ sudo apt update && sudo apt install plaitway
 It installs OpenVPN and the GTK libraries and starts the helper, `plaitwayd.service`. Open
 **Plaitway** from the application menu, or run `plaitway-app`. `sudo apt upgrade` brings the later versions.
 
+**Linux with OpenRC** (Gentoo): the live ebuild of this repository builds it with the system's Go,
+installs the OpenRC service, and pulls in openresolv for DNS settings and OpenVPN for OpenVPN profiles:
+
+```sh
+git clone https://github.com/KoukeNeko/Plaitway && cd Plaitway
+printf '[plaitway]\nlocation = %s\n' "$PWD/packaging/linux/gentoo" | sudo tee /etc/portage/repos.conf/plaitway.conf
+echo '=net-vpn/plaitway-9999 **' | sudo tee -a /etc/portage/package.accept_keywords/plaitway
+sudo emerge net-vpn/plaitway
+sudo rc-update add plaitwayd default && sudo rc-service plaitwayd start
+```
+
+Open **Plaitway** from the application menu, or run `plaitway-app`. With NetworkManager, set
+`rc-manager=resolvconf` in the `[main]` section of a file in `/etc/NetworkManager/conf.d`, or it
+replaces the DNS servers of a full tunnel; [Linux without systemd](#linux-without-systemd-gentoo-openrc) has the details.
+
 **Windows** is in development and has no release yet, see [Windows](#windows).
 
 **Then, on either system:**
@@ -86,6 +101,9 @@ It installs OpenVPN and the GTK libraries and starts the helper, `plaitwayd.serv
 - **Linux, without the apt repository:** `sudo apt install ./plaitway_*.deb` with the `.deb` of the
   release page (it is attached a few minutes after the macOS files), or build it with `make deb`, which writes it
   to `build/linux`
+- **Linux with OpenRC, from a checkout without portage:** `make linux-build`, then
+  `sudo packaging/linux/install.sh --prefix /usr --openrc` with the `--python-dir` of
+  [Linux without systemd](#linux-without-systemd-gentoo-openrc)
 - **From source:** see [Development](#development) and [Release](#release)
 
 </details>
@@ -280,6 +298,10 @@ or `sudo apt install ./plaitway_*.deb` over the old package. The upgrade restart
 helper, which disconnects running profiles; the stored profiles stay. Quit Plaitway and
 open it again to get the new window.
 
+**Update on Gentoo:** `sudo emerge @live-rebuild`, then `sudo rc-service plaitwayd restart`, which
+disconnects running profiles; the stored profiles stay. Installed by hand, build and run
+`install.sh` again.
+
 **Uninstall on macOS**, in this order:
 
 1. In Plaitway, delete the profiles you do not want to keep. This also deletes their
@@ -309,12 +331,12 @@ the steps for a helper installed with `scripts/dev-install-daemon.sh`.
    settings, and with **Launch at Login** on,
    `~/.config/autostart/io.github.koukeneko.Plaitway.desktop`
 
-Installed with `make install`, there is no uninstall target: delete the files of the
-table in [Linux](#linux) from below `/usr/local`. On OpenRC, update by building and running
-`install.sh` again and `sudo rc-service plaitwayd restart`; to uninstall,
-`sudo rc-service plaitwayd stop && sudo rc-update del plaitwayd default`, delete
-`/etc/init.d/plaitwayd`, `/etc/logrotate.d/plaitwayd` and the files of the table, and, to delete
-the profiles with their private keys as well, `sudo rm -rf /var/lib/plaitway /var/log/plaitwayd.log*`. A helper installed with
+On Gentoo, `sudo rc-service plaitwayd stop && sudo rc-update del plaitwayd default`, then
+`sudo emerge --unmerge net-vpn/plaitway`. Installed with `make install`, there is no uninstall
+target: delete the files of the table in [Linux](#linux) from below `/usr/local`. Installed with
+`install.sh --openrc`, stop and remove the service the same way and delete `/etc/init.d/plaitwayd`,
+`/etc/logrotate.d/plaitwayd` and the files of the table. The profiles stay in `/var/lib/plaitway`;
+to delete them with their private keys as well, `sudo rm -rf /var/lib/plaitway /var/log/plaitwayd.log*`. A helper installed with
 `scripts/linux/dev-install-daemon.sh` is removed by
 `sudo scripts/linux/dev-uninstall-daemon.sh`, and `--purge` deletes the profiles as well.
 
@@ -336,8 +358,8 @@ the profiles with their private keys as well, `sudo rm -rf /var/lib/plaitway /va
   later) for OpenVPN profiles; WireGuard profiles run on the embedded
   wireguard-go and need no kernel module. OpenVPN profiles with `dev tap` are
   refused. The app needs GTK 4.14 and libadwaita 1.5, the versions of Ubuntu
-  24.04; [Linux](#linux) says what was run where. Gentoo with OpenRC runs the
-  helper from the source, with DNS settings for a full tunnel through openresolv:
+  24.04; [Linux](#linux) says what was run where. Gentoo with OpenRC installs from the
+  live ebuild, with DNS settings for a full tunnel through openresolv:
   [Linux without systemd](#linux-without-systemd-gentoo-openrc)
 
 Of Windows only the helper and the command line client exist, see
