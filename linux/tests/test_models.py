@@ -92,6 +92,11 @@ class SetupTests(unittest.TestCase):
             (dict(registration=HelperRegistration.RUNNING, is_settling=True), DaemonSetup(SetupState.CONNECTING)),
             (dict(connection=Connection.CONNECTING, registration=HelperRegistration.RUNNING), DaemonSetup(SetupState.CONNECTING)),
             (dict(registration=HelperRegistration.UNKNOWN), DaemonSetup(SetupState.NOT_RESPONDING)),
+            # Another init: nothing the app could start, and nothing it could ask.
+            (dict(registration=HelperRegistration.NO_SYSTEMD), DaemonSetup(SetupState.NOT_MANAGED)),
+            (dict(connection=Connection.CONNECTING, registration=HelperRegistration.NO_SYSTEMD), DaemonSetup(SetupState.CONNECTING)),
+            (dict(connection=Connection.CONNECTED, registration=HelperRegistration.NO_SYSTEMD), READY),
+            (dict(is_overridden=True, registration=HelperRegistration.NO_SYSTEMD), DaemonSetup(SetupState.DEVELOPMENT)),
             (dict(connection=Connection.CONNECTING, registration=HelperRegistration.UNKNOWN), DaemonSetup(SetupState.CONNECTING)),
             # The helper runs and refuses this user, or the app refuses its socket.
             (dict(failure_kind=FailureKind.PERMISSION_DENIED), DaemonSetup(SetupState.PERMISSION_DENIED)),
@@ -122,6 +127,12 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(content(SetupState.NOT_INSTALLED).detail)
         self.assertEqual(content(SetupState.NOT_RESPONDING).primary, SetupAction.RETRY)
         self.assertEqual(content(SetupState.NOT_RESPONDING).secondary, SetupAction.RESTART_HELPER)
+        # Without systemd there is no Start Helper, no Restart Helper and no journal.
+        not_managed = content(SetupState.NOT_MANAGED)
+        self.assertEqual((not_managed.primary, not_managed.secondary), (SetupAction.RETRY, None))
+        self.assertEqual(not_managed.title, STRINGS.helper_not_running)
+        self.assertIn("rc-service plaitwayd start", not_managed.detail)
+        self.assertNotIn("journalctl", not_managed.detail)
         self.assertEqual(content(SetupState.PERMISSION_DENIED).primary, SetupAction.RETRY)
         self.assertEqual(content(SetupState.SERVER_REFUSED, detail="x is writable").detail, "x is writable")
         self.assertEqual(content(SetupState.DEVELOPMENT).primary, SetupAction.RETRY)

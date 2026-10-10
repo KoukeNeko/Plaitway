@@ -151,6 +151,16 @@
         }
       }
     },
+    "Start plaitwayd, for example with rc-service plaitwayd start." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請啟動 plaitwayd，例如用 rc-service plaitwayd start。"
+          }
+        }
+      }
+    },
     "Start plaitwayd, then set PLAITWAY_DEV=1 and PLAITWAY_SOCKET." : {
       "localizations" : {
         "zh-Hant" : {

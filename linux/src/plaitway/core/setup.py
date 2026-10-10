@@ -23,6 +23,9 @@ class SetupState(enum.Enum):
     NOT_RUNNING = "not running"
     # Running and not answering, or systemd cannot be asked.
     NOT_RESPONDING = "not responding"
+    # The system does not run systemd, which the app would ask to start the helper: it is not answering
+    # and the person starts it with the service manager of the system.
+    NOT_MANAGED = "not managed"
     # Running, and it refuses this user.
     PERMISSION_DENIED = "permission denied"
     # Answering, but from a socket that is not root's: the app sent nothing to it.
@@ -78,6 +81,8 @@ def resolve_setup(
     match registration:
         case HelperRegistration.NOT_INSTALLED:
             return DaemonSetup(SetupState.CONNECTING if connecting else SetupState.NOT_INSTALLED)
+        case HelperRegistration.NO_SYSTEMD:
+            return DaemonSetup(SetupState.CONNECTING if connecting else SetupState.NOT_MANAGED)
         case HelperRegistration.STOPPED:
             return DaemonSetup(SetupState.CONNECTING if connecting or is_settling else SetupState.NOT_RUNNING)
         case HelperRegistration.RUNNING:
@@ -128,7 +133,7 @@ def menu_status(setup: DaemonSetup, strings: Strings) -> str | None:
             return strings.connecting
         case SetupState.NOT_INSTALLED:
             return strings.helper_not_installed
-        case SetupState.NOT_RUNNING:
+        case SetupState.NOT_RUNNING | SetupState.NOT_MANAGED:
             return strings.helper_not_running
         case SetupState.PERMISSION_DENIED:
             return strings.permission_denied
@@ -154,6 +159,11 @@ def setup_content(setup: DaemonSetup, strings: Strings) -> SetupContent | None:
         case SetupState.NOT_RUNNING:
             return SetupContent(
                 "plaitway-state-idle-symbolic", s.helper_not_running, None, False, SetupAction.START_HELPER, None
+            )
+        case SetupState.NOT_MANAGED:
+            return SetupContent(
+                "plaitway-state-idle-symbolic", s.helper_not_running, s.start_helper_without_systemd,
+                False, SetupAction.RETRY, None,
             )
         case SetupState.NOT_RESPONDING:
             # The unit is fine; the log is the only trace of why the daemon does not answer.

@@ -13,7 +13,7 @@ place of Apple's. [docs/ui-architecture.md](docs/ui-architecture.md) describes t
 | `python3-gi`, `gir1.2-gtk-4.0`, `gir1.2-adw-1` | the window | GTK 4.14, libadwaita 1.5 |
 | `gir1.2-secret-1` | saved passwords | libsecret 0.20 |
 | `python3-grpc`, `python3-protobuf` | the connection to the helper | the distribution's: written for grpcio 1.51 and protobuf 3.21, tested with 1.84 and 7.36 |
-| systemd, polkit, a system D-Bus | starting and restarting the helper | |
+| systemd, polkit, a system D-Bus | starting and restarting the helper; without systemd (OpenRC) the app starts nothing and says to start `plaitwayd` with the service manager | |
 | A Secret Service (GNOME Keyring, KWallet) | remembering credentials | |
 | A StatusNotifierWatcher | the tray item; stock GNOME has none (an AppIndicator extension provides one) | |
 | `plaitwayd.service` | the helper | the same version as the app |
@@ -145,7 +145,7 @@ mismatched translation, a Mainland term, and a generated module that is out of d
 | macOS | Linux | Why |
 |---|---|---|
 | Menu bar item | StatusNotifierItem with a `com.canonical.dbusmenu` menu, rows as in the macOS menu | The system's tray protocol. Stock GNOME has no tray host; then there is no tray, and closing the window quits the app (tunnels stay up, the helper keeps them). With a tray, closing hides the window. |
-| Install Helper, approval in System Settings, Reinstall, Uninstall | `Start Helper` and `Restart Helper` through `org.freedesktop.systemd1.Manager` with interactive authorization (polkit asks); a screen for each state: not installed, not running, running and not answering, refused (permission denied), not trusted | The helper is a package's systemd unit; the app does not install it. |
+| Install Helper, approval in System Settings, Reinstall, Uninstall | `Start Helper` and `Restart Helper` through `org.freedesktop.systemd1.Manager` with interactive authorization (polkit asks); a screen for each state: not installed, not running, running and not answering, refused (permission denied), not trusted. On a system that does not run systemd (`/run/systemd/system` is not there) one more: not running, with "Start plaitwayd, for example with rc-service plaitwayd start." and Retry, and no restart control | The helper is a package's systemd unit; the app does not install it. |
 | Show in Menu Bar | Show Tray Icon | There is no menu bar. |
 | Keychain | Secret Service through libsecret, schema `io.github.koukeneko.plaitway.credentials`, attributes `profile_id` and `kind`, the same JSON value. A credential that cannot be saved is reported (`Credentials not saved`). | macOS only logs it. |
 | Launch at Login | An autostart entry that starts `plaitway-app --background` | |

@@ -71,6 +71,7 @@ class HelperRegistration(enum.Enum):
     STOPPED = "stopped"  # installed, not running
     RUNNING = "running"
     UNKNOWN = "unknown"  # systemd cannot be asked
+    NO_SYSTEMD = "no systemd"  # the system runs another init, so there is no unit to ask about or to start
 
 
 class HelperServiceError(Exception):

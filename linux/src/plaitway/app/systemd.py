@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
 import gi
 
@@ -26,6 +27,8 @@ MANAGER = "org.freedesktop.systemd1.Manager"
 UNIT = "org.freedesktop.systemd1.Unit"
 PROPERTIES = "org.freedesktop.DBus.Properties"
 
+# The directory systemd makes when it is the init of the system, which is what sd_booted() looks for.
+SYSTEMD_RUN_DIR = Path("/run/systemd/system")
 QUERY_TIMEOUT_MS = 5_000
 # polkit waits for the person to type a password.
 AUTHORIZATION_TIMEOUT_MS = 120_000
@@ -38,8 +41,9 @@ def _plain(message: str) -> str:
 
 
 class SystemdHelperService:
-    def __init__(self, unit: str = HELPER_UNIT) -> None:
+    def __init__(self, unit: str = HELPER_UNIT, run_dir: Path = SYSTEMD_RUN_DIR) -> None:
         self._unit = unit
+        self._run_dir = run_dir
 
     def _bus(self) -> Gio.DBusConnection:
         try:
@@ -56,6 +60,8 @@ class SystemdHelperService:
             raise HelperServiceError(_plain(error.message)) from error
 
     def registration(self) -> HelperRegistration:
+        if not self._run_dir.is_dir():
+            return HelperRegistration.NO_SYSTEMD
         try:
             bus = self._bus()
             (path,) = self._call(
@@ -82,6 +88,8 @@ class SystemdHelperService:
         self._job("RestartUnit")
 
     def _job(self, method: str) -> None:
+        if not self._run_dir.is_dir():
+            raise HelperServiceError("this system does not run systemd")
         bus = self._bus()
         self._call(
             bus, MANAGER_PATH, MANAGER, method, GLib.Variant("(ss)", (self._unit, "replace")), "(o)",

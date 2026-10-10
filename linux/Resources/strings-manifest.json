@@ -189,6 +189,10 @@
         "profile"
       ]
     },
+    "Start plaitwayd, for example with rc-service plaitwayd start.": {
+      "name": "start_helper_without_systemd",
+      "params": []
+    },
     "Start plaitwayd, then set PLAITWAY_DEV=1 and PLAITWAY_SOCKET.": {
       "name": "start_development_daemon",
       "params": []

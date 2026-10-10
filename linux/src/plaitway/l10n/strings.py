@@ -166,6 +166,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'stale_routes': 'Stale routes',
         'start_development_daemon': 'Start plaitwayd, then set PLAITWAY_DEV=1 and PLAITWAY_SOCKET.',
         'start_helper': 'Start Helper',
+        'start_helper_without_systemd': 'Start plaitwayd, for example with rc-service plaitwayd start.',
         'status': 'Status',
         'stopped': 'Stopped',
         'tunnel': 'Tunnel',
@@ -336,6 +337,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'stale_routes': '過時路由',
         'start_development_daemon': '請啟動 plaitwayd，並設定 PLAITWAY_DEV=1 與 PLAITWAY_SOCKET。',
         'start_helper': '啟動輔助程式',
+        'start_helper_without_systemd': '請啟動 plaitwayd，例如用 rc-service plaitwayd start。',
         'status': '狀態',
         'stopped': '已停止',
         'tunnel': '通道',
@@ -1129,6 +1131,11 @@ class Strings:
     @property
     def start_helper(self) -> str:
         return self._table['start_helper']
+
+    # Linux: Start plaitwayd, for example with rc-service plaitwayd start.
+    @property
+    def start_helper_without_systemd(self) -> str:
+        return self._table['start_helper_without_systemd']
 
     # macOS: Status
     @property
