@@ -337,7 +337,7 @@ private keys as well, `sudo rm -rf /var/lib/plaitway /var/log/plaitwayd.log`. A 
   wireguard-go and need no kernel module. OpenVPN profiles with `dev tap` are
   refused. The app needs GTK 4.14 and libadwaita 1.5, the versions of Ubuntu
   24.04; [Linux](#linux) says what was run where. Gentoo with OpenRC runs the
-  helper from the source, without DNS settings:
+  helper from the source, with DNS settings for a full tunnel through openresolv:
   [Linux without systemd](#linux-without-systemd-gentoo-openrc)
 
 Of Windows only the helper and the command line client exist, see
@@ -599,7 +599,8 @@ Linux as root.
 The helper runs as root, as the systemd service `plaitwayd.service`. The app is a
 GTK 4 and libadwaita window with a tray item ([linux/README.md](linux/README.md));
 `plaitway` is the command line client. Tunnels are `tun` devices, routes go
-through netlink, DNS through `resolvectl`, and OpenVPN is the distribution's.
+through netlink, DNS through `resolvectl` (or `resolvconf` where there is no systemd-resolved),
+and OpenVPN is the distribution's.
 
 | Path | What |
 |---|---|
@@ -638,7 +639,9 @@ its own.
 **DNS** is set per tunnel interface through `resolvectl` (servers, a routing domain,
 the default-route flag), which systemd-resolved forgets when the interface goes away.
 The helper writes nothing to `/etc/resolv.conf` and looks at it only to warn, once, when
-it does not lead to systemd-resolved.
+it does not lead to systemd-resolved. Where there is no `resolvectl` and openresolv is
+installed, it adds the servers of a full tunnel with `resolvconf -x -a plaitway:<owner>:<interface>`
+and resolvconf writes the file: [Linux without systemd](#linux-without-systemd-gentoo-openrc).
 
 **Other VPNs.** A VPN that routes by policy (wg-quick with a table and a fwmark,
 Cloudflare WARP: a rule that sends all traffic without its mark to a table of its own)
@@ -658,11 +661,13 @@ the caller's uid and groups.
 The helper does not need systemd to run: it sends its readiness notice only when systemd
 gives it a socket, and it takes its paths and its `openvpn` on the command line.
 `packaging/linux/openrc/plaitwayd` is an OpenRC service with the arguments of the unit,
-run by `supervise-daemon`: a crash is followed by a start that repairs the routes, and
-more than five in a minute stop it, as the unit's start limit does. It sets no new
-privileges, keeps the log in `/var/log/plaitwayd.log` where only root reads it, and
-removes the run directory when it stops. Build and install it from the source, with the
-Python directory of the system's Python (Gentoo's does not look below `/usr/local`):
+run by `supervise-daemon`. A crash or a kill is followed by a start three seconds later that
+repairs the routes and the DNS entry, and the restarts have no limit: the DNS entry of a full
+tunnel outlives the daemon that made it (see below), and only a daemon that runs again
+deletes it. The service sets no new privileges, keeps the log in `/var/log/plaitwayd.log`
+where only root reads it, and removes the run directory and the DNS entries of the daemon
+when it stops. Build and install it from the source, with the Python directory of the
+system's Python (Gentoo's does not look below `/usr/local`):
 
 ```sh
 make linux-build
@@ -676,38 +681,65 @@ sudo packaging/linux/install.sh --prefix /usr --openrc --python-dir "$(python3 -
 sudo rc-update add plaitwayd default && sudo rc-service plaitwayd start
 ```
 
-Building needs Go 1.27.1 and a C compiler. The helper needs `/dev/net/tun` and, for
-OpenVPN profiles, the distribution's `openvpn` 2.6 or later; the app needs GTK 4.14,
-libadwaita 1.5, PyGObject, grpcio, protobuf and libsecret. What is not as with systemd:
+Building needs Go 1.27.1 and a C compiler. The helper needs `/dev/net/tun`, the
+distribution's `openvpn` 2.6 or later for OpenVPN profiles, and openresolv (`resolvconf`;
+`net-dns/openresolv` on Gentoo) for DNS settings; the app needs GTK 4.14, libadwaita 1.5,
+PyGObject, grpcio, protobuf and libsecret. What is not as with systemd:
 
-- **No DNS settings.** The helper asks systemd-resolved through `resolvectl`, which an
-  OpenRC system does not have. The routes work, the DNS entries of a profile stay pending
-  and the profile says so. With a full tunnel, DNS goes to the resolver the network gave
-  the machine (`dhcpcd`, which the stage3 has, writes `/etc/resolv.conf` through its hook), and a resolver on the
-  local network is reached outside the tunnel; point `/etc/resolv.conf` at the tunnel's
-  resolver yourself while it is up
+- **DNS goes through `resolvconf` (openresolv), for a full tunnel only.** The entry of a
+  full tunnel is added as the exclusive one: while it is up its servers are the only ones in
+  `/etc/resolv.conf`, deleting it brings the others back, and a renewed DHCP lease does not
+  take it away. A profile whose DNS is for some domains only (a split tunnel with search
+  domains) cannot be set, because `resolv.conf` has one list of servers for every name: the
+  profile's Routes and DNS page says "DNS for corp.example needs systemd-resolved", and
+  those names go to the resolver the network gave. With neither systemd-resolved nor
+  openresolv there are no DNS settings, and the log says so at start. The entries do not go
+  away with the tunnel, as the links of systemd-resolved do: a daemon that was killed leaves
+  its entry in `/run/resolvconf` until a daemon starts again, which deletes it, or the
+  service is stopped, which does too. If a host has lost its DNS that way,
+  `sudo resolvconf -i 'plaitway:*'` lists the entries and `sudo resolvconf -f -d NAME`
+  deletes one
 - **Console users.** The people at the console are read from the seats of systemd-logind
-  in `/run/systemd/seats`. Without that directory only administrators (root and the
-  members of `sudo`, `wheel` or `admin`) can use the helper; whether `elogind` provides the
-  directory was not checked
+  in `/run/systemd/seats`. `elogind` keeps `seat0` there in the same format; an active
+  session on it was not tried. Without the directory only administrators (root and the
+  members of `sudo`, `wheel` or `admin`) can use the helper
 - **No sandbox of the unit's kind.** The helper runs as root with no new privileges, and
   without the capability bounding set, the system call filter and the read-only file
   system that the unit adds. `supervise-daemon` could drop capabilities only by listing
   every other one
-- **The app cannot start the helper:** **Start Helper** asks systemd. Start it with
-  `rc-service plaitwayd start`, or at boot with `rc-update`
+- **The app cannot start the helper.** On a system that does not run systemd it shows
+  "Helper not running" with "Start plaitwayd, for example with rc-service plaitwayd start.",
+  and no restart control. Start the helper with `rc-service plaitwayd start`, or at boot with
+  `rc-update`
 
-Run on Gentoo's own OpenRC (stage3 `amd64-openrc` of 2026-10-04, OpenRC 0.63.3, glibc 2.43)
-in a booted container, with Gentoo's own init: the service starts at boot and is the child of
-`supervise-daemon`; the socket is 0666, the run directory 0755, the state directory and the
-log 0700 and 0600; `plaitway diagnostics` reaches it; a SIGKILL is followed by a new daemon
-within seconds, and seven in a row stop the service; stop and restart leave no process, and
-stop removes the run directory. With a WireGuard profile against a kernel peer: it connected,
-carried traffic, its route had `proto 199` and metric 5, its DNS entry stayed pending with
-"resolvectl not found", a SIGKILL left no interface and no route after the restart, and a stop
-with the tunnel up left none. `install.sh --openrc` laid out the files there and Gentoo's Python
-imported the package. Not run: OpenVPN (the stage3 has no `openvpn`), the app, `elogind`, and
-`dhcpcd` or NetworkManager beside a tunnel.
+Run on Debian 13 in a booted container with OpenRC 0.56 as its init, openresolv 3.13.2 and
+OpenVPN 2.6.14 (Debian's OpenRC has no `localmount` service, so a stand-in was used), a DHCP
+client stood in for by `resolvconf -a lan0.dhcp`, and a peer namespace with a kernel WireGuard
+peer, an OpenVPN server that pushes `redirect-gateway` and a DNS server. A WireGuard full
+tunnel with `DNS =` put its server alone in `resolv.conf`, answered the names of a domain and
+a name that does not exist at once, kept it through a renewed DHCP lease, and disconnecting
+brought the DHCP server back. A split tunnel with a search domain was connected with its route
+and its DNS entry reported as failed, with the reason above, and `resolv.conf` untouched. An
+OpenVPN full tunnel did the same with the server it pushed. With two full tunnels there was
+one entry, and it moved to the other when the holder went. Twenty rounds of a SIGKILL of the
+helper with a full tunnel up: each time OpenRC started a new helper, which deleted the entry
+the old one left, within 53 ms of `resolv.conf` being the DHCP server's again, with no
+interface and no route; the `openvpn` child of a killed helper was gone. Stopping the service
+with a tunnel up removed the entry and left no process, and with the supervisor and the
+helper both killed, `rc-service plaitwayd stop` deleted the entry that was left.
+
+On Gentoo's own stage3 (`amd64-openrc` of 2026-10-04, OpenRC 0.63.3, glibc 2.43), booted with
+Gentoo's init and with the files of openresolv 3.13.2 added (the stage3 has neither it nor
+`openvpn`), the WireGuard checks above gave the same results: the service starts at boot under
+one supervisor, a full tunnel's server is alone in `resolv.conf` and survives a renewed lease,
+a split tunnel's DNS entry is reported as failed, twenty SIGKILLs were each followed by a new
+helper that deleted the entry (`resolv.conf` was the DHCP server's within 3 ms), and stopping
+the service with the supervisor and the helper both killed deleted the entry. Without
+openresolv the helper says at start that neither `resolvectl` nor `resolvconf` is installed
+and what to install, and the DNS entry of a full tunnel is reported as failed with the same
+words. `install.sh --openrc` laid out the files there and Gentoo's Python imported the
+package. Not run on Gentoo: OpenVPN, the app, an active session on an `elogind` seat, and
+`dhcpcd` or NetworkManager themselves, which hand `resolvconf` their servers as the lab did.
 
 ### Troubleshooting on Linux
 
@@ -828,11 +860,10 @@ in the initial namespaces:
 
 ### Known limitations on Linux
 
-- DNS settings need systemd-resolved and `resolvectl`. There is no `resolvconf` or
-  `/etc/resolv.conf` backend: without resolved, as on OpenRC, the routes work and the DNS
-  entries of profiles stay pending, and the profile says so. The design for one that is
-  safe is open: it would use `resolvconf` where it exists, take a catch-all entry as the
-  exclusive one of its interface, and say that a split entry cannot be applied
+- DNS settings for some domains only need systemd-resolved and `resolvectl`. Without it,
+  as on OpenRC, openresolv's `resolvconf` sets the servers of a full tunnel and nothing
+  else: a profile whose DNS is for a search domain only gets its DNS entry reported as
+  failed, and there is no backend that writes `/etc/resolv.conf` itself
 - Only the main routing table is read and written. Policy routing (`ip rule`) and other
   tables are neither read nor changed, so a program that sends traffic around the main
   table cannot be seen
