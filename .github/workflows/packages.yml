@@ -1,6 +1,6 @@
 name: Publish packages
 
-# Updates the Homebrew cask in KoukeNeko/homebrew-tap and the Scoop manifest in KoukeNeko/scoop-bucket.
+# Updates the Homebrew cask in KoukeNeko/homebrew-tap or the Scoop manifest in KoukeNeko/scoop-bucket.
 # The release workflow calls this after every stable tag, once for each package manager, because the
 # Windows files arrive after the macOS ones and a problem with one must not hold back the other. Run it by
 # hand to backfill or repair a published release.
@@ -35,28 +35,47 @@ permissions:
   contents: read
 
 jobs:
-  homebrew:
-    if: inputs.package == 'homebrew'
+  publish:
+    name: ${{ inputs.package }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Where each package manager keeps its files, which secret pushes there, which checksum file of the
+      # release its renderer reads, and what it renders (script:file in the repository).
+      - name: Look up the package
+        id: target
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          case "$PACKAGE" in
+            homebrew)
+              repo=KoukeNeko/homebrew-tap
+              token=HOMEBREW_TAP_TOKEN
+              checksums=SHA256SUMS
+              files=scripts/render-homebrew-cask.sh:Casks/plaitway.rb
+              ;;
+            scoop)
+              repo=KoukeNeko/scoop-bucket
+              token=SCOOP_BUCKET_TOKEN
+              checksums=SHA256SUMS-windows
+              files=scripts/render-scoop-manifest.sh:bucket/plaitway.json
+              ;;
+            *)
+              echo "::error::package must be homebrew or scoop, not $PACKAGE" >&2
+              exit 1
+              ;;
+          esac
+          {
+            echo "repo=$repo"
+            echo "token=$token"
+            echo "checksums=$checksums"
+            echo "files=$files"
+          } >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/publish-package
         with:
           version: ${{ inputs.version }}
-          repo: KoukeNeko/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          checksums: SHA256SUMS
-          files: scripts/render-homebrew-cask.sh:Casks/plaitway.rb
-
-  scoop:
-    if: inputs.package == 'scoop'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/publish-package
-        with:
-          version: ${{ inputs.version }}
-          repo: KoukeNeko/scoop-bucket
-          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-          checksums: SHA256SUMS-windows
-          files: scripts/render-scoop-manifest.sh:bucket/plaitway.json
+          repo: ${{ steps.target.outputs.repo }}
+          token: ${{ secrets[steps.target.outputs.token] }}
+          checksums: ${{ steps.target.outputs.checksums }}
+          files: ${{ steps.target.outputs.files }}

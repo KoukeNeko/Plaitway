@@ -26,6 +26,21 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Check repository access
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        test -n "$GH_TOKEN" || { echo "::error::the token for $REPO is not set" >&2; exit 1; }
+        if ! push="$(gh api "repos/$REPO" --jq '.permissions.push' 2>&1)"; then
+          echo "::error::the token cannot read $REPO. Check that it grants access to it." >&2
+          exit 1
+        fi
+        if [ "$push" != "true" ]; then
+          echo "::error::the token can read $REPO but cannot push. Grant it Contents: Read and write." >&2
+          exit 1
+        fi
     - name: Check the release
       shell: bash
       env:
@@ -46,21 +61,6 @@ runs:
           exit 1
         fi
         gh release download "$VERSION" --pattern "$CHECKSUMS" --dir "$RUNNER_TEMP"
-    - name: Check repository access
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.token }}
-        REPO: ${{ inputs.repo }}
-      run: |
-        test -n "$GH_TOKEN" || { echo "::error::the token for $REPO is not set" >&2; exit 1; }
-        if ! push="$(gh api "repos/$REPO" --jq '.permissions.push' 2>&1)"; then
-          echo "::error::the token cannot read $REPO. Check that it grants access to it." >&2
-          exit 1
-        fi
-        if [ "$push" != "true" ]; then
-          echo "::error::the token can read $REPO but cannot push. Grant it Contents: Read and write." >&2
-          exit 1
-        fi
     - name: Render
       shell: bash
       env:

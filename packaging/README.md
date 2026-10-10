@@ -208,17 +208,24 @@ The workflow runs the tests, builds and signs the app (`make app`), notarizes an
 (`notarize.sh`), checks the bundle (`make verify`), creates the GitHub release with the zip, the dmg and
 `SHA256SUMS` and the notes, and then `packages.yml` updates `Casks/plaitway.rb` in `KoukeNeko/homebrew-tap` from the release's
 checksums. Run by hand (Actions › Release › Run workflow) it builds and signs but publishes nothing and keeps the
-files as an artifact. Actions › Publish packages redoes the cask of a release that is already published.
+files as an artifact. Actions › Publish packages redoes the cask, or the Scoop manifest, of a release that is already published.
 
 | Secret | Used for |
 |---|---|
 | `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERT_PASSWORD` | the Developer ID Application certificate and its password; the identity `lib.sh` signs with, or else the first one in the file |
 | `ASC_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | the App Store Connect API key that notarizes |
 | `HOMEBREW_TAP_TOKEN` | pushing to the tap; it needs Contents: Read and write on `KoukeNeko/homebrew-tap` |
+| `SCOOP_BUCKET_TOKEN` | pushing to the bucket; it needs Contents: Read and write on `KoukeNeko/scoop-bucket` |
 | `APT_GPG_PRIVATE_KEY`, `APT_GPG_PASSPHRASE` | the armored secret key that signs the apt repository, and its passphrase if it has one (`apt.yml`) |
 
 The same tag builds the Linux packages (the `linux` job, amd64 and arm64) and `publish-linux` attaches the two `.deb` files
 and `SHA256SUMS-linux` to the release, after the macOS files. Neither holds back the macOS release or the cask.
+
+The same tag builds the Windows packages (the `windows` job: the Go tests, `packaging/windows/build-installer.ps1`, then
+`Test-Installer.ps1`) and `publish-windows` attaches the MSI of each language and `SHA256SUMS-windows` to the release. They are
+unsigned until a code signing certificate is given to `build-installer.ps1`. After that `packages.yml` writes
+`bucket/plaitway.json` in `KoukeNeko/scoop-bucket` (`scripts/render-scoop-manifest.sh`), which installs the English package.
+A Windows problem holds back neither the macOS release nor the cask.
 
 **The apt repository.** When the release workflow of a tag has finished, whatever its result, `.github/workflows/apt.yml` downloads the `.deb`
 files of every stable release (each checked against that release's `SHA256SUMS-linux`), runs `linux/make-apt-repo.sh` and
