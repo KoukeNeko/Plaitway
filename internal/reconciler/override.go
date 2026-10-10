@@ -94,6 +94,11 @@ func (r *Reconciler) foreignRoutes(table map[routeKey]osnet.Route) (rivals, unde
 		if _, ours := r.owned[key]; ours {
 			continue
 		}
+		if rt.IfIndex == 0 && rt.Iface == "" {
+			// A blackhole names no interface, so there is none to wait for.
+			rivals = append(rivals, rt)
+			continue
+		}
 		ifc, known := routeInterface(r.netState, rt)
 		switch {
 		case !known:
