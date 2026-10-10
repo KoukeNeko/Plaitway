@@ -707,8 +707,9 @@ func TestStopDuringTheLookupLeavesNothingBehind(t *testing.T) {
 	n := newNode(t, "slow", clientProfile(newKeyPair(t), newKeyPair(t), "vpn.test:51820", "", ""), nodeOptions{resolver: resolver})
 	n.start()
 	eventually(t, "the lookup", func() bool { return resolver.callCount() == 1 })
-	if st := n.status.last(); st.State != tunnel.StateConnecting || st.Err != "" {
-		t.Errorf("status = %+v, want Connecting", st)
+	// The status reaches the recorder on a goroutine of its own, so it is waited for and not read at once.
+	if st := n.waitState(tunnel.StateConnecting); st.Err != "" {
+		t.Errorf("status = %+v, want Connecting without an error", st)
 	}
 
 	stopWithin(t, n, promptly)
