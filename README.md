@@ -83,8 +83,9 @@ replaces the DNS servers of a full tunnel; [Linux without systemd](#linux-withou
 
 **Windows 11, x64:** download `Plaitway-<version>-x64-en-US.msi` (or `zh-TW`) from the
 [latest release](https://github.com/KoukeNeko/Plaitway/releases/latest) and run it. The package is not signed yet, so
-SmartScreen asks for confirmation. WireGuard profiles need nothing else; OpenVPN profiles use the OpenVPN installation of
-the PC. See [Windows](#windows).
+SmartScreen asks for confirmation. Or with Scoop:
+`scoop bucket add koukeneko https://github.com/KoukeNeko/scoop-bucket`, then `scoop install koukeneko/plaitway`.
+WireGuard profiles need nothing else; OpenVPN profiles use the OpenVPN installation of the PC. See [Windows](#windows).
 
 **Then, on either system:**
 
