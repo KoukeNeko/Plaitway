@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>111033412+KoukeNeko@users.noreply.github.com</email>
+		<name>KoukeNeko</name>
+	</maintainer>
+	<use>
+		<flag name="systemd">Install the unit for systemd and depend on systemd-resolved's tools; without it the package installs the OpenRC service and sets DNS through openresolv</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">KoukeNeko/Plaitway</remote-id>
+		<bugs-to>https://github.com/KoukeNeko/Plaitway/issues</bugs-to>
+	</upstream>
+</pkgmetadata>
