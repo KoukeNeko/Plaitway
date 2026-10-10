@@ -14,7 +14,10 @@ func TestForgiveAbsentAddress(t *testing.T) {
 	there := func() (bool, error) { return true, nil }
 	absent := func() (bool, error) { return false, nil }
 	broken := func() (bool, error) { return false, lookupFailed }
-	never := func() (bool, error) { t.Fatal("the address was looked up for an error that needs no lookup"); return false, nil }
+	never := func() (bool, error) {
+		t.Fatal("the address was looked up for an error that needs no lookup")
+		return false, nil
+	}
 	other := errors.New("access is denied")
 
 	tests := []struct {
