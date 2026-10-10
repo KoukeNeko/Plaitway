@@ -5,7 +5,8 @@ name: Release
 # does everything up to publishing and keeps the files as an artifact, which is how to try the
 # pipeline. Linux is built beside macOS (the linux job) and its .deb files are attached to the release
 # afterwards (publish-linux), so a problem of the Linux job never holds back the macOS release or the
-# Homebrew cask. Windows is not released: it has no app yet.
+# Homebrew cask. The same goes for Windows: the MSI of each language is built beside macOS (the windows
+# job, unsigned until there is a code signing certificate) and attached by publish-windows.
 on:
   push:
     tags: ['v*']
@@ -178,6 +179,39 @@ jobs:
           path: build/linux/plaitway_*.deb
           if-no-files-found: error
 
+  # The MSI of each language, built and checked as packaging/windows/README.md describes. The Go tests
+  # run first, as in the macOS job; the app's tests and the elevated tests are not part of a release.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: windows/global.json
+      - name: Check the version
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: go test -count=1 ./...
+      - name: Build the packages
+        run: powershell -NoProfile -File packaging\windows\build-installer.ps1
+      - name: Check the packages
+        run: powershell -NoProfile -File packaging\windows\Test-Installer.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: build/windows/Plaitway-${{ env.VERSION }}-x64-*.msi
+          if-no-files-found: error
+
   publish:
     if: github.ref_type == 'tag'
     needs: macos
@@ -222,6 +256,27 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS-linux
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  # The Windows files are attached the same way, and for the same reason.
+  publish-windows:
+    if: github.ref_type == 'tag'
+    needs: [publish, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows
+          path: dist
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS-windows
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
