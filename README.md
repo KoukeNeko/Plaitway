@@ -683,7 +683,18 @@ sudo packaging/linux/install.sh --prefix /usr --openrc --python-dir "$(python3 -
 sudo rc-update add plaitwayd default && sudo rc-service plaitwayd start
 ```
 
-Building needs Go 1.27.1 and a C compiler. The helper needs `/dev/net/tun`, the
+On Gentoo, `packaging/linux/gentoo` is a repository with a live ebuild of the head of `main`,
+which builds the programs with the Go of the system, installs the OpenRC service (or the unit,
+with the `systemd` flag), the logrotate file and the app, and depends on the packages below.
+It fetches the Go modules while it unpacks, so it needs the network then:
+
+```sh
+printf '[plaitway]\nlocation = %s\n' "$PWD/packaging/linux/gentoo" | sudo tee /etc/portage/repos.conf/plaitway.conf
+echo '=net-vpn/plaitway-9999 **' | sudo tee -a /etc/portage/package.accept_keywords/plaitway
+sudo emerge net-vpn/plaitway
+```
+
+Building needs Go 1.27.1 (`dev-lang/go`) and a C compiler. The helper needs `/dev/net/tun`, the
 distribution's `openvpn` 2.6 or later for OpenVPN profiles, and openresolv (`resolvconf`;
 `net-dns/openresolv` on Gentoo) for DNS settings; the app needs GTK 4.14, libadwaita 1.5,
 PyGObject, grpcio, protobuf and libsecret. What is not as with systemd:
@@ -700,10 +711,14 @@ PyGObject, grpcio, protobuf and libsecret. What is not as with systemd:
   its entry in `/run/resolvconf` until a daemon starts again, which deletes it, or the
   service is stopped, which does too. If a host has lost its DNS that way,
   `sudo resolvconf -i 'plaitway:*'` lists the entries and `sudo resolvconf -f -d NAME`
-  deletes one
+  deletes one. **NetworkManager** writes `/etc/resolv.conf` itself unless it is told to go
+  through resolvconf, and then puts its own servers back whenever a connection changes;
+  set `rc-manager=resolvconf` in the `[main]` section of a file in
+  `/etc/NetworkManager/conf.d`, and the helper says at start when the file says
+  NetworkManager made it
 - **Console users.** The people at the console are read from the seats of systemd-logind
-  in `/run/systemd/seats`. `elogind` keeps `seat0` there in the same format; an active
-  session on it was not tried. Without the directory only administrators (root and the
+  in `/run/systemd/seats`. `elogind` keeps `seat0` there in the same format, with the user
+  of the active session as `ACTIVE_UID`. Without the directory only administrators (root and the
   members of `sudo`, `wheel` or `admin`) can use the helper
 - **No sandbox of the unit's kind.** The helper runs as root with no new privileges, and
   without the capability bounding set, the system call filter and the read-only file
@@ -735,7 +750,32 @@ runs leaves a compressed copy of everything before it, a live log that starts ag
 no zero bytes in it, the same daemon process, mode 0600 on both, a rotation at 21 MB without
 waiting for the week, four copies kept, and no rotation of an empty or a missing log.
 
-On Gentoo's own stage3 (`amd64-openrc` of 2026-10-04, OpenRC 0.63.3, glibc 2.43), booted with
+On Gentoo's own stage3 with Gentoo's own packages (see the next paragraphs for the first run
+there), the ebuild was built and installed, and everything below was run against that
+installation: OpenRC 0.63.3, openresolv 3.16.5, OpenVPN 2.7.5, dhcpcd 10.5.2, NetworkManager
+1.56.1, logrotate 3.22.0, elogind 255.24, Go 1.27.1, Python 3.14.7, GTK 4.20.4, libadwaita 1.8,
+grpcio 1.83.1 and protobuf 7.35.1 (binary packages of Gentoo where it has them, GTK and grpcio
+compiled). The lab above passed all 49 checks, OpenVPN included, and the helper deleted the entry
+within 2 ms after each of twenty SIGKILLs. It found that openresolv 3.16 says "No resolv.conf for
+key" where 3.13 says "... for interface", so every listing with no match was an error and a full
+tunnel got no DNS entry; the Debian run used 3.13 and could not have seen it. Gentoo's Go also
+deletes `LICENSE` from `GOROOT`, which the generator of the third-party notices needed. A real
+dhcpcd took a lease from a real DHCP server (dnsmasq); a rebind that changed its DNS server, a
+new request and the release of the lease each left the tunnel's server alone in `resolv.conf`,
+and disconnecting brought the renewed lease's server back. NetworkManager with its default
+settings writes `resolv.conf` itself and replaced the tunnel's server when the connection went
+down and up; with `rc-manager=resolvconf` the tunnel kept it through the same steps. The
+rotation of the log was run on the real helper: a compressed copy of the lines before, a log that
+starts small again with no zero bytes, the same process, mode 0600 on both. The app's 369 tests
+pass under Xvfb on Gentoo's Python and GTK (the daemon of the tests is built as the development
+version, as in the CI), and the installed app, run headless, shows "Helper not running" with
+"Start plaitwayd, for example with rc-service plaitwayd start." while the service is stopped and
+its profiles while it runs. With an `elogind` session of a user on `seat0` (made with the
+`CreateSession` call of logind's bus API, as `pam_elogind` makes it; `seat0` then holds
+`ACTIVE_UID`), that user could disconnect a profile and a user without a session could not,
+and the user lost it again when the session ended.
+
+The first run on Gentoo's stage3 (`amd64-openrc` of 2026-10-04, OpenRC 0.63.3, glibc 2.43), booted with
 Gentoo's init and with the files of openresolv 3.13.2 added (the stage3 has neither it nor
 `openvpn`), the WireGuard checks above gave the same results: the service starts at boot under
 one supervisor, a full tunnel's server is alone in `resolv.conf` and survives a renewed lease,
@@ -745,8 +785,7 @@ the service with the supervisor and the helper both killed deleted the entry. Wi
 openresolv the helper says at start that neither `resolvectl` nor `resolvconf` is installed
 and what to install, and the DNS entry of a full tunnel is reported as failed with the same
 words. `install.sh --openrc` laid out the files there and Gentoo's Python imported the
-package. Not run on Gentoo: OpenVPN, the app, an active session on an `elogind` seat, and
-`dhcpcd` or NetworkManager themselves, which hand `resolvconf` their servers as the lab did.
+package.
 
 ### Troubleshooting on Linux
 
