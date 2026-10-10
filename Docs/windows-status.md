@@ -1,6 +1,6 @@
 # Windows: what is verified, what waits, what is not done
 
-State of the branch `windows-phase3` on 2026-10-09. The machine of the verification is a Windows 11 Pro PC (build
+State on 2026-10-11, at release 0.6.0. The machine of the verification is a Windows 11 Pro PC (build
 26300) with an administrator session; "elevated" below means that session. The architecture is in
 [windows-architecture.md](windows-architecture.md), the elevated tests in [windows-elevated-tests.md](windows-elevated-tests.md).
 
@@ -16,6 +16,7 @@ State of the branch `windows-phase3` on 2026-10-09. The machine of the verificat
 | The service: registration, the pipe served as SYSTEM, stop, restart after a crash, uninstall | `-Include Service -TestMachine` | 4 of 4 |
 | C# client library and app model | `dotnet test` from `windows/` | Client 898 of 900 (2 need a daemon with real engines), AppCore 344 of 344 |
 | UI tests: the window opened on the screen | `dotnet test Tests/Plaitway.App.UiTests` from `windows/`, after the drop and the trust check were wired and the branch was rebased onto v0.5.0 | 8 of 8 |
+| The `windows` job of the release workflow on a GitHub runner (`windows-latest`) | Release run by hand: the Go tests, `build-installer.ps1`, `Test-Installer.ps1`; then `Test-Installer.ps1` again on the two MSIs of the artifact | pass. The first run failed two tests that assumed a process that is not elevated (`fsperm`: the owner of a new file; `transport`: the restricted token of an ordinary user kept the Administrators group); the tests are fixed |
 | The MSI of both languages | `build-installer.ps1`, then `Test-Installer.ps1` (tables, the order of the Helper actions, the unpacked files, the signature of `wintun.dll`) | pass |
 | Installing the MSI for real, on the development PC (the PC had no Plaitway, no `%ProgramData%\Plaitway`, and a restore timer was armed) | install, `plaitwayd status`, `plaitway status` through the pipe, `layoutcheck`, repair (also of a deleted `wintun.dll` and with the service stopped), the zh-TW package over the en-US one, removal with `PLAITWAY_PURGE_DATA=1` | pass; the service is LocalSystem, automatic, restarts on failure; after the removal nothing is left |
 
