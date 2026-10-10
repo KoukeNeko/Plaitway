@@ -159,6 +159,7 @@ expect "a build directory without the programs is refused, naming build.sh" 'tes
 # --- the OpenRC script ----------------------------------------------------------
 
 OPENRC="$HERE/openrc/plaitwayd"
+# shellcheck disable=SC2034 # read by the checks below, which expect() runs with eval
 LOGROTATE="$HERE/openrc/plaitwayd.logrotate"
 unit_args() { sed -n 's|^ExecStart=/usr/libexec/plaitway/plaitwayd ||p' "$HERE/plaitwayd.service"; }
 openrc_args() { sed -n 's|^command_args="\(.*\)"$|\1|p' "$OPENRC"; }
