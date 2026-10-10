@@ -16,8 +16,8 @@ import (
 )
 
 // fakeOpenresolv is the part of openresolv's resolvconf that the adapter uses,
-// with the output and the exit statuses that openresolv 3.13.2 gave when the
-// same commands were tried on it: "-i" lists the names that match a shell
+// with the output and the exit statuses that openresolv 3.13.2 and 3.16.5 gave
+// when the same commands were tried on them: "-i" lists the names that match a shell
 // pattern and exits with 2 and a message when none does, "-l" prints the file of
 // a name with a comment line before it, "-d" of a name that is not there fails
 // unless "-f" is given.
@@ -35,10 +35,13 @@ type fakeOpenresolv struct {
 	store func(name, body string) string
 	// hang makes a command wait for its context.
 	hang bool
+	// noFilesWord is what the message about a name without a file calls it:
+	// "interface" in openresolv 3.13, "key" in 3.16.
+	noFilesWord string
 }
 
 func newFakeOpenresolv() *fakeOpenresolv {
-	return &fakeOpenresolv{files: map[string]string{}, path: "/sbin/resolvconf", version: "openresolv 3.13.2"}
+	return &fakeOpenresolv{files: map[string]string{}, path: "/sbin/resolvconf", version: "openresolv 3.13.2", noFilesWord: "interface"}
 }
 
 func (f *fakeOpenresolv) run(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
@@ -68,7 +71,7 @@ func (f *fakeOpenresolv) run(ctx context.Context, name string, args []string, st
 			}
 		}
 		if len(names) == 0 {
-			return exit(2, "No resolv.conf for interface "+args[1]+"\n\n")
+			return exit(2, "No resolv.conf for "+f.noFilesWord+" "+args[1]+"\n\n")
 		}
 		slices.Sort(names)
 		return []byte(strings.Join(names, " ") + " \n"), nil
@@ -87,7 +90,7 @@ func (f *fakeOpenresolv) run(ctx context.Context, name string, args []string, st
 	case len(args) == 2 && args[0] == "-l":
 		body, ok := f.files[args[1]]
 		if !ok {
-			return exit(2, "No resolv.conf for interface "+args[1]+"\n\n")
+			return exit(2, "No resolv.conf for "+f.noFilesWord+" "+args[1]+"\n\n")
 		}
 		return []byte("# resolv.conf from " + args[1] + "\n" + body + "\n"), nil
 	case len(args) == 3 && args[0] == "-f" && args[1] == "-d":
@@ -95,7 +98,7 @@ func (f *fakeOpenresolv) run(ctx context.Context, name string, args []string, st
 		return nil, nil
 	case len(args) == 2 && args[0] == "-d":
 		if _, ok := f.files[args[1]]; !ok {
-			return exit(1, "No resolv.conf for interface "+args[1]+"\n")
+			return exit(1, "No resolv.conf for "+f.noFilesWord+" "+args[1]+"\n")
 		}
 		delete(f.files, args[1])
 		return nil, nil
@@ -483,5 +486,27 @@ func TestResolvconfFlushRunsNothing(t *testing.T) {
 	d := newTestResolvconf(f)
 	if err := d.Flush(); err != nil || len(f.runList()) != 0 {
 		t.Errorf("Flush = %v after %v", err, f.runList())
+	}
+}
+
+func TestResolvconfNothingToListIsNotAnErrorInEveryVersion(t *testing.T) {
+	for _, word := range []string{"interface", "key"} {
+		t.Run(word, func(t *testing.T) {
+			f := newFakeOpenresolv()
+			f.noFilesWord = word
+			d := newTestResolvconf(f)
+			if err := d.Apply("office", []osnet.DNSEntry{dnsCatchAll("tun0", "10.6.0.1")}); err != nil {
+				t.Fatalf("Apply with no entry yet: %v", err)
+			}
+			if err := d.Remove("office"); err != nil {
+				t.Fatalf("Remove: %v", err)
+			}
+			if err := d.Remove("other"); err != nil {
+				t.Fatalf("Remove of an owner that has nothing: %v", err)
+			}
+			if keys, err := d.Owned(); err != nil || len(keys) != 0 {
+				t.Fatalf("Owned = %v, %v; want nothing", keys, err)
+			}
+		})
 	}
 }

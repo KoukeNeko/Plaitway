@@ -24,9 +24,10 @@ const (
 	// openresolvName is what "resolvconf --version" prints first. Another
 	// resolvconf has other options, so it is not driven.
 	openresolvName = "openresolv"
-	// noResolvconfFiles is printed by "resolvconf -i" and "-l" when nothing
-	// matches (and the exit status is 2).
-	noResolvconfFiles = "No resolv.conf for interface"
+	// noResolvconfFiles starts the message of "resolvconf -i" and "-l" when
+	// nothing matches (and the exit status is 2). It goes on with "interface"
+	// in openresolv 3.13 and "key" in 3.16.
+	noResolvconfFiles = "No resolv.conf for "
 	// maxResolvconfName keeps the name far below the 255 bytes of a file name.
 	maxResolvconfName = 200
 )
