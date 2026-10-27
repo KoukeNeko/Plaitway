@@ -40,6 +40,8 @@ pub struct Ui {
     pub switches: [bool; 8],
     hits: Vec<(R, Act)>,
     hover: Option<Act>,
+    /// The lowest y any card reached in the last draw, in the same logical pixels it was drawn at.
+    pub bottom: f32,
 }
 
 pub struct Fonts {
@@ -50,7 +52,7 @@ pub struct Fonts {
 
 impl Ui {
     pub fn new() -> Self {
-        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], hits: Vec::new(), hover: None }
+        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], hits: Vec::new(), hover: None, bottom: 0.0 }
     }
 
     pub fn clear(&mut self) {
@@ -113,6 +115,7 @@ impl Ui {
     /// Draw every page but Routing at logical origin (`ox`, `oy`), `w` wide.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, view: &View, s: f32, ox: f32, oy: f32, w: f32, h: f32) {
+        self.bottom = oy;
         match self.page.clone() {
             Page::Routing => {}
             Page::Profile(id) => match view.model.index(&id) {
@@ -127,7 +130,7 @@ impl Ui {
     #[allow(clippy::too_many_arguments)]
     fn header(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, title: &str, sub: &str) {
         g.text(f.bold, 28.0 * s, ox * s, oy * s + 14.0 * s, title, pal.ink);
-        g.text(f.text, 14.0 * s, ox * s, oy * s + 50.0 * s, sub, pal.muted);
+        g.text_fit(f.text, 14.0 * s, ox * s, oy * s + 50.0 * s, sub, pal.muted, 640.0 * s);
     }
 
     /// A row of tabs; returns the y just below it, in logical pixels.
@@ -150,7 +153,7 @@ impl Ui {
 
     /// One card holding `rows` of (label, value); returns its bottom.
     #[allow(clippy::too_many_arguments)]
-    fn rows(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, rows: &[(&str, String)]) -> f32 {
+    fn rows(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, rows: &[(&str, String)]) -> f32 {
         let h = rows.len() as f32 * 46.0;
         g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
         g.outline(ox * s, y * s, w * s, h * s, 10.0 * s, 1.0, pal.line);
@@ -160,8 +163,9 @@ impl Ui {
                 g.rect((ox + 1.0) * s, cy - 23.0 * s, (w - 2.0) * s, 1.0, 0.0, pal.line);
             }
             g.text(f.text, 14.0 * s, (ox + 18.0) * s, cy, k, pal.muted);
-            g.text(f.text, 14.0 * s, (ox + 190.0) * s, cy, v, pal.ink);
+            g.text_fit(f.text, 14.0 * s, (ox + 190.0) * s, cy, v, pal.ink, (w - 190.0 - 18.0) * s);
         }
+        self.bottom = self.bottom.max(y + h);
         y + h + 14.0
     }
 
@@ -186,17 +190,19 @@ impl Ui {
             }
             self.region((ox * s, cy - 23.0 * s, w * s, 46.0 * s), Act::Switch(*idx));
         }
+        self.bottom = self.bottom.max(y + h);
         y + h + 14.0
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn lines(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, lines: &[String], mono: bool) -> f32 {
+    fn lines(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, lines: &[String], mono: bool) -> f32 {
         let h = lines.len().max(1) as f32 * 24.0 + 24.0;
         g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
         g.outline(ox * s, y * s, w * s, h * s, 10.0 * s, 1.0, pal.line);
         for (i, l) in lines.iter().enumerate() {
-            g.text(if mono { f.mono } else { f.text }, 13.0 * s, (ox + 18.0) * s, (y + 24.0 + i as f32 * 24.0) * s, l, pal.ink);
+            g.text_fit(if mono { f.mono } else { f.text }, 13.0 * s, (ox + 18.0) * s, (y + 24.0 + i as f32 * 24.0) * s, l, pal.ink, (w - 36.0) * s);
         }
+        self.bottom = self.bottom.max(y + h);
         y + h + 14.0
     }
 
@@ -281,9 +287,9 @@ impl Ui {
             (_, None) => {
                 self.rows(g, f, pal, s, ox, y, w, &[("Daemon", daemon)]);
             }
-            (0, Some(d)) => self.diag_overview(g, f, pal, d, daemon, s, ox, y, w),
+            (0, Some(d)) => self.diag_overview(g, f, pal, d, &view.model, daemon, s, ox, y, w),
             (_, Some(d)) => {
-                let lines: Vec<String> = d.journal.iter().take(((h - y - 48.0) / 24.0).max(1.0) as usize).map(|j| format!("{}  {:<8}{:<18}{}", local_hms(j.time), j.owner, j.key, j.state)).collect();
+                let lines: Vec<String> = d.journal.iter().take(((h - y - 48.0) / 24.0).max(1.0) as usize).map(|j| format!("{}  {:<8}{:<18}{}", local_hms(j.time), short(&name_of(&view.model, &j.owner)), j.key, j.state)).collect();
                 let lines = if lines.is_empty() { vec!["Nothing has changed yet.".to_string()] } else { lines };
                 self.lines(g, f, pal, s, ox, y, w, &lines, true);
             }
@@ -291,7 +297,7 @@ impl Ui {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn diag_overview(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, d: &Diagnostics, daemon: String, s: f32, ox: f32, y: f32, w: f32) {
+    fn diag_overview(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, d: &Diagnostics, m: &plaitway_core::Model, daemon: String, s: f32, ox: f32, y: f32, w: f32) {
         let version = format!("{} · {}", d.version, if d.privileged { "can change routes" } else { "cannot change routes" });
         let gateway = if d.gateway_v4.is_empty() { "none".to_string() } else { format!("{} via {}", d.gateway_v4, d.interface_v4) };
         let changed = match d.last_change {
@@ -301,7 +307,7 @@ impl Ui {
         let y = self.rows(g, f, pal, s, ox, y, w, &[("Daemon", daemon), ("Version", version), ("Default gateway", gateway), ("Network changed", changed)]);
 
         g.text(f.bold, 13.0 * s, ox * s, (y + 8.0) * s, &format!("Routes the daemon owns ({})", d.owned.len()), pal.muted);
-        let mut lines: Vec<String> = d.owned.iter().take(6).map(|r| format!("{:<20}{:<10}{}", r.prefix, r.owner, r.via)).collect();
+        let mut lines: Vec<String> = d.owned.iter().take(6).map(|r| format!("{:<20}{:<10}{}", r.prefix, short(&name_of(m, &r.owner)), if r.kind == plaitway_core::RouteKind::Bypass { format!("{} (keeps the endpoint reachable)", r.via) } else { r.via.clone() })).collect();
         if d.owned.len() > 6 {
             lines.push(format!("and {} more", d.owned.len() - 6));
         }
@@ -320,7 +326,8 @@ impl Ui {
             g.rect(ox * s, y * s, w * s, 46.0 * s, 10.0 * s, pal.card);
             g.outline(ox * s, y * s, w * s, 46.0 * s, 10.0 * s, 1.0, pal.line);
             let what = format!("{}  {} · {}{}", st.prefix, st.interface, st.reason, if st.owned { " · installed by Plaitway" } else { "" });
-            g.text(f.text, 13.0 * s, (ox + 18.0) * s, (y + 23.0) * s, &what, pal.ink);
+            g.text_fit(f.text, 13.0 * s, (ox + 18.0) * s, (y + 23.0) * s, &what, pal.ink, (w - 36.0 - 100.0) * s);
+            self.bottom = self.bottom.max(y + 46.0);
             let (bx, by, bw, bh) = ((ox + w - 18.0 - 88.0) * s, (y + 9.0) * s, 88.0 * s, 28.0 * s);
             let act = Act::RemoveStale(st.key.clone());
             g.rect(bx, by, bw, bh, 6.0 * s, if self.is_hover(&act) { [pal.ink[0], pal.ink[1], pal.ink[2], 0.12] } else { pal.card });
@@ -334,9 +341,10 @@ impl Ui {
 
     /// The newest lines that fit between `y` and the bottom of the window, oldest first.
     #[allow(clippy::too_many_arguments)]
-    fn log(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, h: f32, log: Option<&LogView>) {
+    fn log(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, h: f32, log: Option<&LogView>) {
         let cap = (((h - y - 24.0) / 22.0).floor().max(1.0)) as usize;
         let h = cap as f32 * 22.0 + 24.0;
+        self.bottom = self.bottom.max(y + h);
         g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
         g.outline(ox * s, y * s, w * s, h * s, 10.0 * s, 1.0, pal.line);
         let Some(log) = log.filter(|l| !l.lines.is_empty()) else {
@@ -346,7 +354,7 @@ impl Ui {
         let shown = &log.lines[log.lines.len().saturating_sub(cap)..];
         for (i, l) in shown.iter().enumerate() {
             let c = if matches!(l.level, Level::Warn | Level::Error) { if pal.dark { [1.0, 0.55, 0.71, 1.0] } else { [0.71, 0.14, 0.37, 1.0] } } else { pal.ink };
-            g.text(f.mono, 13.0 * s, (ox + 18.0) * s, (y + 23.0 + i as f32 * 22.0) * s, &format!("{}  {}", local_hms(l.time), l.text), c);
+            g.text_fit(f.mono, 13.0 * s, (ox + 18.0) * s, (y + 23.0 + i as f32 * 22.0) * s, &format!("{}  {}", local_hms(l.time), l.text), c, (w - 36.0) * s);
         }
     }
     fn settings(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, w: f32) {
@@ -355,6 +363,16 @@ impl Ui {
         let y = self.rows(g, f, pal, s, ox, y, w, &[("Language", "English".to_string())]);
         self.switch_row(g, f, pal, s, ox, y, w, &[("Start with Windows", 0), ("Keep running in the tray when closed", 1)]);
     }
+}
+
+/// At most 9 characters, for the narrow columns of a table in a monospaced font.
+fn short(s: &str) -> String {
+    if s.chars().count() <= 9 { s.to_string() } else { s.chars().take(8).collect::<String>() + "…" }
+}
+
+/// A profile's name for its id, or the id when the profile is gone (a journal outlives its profiles).
+fn name_of(m: &plaitway_core::Model, id: &str) -> String {
+    m.tunnels.iter().find(|t| t.id == id).map_or_else(|| id.chars().take(8).collect(), |t| t.name.clone())
 }
 
 pub fn state_name(s: State) -> &'static str {
@@ -482,6 +500,13 @@ mod tests {
     }
 
     #[test]
+    fn long_names_are_cut_for_the_tables() {
+        assert_eq!(short("Home"), "Home");
+        assert_eq!(short("Nine char"), "Nine cha…");
+        assert_eq!(short("123456789"), "123456789");
+    }
+
+    #[test]
     fn uptime_reads_naturally() {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         assert_eq!(uptime(now - 8040).unwrap(), "2 h 14 min");
@@ -489,6 +514,10 @@ mod tests {
         assert!(uptime(now + 100).unwrap().ends_with(" s"));
     }
 }
+
+
+
+
 
 
 

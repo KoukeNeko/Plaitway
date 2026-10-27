@@ -19,6 +19,7 @@ use tokio::{
 };
 use tonic::{transport::server::Connected, transport::Server, Request, Response, Status};
 
+#[derive(Clone, Copy)]
 pub struct Seed {
     pub id: &'static str,
     pub name: &'static str,
@@ -393,5 +394,6 @@ pub async fn serve(pipe: &str, fake: Fake, ready: tokio::sync::oneshot::Sender<(
     };
     Server::builder().add_service(DaemonServiceServer::new(fake)).serve_with_incoming(incoming).await
 }
+
 
 

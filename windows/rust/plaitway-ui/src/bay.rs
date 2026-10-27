@@ -258,6 +258,12 @@ impl Bay {
         changed
     }
 
+    /// Height of the page below its origin, for scrolling.
+    pub fn height(&self, m: &Model, w: f32) -> f32 {
+        let l = self.layout(w, m.routes().len(), m.tunnels.len());
+        l.why.1 + l.why.3
+    }
+
     /// Draw at logical origin (`ox`, `oy`), `w` wide. `f` is (text, bold).
     pub fn draw(&self, g: &mut Gfx, f: (usize, usize), pal: &Pal, m: &Model, s: f32, ox: f32, oy: f32, w: f32) {
         let routes = m.routes();
@@ -291,8 +297,9 @@ impl Bay {
                 let names: Vec<&str> = row.requests.iter().map(|r| m.tunnels[r.0].name.as_str()).collect();
                 desc = format!("Asked by {}", names.join(", "));
             }
-            g.text(f.1, 15.0 * s, x + 14.0 * s, y + 20.0 * s, &name, pal.ink);
-            g.text(f.0, 12.0 * s, x + 14.0 * s, y + 40.0 * s, &desc, pal.muted);
+            let room = rw - 28.0 * s - if self.compact { 0.0 } else { 24.0 * s };
+            g.text_fit(f.1, 15.0 * s, x + 14.0 * s, y + 20.0 * s, &name, pal.ink, room);
+            g.text_fit(f.0, 12.0 * s, x + 14.0 * s, y + 40.0 * s, &desc, pal.muted, room);
             if self.compact {
                 // "Home holds" and "Office waits" chips, in priority order.
                 let mut cx = x + 14.0 * s;
@@ -324,7 +331,7 @@ impl Bay {
         g.rect(x, y, ww, wh, 8.0 * s, pal.card);
         g.outline(x, y, ww, wh, 8.0 * s, 1.0, pal.line);
         let text = routes.get(self.sel).map_or_else(|| "No route is asked for yet".to_string(), |row| why(m, row));
-        g.text(f.1, 14.0 * s, x + 16.0 * s, y + wh / 2.0, &text, pal.ink);
+        g.text_fit(f.1, 14.0 * s, x + 16.0 * s, y + wh / 2.0, &text, pal.ink, ww - 32.0 * s);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -336,7 +343,7 @@ impl Bay {
         if self.compact {
             g.rect(x, y, tw, th, 8.0 * s, if on { c_alpha(c, 0.13) } else { pal.card });
             g.outline(x, y, tw, th, 8.0 * s, 1.0, if on { c_alpha(c, 0.28) } else { pal.line });
-            g.text(f.1, 13.0 * s, x + 14.0 * s, y + th / 2.0, &format!("{} · {}", tun.name, if on { "On" } else { "Off" }), pal.ink);
+            g.text_fit(f.1, 13.0 * s, x + 14.0 * s, y + th / 2.0, &format!("{} · {}", tun.name, if on { "On" } else { "Off" }), pal.ink, tw - 28.0 * s);
             return;
         }
         let lifted = matches!(self.drag, Some((d, _)) if d == t);
@@ -348,12 +355,12 @@ impl Bay {
             g.outline(x, y, tw, th, 10.0 * s, 1.0, pal.line);
             g.outline(x + 16.0 * s, y + 22.0 * s - 5.0 * s, 10.0 * s, 10.0 * s, 5.0 * s, 2.0 * s, pal.muted);
         }
-        g.text(f.1, 16.0 * s, x + 34.0 * s, y + 22.0 * s, &tun.name, pal.ink);
         let kind = kind_name(tun);
         let pw = g.measure(f.1, 11.0 * s, kind) + 14.0 * s;
+        g.text_fit(f.1, 16.0 * s, x + 34.0 * s, y + 22.0 * s, &tun.name, pal.ink, tw - 34.0 * s - pw - 28.0 * s);
         g.outline(x + tw - 16.0 * s - pw, y + 13.0 * s, pw, 18.0 * s, 9.0 * s, 1.0, pal.line);
         g.text(f.1, 11.0 * s, x + tw - 16.0 * s - pw + 7.0 * s, y + 22.0 * s, kind, pal.muted);
-        g.text(f.0, 13.0 * s, x + 16.0 * s, y + 50.0 * s, &state_line(tun, slot), pal.muted);
+        g.text_fit(f.0, 13.0 * s, x + 16.0 * s, y + 50.0 * s, &state_line(tun, slot), pal.muted, tw - 32.0 * s);
 
         let (bx, by, bw, bh) = btn;
         g.rect(bx, by, bw, bh, 6.0 * s, if self.btn_hover == Some(t) { c_alpha(pal.ink, 0.1) } else { pal.card });
@@ -642,5 +649,6 @@ mod tests {
         assert!(b.animating());
     }
 }
+
 
 

@@ -120,6 +120,8 @@ pub struct Gfx {
     shelf: (u32, u32, u32),
     pub size: (u32, u32),
     inst: Vec<Inst>,
+    /// Where the scissor rectangle changes: (first instance, [left, top, right, bottom]); empty means no clipping.
+    clips: Vec<(usize, [i32; 4])>,
 }
 
 const MAX_INST: usize = 8192;
@@ -252,7 +254,7 @@ impl Gfx {
             let mut blend = None;
             dev.CreateBlendState(&bd, Some(&mut blend))?;
             let mut raster = None;
-            dev.CreateRasterizerState(&D3D11_RASTERIZER_DESC { FillMode: D3D11_FILL_SOLID, CullMode: D3D11_CULL_NONE, DepthClipEnable: true.into(), ..Default::default() }, Some(&mut raster))?;
+            dev.CreateRasterizerState(&D3D11_RASTERIZER_DESC { FillMode: D3D11_FILL_SOLID, CullMode: D3D11_CULL_NONE, DepthClipEnable: true.into(), ScissorEnable: true.into(), ..Default::default() }, Some(&mut raster))?;
 
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let mut g = Gfx {
@@ -279,6 +281,7 @@ impl Gfx {
                 shelf: (1, 1, 0),
                 size: (w, h),
                 inst: Vec::with_capacity(512),
+                clips: Vec::new(),
             };
             g.make_rtv()?;
             Ok(g)
@@ -452,8 +455,41 @@ impl Gfx {
         self.push(Inst { rect: [lx, ly, x0.max(x1) + pad - lx, y0.max(y1) + pad - ly], col, uv: [x0, y0, x1, y1], p: [width, 2.0, flat, 0.0] });
     }
 
-    fn push(&mut self, i: Inst) {
-        if self.inst.len() < MAX_INST {
+    /// Draw nothing outside this rectangle (pixels) from now on, until `unclip`.
+    pub fn clip(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.clips.push((self.inst.len(), [x.floor() as i32, y.floor() as i32, (x + w).ceil() as i32, (y + h).ceil() as i32]));
+    }
+
+    pub fn unclip(&mut self) {
+        self.clips.push((self.inst.len(), [0, 0, i32::MAX / 2, i32::MAX / 2]));
+    }
+
+    /// `text`, cut with an ellipsis when it is wider than `max_w`. Returns the width drawn.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_fit(&mut self, font: usize, size: f32, x: f32, cy: f32, text: &str, col: [f32; 4], max_w: f32) -> f32 {
+        let shown = self.fit(font, size, text, max_w);
+        self.text(font, size, x, cy, &shown, col)
+    }
+
+    pub fn fit(&self, font: usize, size: f32, text: &str, max_w: f32) -> String {
+        if self.measure(font, size, text) <= max_w {
+            return text.to_string();
+        }
+        let chars: Vec<char> = text.chars().collect();
+        let (mut lo, mut hi) = (0usize, chars.len());
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            let cut: String = chars[..mid].iter().collect::<String>() + "…";
+            if self.measure(font, size, &cut) <= max_w {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        chars[..lo].iter().collect::<String>() + "…"
+    }
+
+    fn push(&mut self, i: Inst) {        if self.inst.len() < MAX_INST {
             self.inst.push(i);
         }
     }
@@ -485,9 +521,23 @@ impl Gfx {
             ctx.PSSetShader(&self.ps, None);
             ctx.PSSetShaderResources(0, Some(&[Some(self.atlas_srv.clone())]));
             ctx.PSSetSamplers(0, Some(&[Some(self.sampler.clone())]));
-            ctx.DrawInstanced(4, self.inst.len() as u32, 0, 0);
+            // One draw per stretch between scissor changes.
+            let mut start = 0usize;
+            let mut rect = [0, 0, i32::MAX / 2, i32::MAX / 2];
+            let mut stops: Vec<(usize, [i32; 4])> = self.clips.clone();
+            stops.push((self.inst.len(), rect));
+            for (at, next) in stops {
+                let at = at.min(self.inst.len());
+                if at > start {
+                    ctx.RSSetScissorRects(Some(&[RECT { left: rect[0], top: rect[1], right: rect[2], bottom: rect[3] }]));
+                    ctx.DrawInstanced(4, (at - start) as u32, 0, start as u32);
+                    start = at;
+                }
+                rect = next;
+            }
             self.inst.clear();
-            self.swap.Present(1, DXGI_PRESENT(0)).ok()
+            self.clips.clear();            self.swap.Present(1, DXGI_PRESENT(0)).ok()
         }
     }
 }
+

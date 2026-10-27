@@ -95,6 +95,11 @@ struct App {
     ui: Ui,
     /// What the session was last asked to watch: the log (a profile id, empty for the daemon's) and whether diagnostics.
     watching: (Option<String>, bool),
+    /// How far the page is scrolled, in logical pixels, and how far it can be.
+    scroll: f32,
+    max_scroll: f32,
+    /// The page and tab the scroll position belongs to; a different one starts at the top.
+    scroll_key: (Page, usize),
     f_mono: usize,
     frames: u32,
     f_text: usize,
@@ -187,8 +192,9 @@ impl App {
                 g.outline(dx, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, 2.0 * s, muted);
             }
             if !compact {
-                g.text(self.f_text, 14.0 * s, 46.0 * s, cy - 8.0 * s, &tun.name, ink);
-                g.text(self.f_text, 12.0 * s, 46.0 * s, cy + 10.0 * s, &sub, muted);
+                let room = (side - 46.0 - 20.0) * s;
+                g.text_fit(self.f_text, 14.0 * s, 46.0 * s, cy - 8.0 * s, &tun.name, ink, room);
+                g.text_fit(self.f_text, 12.0 * s, 46.0 * s, cy + 10.0 * s, &sub, muted, room);
             }
         }
 
@@ -210,6 +216,13 @@ impl App {
         let pal = Pal { dark: t.dark, ink, muted, line, card: if t.dark { rgba(0xFFFFFF, 0.07) } else { rgba(0xFFFFFF, 0.9) } };
         let (ox, oy, cw) = content(w, s);
         self.bay.compact = compact;
+        if self.scroll_key != (self.ui.page.clone(), self.ui.tab) {
+            self.scroll_key = (self.ui.page.clone(), self.ui.tab);
+            self.scroll = 0.0;
+        }
+        let top = oy - self.scroll;
+        let viewport = h / s - oy - 16.0;
+        g.clip(cx, cy0 + 1.0, w - cx, h - cy0);
         let fonts = Fonts { text: self.f_text, bold: self.f_bold, mono: self.f_mono };
         match (&self.view.link, self.ui.page == Page::Routing) {
             // Without the daemon there is nothing to draw but why.
@@ -225,8 +238,23 @@ impl App {
                 g.text(self.f_bold, 28.0 * s, ox * s, (oy + 14.0) * s, "No profiles yet", ink);
                 g.text(self.f_text, 14.0 * s, ox * s, (oy + 50.0) * s, "Import a WireGuard or OpenVPN profile to see its routes here.", muted);
             }
-            (_, true) => self.bay.draw(g, (self.f_text, self.f_bold), &pal, &self.view.model, s, ox, oy, cw),
-            _ => self.ui.draw(g, &fonts, &pal, &self.view, s, ox, oy, cw, h / s - oy - 24.0),
+            (_, true) => {
+                self.bay.draw(g, (self.f_text, self.f_bold), &pal, &self.view.model, s, ox, top, cw);
+                self.max_scroll = (self.bay.height(&self.view.model, cw) + 24.0 - viewport).max(0.0);
+            }
+            _ => {
+                self.ui.draw(g, &fonts, &pal, &self.view, s, ox, top, cw, h / s - oy - 24.0);
+                self.max_scroll = (self.ui.bottom - top + 24.0 - viewport).max(0.0);
+            }
+        }
+        self.scroll = self.scroll.clamp(0.0, self.max_scroll);
+        g.unclip();
+        if self.max_scroll > 0.0 {
+            // A thin bar at the right edge: the thumb is the visible share of the page.
+            let (track_y, track_h) = ((oy - 8.0) * s, (viewport + 8.0) * s);
+            let thumb = (viewport / (viewport + self.max_scroll) * track_h).max(24.0 * s);
+            let at = track_y + (track_h - thumb) * self.scroll / self.max_scroll;
+            g.rect(w - 8.0 * s, at, 4.0 * s, thumb, 2.0 * s, rgba(if t.dark { 0xFFFFFF } else { 0x16222A }, 0.35));
         }
         if let Some(e) = &self.view.error {
             g.text(self.f_text, 13.0 * s, ox * s, h - 24.0 * s, e, rgba(0xFF8DB4, 1.0));
@@ -234,6 +262,15 @@ impl App {
         self.frames += 1;
         let clear = if self.mica { [0.0; 4] } else { self.theme.solid };
         self.gfx.render(clear)
+    }
+}
+
+/// Scroll by `delta` logical pixels (positive is down) and redraw if that moved the page.
+fn scroll_by(hwnd: HWND, a: &mut App, delta: f32) {
+    let to = (a.scroll + delta).clamp(0.0, a.max_scroll);
+    if to != a.scroll {
+        a.scroll = to;
+        redraw(hwnd, a);
     }
 }
 
@@ -250,7 +287,7 @@ fn frame(w_px: f32, s: f32) -> (f32, f32, bool) {
 fn local(a: &mut App, x: f32, y: f32, w_px: f32) -> (f32, f32, f32) {
     let (s, (ox, oy, cw)) = (a.scale, content(w_px, a.scale));
     a.bay.compact = frame(w_px, s).2;
-    (x / s - ox, y / s - oy, cw)
+    (x / s - ox, y / s - oy + a.scroll, cw)
 }
 
 /// Tell the session what the current page needs: a log on the Logs tabs, diagnostics on the Diagnostics ones.
@@ -474,9 +511,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             });
             LRESULT(0)
         }
+        WM_MOUSEWHEEL => {
+            let delta = ((wparam.0 >> 16) & 0xffff) as i16 as f32 / 120.0;
+            with_app(|a| scroll_by(hwnd, a, -delta * 56.0));
+            LRESULT(0)
+        }
         WM_KEYDOWN => {
             with_app(|a| {
                 let vk = wparam.0 as u32;
+                let page = (a.gfx.size.1 as f32 / a.scale) * 0.8;
+                match vk {
+                    0x21 => scroll_by(hwnd, a, -page),
+                    0x22 => scroll_by(hwnd, a, page),
+                    _ => {}
+                }
                 let tab = a.ui.key(vk);
                 sync_watch(a);
                 if tab || (a.ui.page == Page::Routing && a.bay.key(&a.view.model, vk)) {
@@ -601,7 +649,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
             let _ = PostMessageW(Some(HWND(handle as *mut c_void)), WM_APP, WPARAM(0), LPARAM(0));
         });
         let view = session.view();
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false), f_mono, frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false), scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
@@ -618,6 +666,8 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
 
 
 

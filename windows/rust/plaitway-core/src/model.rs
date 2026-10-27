@@ -64,7 +64,7 @@ impl Tunnel {
             pb::ProfileState::AwaitingCredentials => State::AwaitingCredentials,
             _ => State::Disconnected,
         };
-        let requests = p
+        let requests: Vec<Request> = p
             .status
             .iter()
             .flat_map(|s| s.routes.iter())
@@ -80,6 +80,7 @@ impl Tunnel {
                 shadowed_by: (!r.shadowed_by.is_empty()).then(|| r.shadowed_by.clone()),
             })
             .collect();
+        let requests = merge_default_halves(requests);
         Tunnel {
             id: p.id.clone(),
             name: p.name.clone(),
@@ -102,6 +103,20 @@ impl Tunnel {
     pub fn holds(&self) -> (usize, usize) {
         (self.requests.iter().filter(|r| r.standing == Standing::Holds).count(), self.wanted.max(self.requests.len()))
     }
+}
+
+/// The daemon installs a default route as two halves so that it outranks the one it replaces; to the user it is one route.
+fn merge_default_halves(mut requests: Vec<Request>) -> Vec<Request> {
+    for (low, high, whole) in [("0.0.0.0/1", "128.0.0.0/1", "0.0.0.0/0"), ("::/1", "8000::/1", "::/0")] {
+        let at = |p: &str, rs: &[Request]| rs.iter().position(|r| r.prefix == p);
+        if let (Some(a), Some(b)) = (at(low, &requests), at(high, &requests)) {
+            if requests[a].standing == requests[b].standing {
+                requests[a].prefix = whole.into();
+                requests.remove(b);
+            }
+        }
+    }
+    requests
 }
 
 /// One prefix and every connected profile asking for it.
@@ -219,6 +234,16 @@ mod tests {
     }
 
     #[test]
+    fn the_two_halves_of_a_default_route_are_one_route() {
+        use pb::{ProfileState::*, RouteState::*};
+        let mut m = Model::default();
+        m.apply(snapshot(vec![profile("a", 0, Connected, &[("0.0.0.0/1", Installed, ""), ("10.0.0.0/8", Installed, ""), ("128.0.0.0/1", Installed, "")])]));
+        assert_eq!(m.routes().iter().map(|r| r.prefix.as_str()).collect::<Vec<_>>(), ["0.0.0.0/0", "10.0.0.0/8"]);
+        // Halves that stand differently are not one route; both are kept.
+        m.apply(snapshot(vec![profile("b", 0, Connected, &[("0.0.0.0/1", Shadowed, "a"), ("128.0.0.0/1", Installed, "")])]));
+        assert_eq!(m.routes().len(), 2);
+    }
+    #[test]
     fn holds_counts_what_a_profile_won() {
         let m = two();
         assert_eq!(m.tunnels[0].holds(), (2, 2));
@@ -248,5 +273,7 @@ mod tests {
         assert_eq!(m.tunnels.len(), 2);
     }
 }
+
+
 
 
