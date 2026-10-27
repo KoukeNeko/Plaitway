@@ -1,26 +1,30 @@
-//! Navigation and the pages other than Routing, on fake data. Every clickable thing registers a
-//! region while it is drawn; a click looks the region up, so drawing and hit-testing cannot drift apart.
+//! Navigation and the pages other than Routing. Every clickable thing registers a region while it is
+//! drawn; a click looks the region up, so drawing and hit-testing cannot drift apart.
+
+use plaitway_core::{Link, Model, Standing, State, Tunnel, View};
 
 use crate::{
-    bay::{Bay, Pal, PROFILES},
+    bay::{hue, kind_name, Pal},
     gfx::Gfx,
 };
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Page {
     Routing,
-    Profile(usize),
+    /// By profile id, so the page stays on the same profile when the priorities change.
+    Profile(String),
     Diagnostics,
     Settings,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Act {
     Go(Page),
     Tab(usize),
-    /// A switch: 0 start with Windows, 1 close to tray, 2 and up per-profile switches.
+    /// A switch: 0 start with Windows, 1 close to tray, 2 and up per profile.
     Switch(usize),
-    Connect(usize),
+    /// Connect or disconnect the profile with this id.
+    Toggle(String),
 }
 
 pub const PROFILE_TABS: [&str; 5] = ["Overview", "Routes", "Logs", "Configuration", "Settings"];
@@ -56,11 +60,11 @@ impl Ui {
     }
 
     fn at(&self, x: f32, y: f32) -> Option<Act> {
-        self.hits.iter().rev().find(|(r, _)| x >= r.0 && x < r.0 + r.2 && y >= r.1 && y < r.1 + r.3).map(|(_, a)| *a)
+        self.hits.iter().rev().find(|(r, _)| x >= r.0 && x < r.0 + r.2 && y >= r.1 && y < r.1 + r.3).map(|(_, a)| a.clone())
     }
 
-    pub fn is_hover(&self, act: Act) -> bool {
-        self.hover == Some(act)
+    pub fn is_hover(&self, act: &Act) -> bool {
+        self.hover.as_ref() == Some(act)
     }
 
     /// Returns true when the highlighted region changed.
@@ -71,17 +75,17 @@ impl Ui {
         changed
     }
 
-    /// Apply a click. `Connect` is returned to the caller, which owns the tunnel state.
+    /// Apply a click. `Toggle` is returned to the caller, which owns the session.
     pub fn click(&mut self, x: f32, y: f32) -> Option<Act> {
         let act = self.at(x, y)?;
-        match act {
+        match &act {
             Act::Go(p) => {
-                self.page = p;
+                self.page = p.clone();
                 self.tab = 0;
             }
-            Act::Tab(t) => self.tab = t,
-            Act::Switch(i) => self.switches[i] = !self.switches[i],
-            Act::Connect(_) => {}
+            Act::Tab(t) => self.tab = *t,
+            Act::Switch(i) => self.switches[*i] = !self.switches[*i],
+            Act::Toggle(_) => {}
         }
         Some(act)
     }
@@ -104,21 +108,27 @@ impl Ui {
     }
 
     /// Draw every page but Routing at logical origin (`ox`, `oy`), `w` wide.
-    pub fn draw(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, bay: &Bay, s: f32, ox: f32, oy: f32, w: f32) {
-        match self.page {
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, view: &View, s: f32, ox: f32, oy: f32, w: f32) {
+        match self.page.clone() {
             Page::Routing => {}
-            Page::Profile(p) => self.profile(g, f, pal, bay, p, s, ox, oy, w),
-            Page::Diagnostics => self.diagnostics(g, f, pal, bay, s, ox, oy, w),
+            Page::Profile(id) => match view.model.index(&id) {
+                Some(i) => self.profile(g, f, pal, &view.model, i, s, ox, oy, w),
+                None => self.header(g, f, pal, s, ox, oy, "Profile not found", "It may have been deleted"),
+            },
+            Page::Diagnostics => self.diagnostics(g, f, pal, view, s, ox, oy, w),
             Page::Settings => self.settings(g, f, pal, s, ox, oy, w),
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn header(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, title: &str, sub: &str) {
         g.text(f.bold, 28.0 * s, ox * s, oy * s + 14.0 * s, title, pal.ink);
         g.text(f.text, 14.0 * s, ox * s, oy * s + 50.0 * s, sub, pal.muted);
     }
 
     /// A row of tabs; returns the y just below it, in logical pixels.
+    #[allow(clippy::too_many_arguments)]
     fn tabs(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, names: &[&str], accent: [f32; 4]) -> f32 {
         g.rect(ox * s, (y + 36.0) * s, w * s, 1.0, 0.0, pal.line);
         let mut x = ox;
@@ -136,7 +146,8 @@ impl Ui {
     }
 
     /// One card holding `rows` of (label, value); returns its bottom.
-    fn rows(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, rows: &[(&str, &str)]) -> f32 {
+    #[allow(clippy::too_many_arguments)]
+    fn rows(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, rows: &[(&str, String)]) -> f32 {
         let h = rows.len() as f32 * 46.0;
         g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
         g.outline(ox * s, y * s, w * s, h * s, 10.0 * s, 1.0, pal.line);
@@ -151,6 +162,7 @@ impl Ui {
         y + h + 14.0
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn switch_row(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, rows: &[(&str, usize)]) -> f32 {
         let h = rows.len() as f32 * 46.0;
         g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
@@ -174,8 +186,9 @@ impl Ui {
         y + h + 14.0
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lines(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32, lines: &[String], mono: bool) -> f32 {
-        let h = lines.len() as f32 * 24.0 + 24.0;
+        let h = lines.len().max(1) as f32 * 24.0 + 24.0;
         g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
         g.outline(ox * s, y * s, w * s, h * s, 10.0 * s, 1.0, pal.line);
         for (i, l) in lines.iter().enumerate() {
@@ -185,19 +198,16 @@ impl Ui {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn profile(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, bay: &Bay, p: usize, s: f32, ox: f32, oy: f32, w: f32) {
-        let (name, proto, light, dark) = PROFILES[p];
-        let hex = if pal.dark { dark } else { light };
-        let c = [((hex >> 16) & 255) as f32 / 255.0, ((hex >> 8) & 255) as f32 / 255.0, (hex & 255) as f32 / 255.0, 1.0];
-        let on = bay.on[p];
-        let (held, wanted) = bay.holds(p);
-        self.header(g, f, pal, s, ox, oy, name, &format!("{proto} · priority {}", bay.order.iter().position(|&q| q == p).unwrap() + 1));
+    fn profile(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, m: &Model, i: usize, s: f32, ox: f32, oy: f32, w: f32) {
+        let t: &Tunnel = &m.tunnels[i];
+        let c = hue(m, i, pal.dark);
+        self.header(g, f, pal, s, ox, oy, &t.name, &format!("{} · priority {}", kind_name(t), i + 1));
         // Connect / Disconnect at the right of the header.
         let (bx, by, bw, bh) = ((ox + w - 112.0) * s, (oy + 6.0) * s, 112.0 * s, 34.0 * s);
-        let act = Act::Connect(p);
-        g.rect(bx, by, bw, bh, 6.0 * s, if self.is_hover(act) { [pal.ink[0], pal.ink[1], pal.ink[2], 0.12] } else { pal.card });
+        let act = Act::Toggle(t.id.clone());
+        g.rect(bx, by, bw, bh, 6.0 * s, if self.is_hover(&act) { [pal.ink[0], pal.ink[1], pal.ink[2], 0.12] } else { pal.card });
         g.outline(bx, by, bw, bh, 6.0 * s, 1.0, pal.line);
-        let label = if on { "Disconnect" } else { "Connect" };
+        let label = if t.enabled { "Disconnect" } else { "Connect" };
         let lw = g.measure(f.text, 14.0 * s, label);
         g.text(f.text, 14.0 * s, bx + (bw - lw) / 2.0, by + bh / 2.0, label, pal.ink);
         self.region((bx, by, bw, bh), act);
@@ -205,67 +215,108 @@ impl Ui {
         let y = self.tabs(g, f, pal, s, ox, oy + 74.0, w, &PROFILE_TABS, c);
         match self.tab {
             0 => {
+                let (held, wanted) = t.holds();
                 g.rect(ox * s, y * s, w * s, 76.0 * s, 10.0 * s, pal.card);
                 g.outline(ox * s, y * s, w * s, 76.0 * s, 10.0 * s, 1.0, pal.line);
-                if on {
+                if t.connected() {
                     g.rect((ox + 18.0) * s, (y + 24.0) * s, 28.0 * s, 28.0 * s, 14.0 * s, c);
                 } else {
                     g.outline((ox + 18.0) * s, (y + 24.0) * s, 28.0 * s, 28.0 * s, 14.0 * s, 2.0 * s, pal.muted);
                 }
-                g.text(f.bold, 18.0 * s, (ox + 60.0) * s, (y + 28.0) * s, if on { "Connected" } else { "Not connected" }, pal.ink);
-                let sub = if on { format!("Holds {held} of {wanted} routes") } else { "No routes held".to_string() };
+                g.text(f.bold, 18.0 * s, (ox + 60.0) * s, (y + 28.0) * s, state_name(t.state), pal.ink);
+                let sub = if t.connected() {
+                    format!("Holds {held} of {wanted} routes")
+                } else if !t.error.is_empty() {
+                    t.error.clone()
+                } else {
+                    "No routes held".to_string()
+                };
                 g.text(f.text, 13.0 * s, (ox + 60.0) * s, (y + 52.0) * s, &sub, pal.muted);
-                if on {
-                    g.text(f.bold, 18.0 * s, (ox + w - 150.0) * s, (y + 28.0) * s, "2 h 14 min", pal.ink);
+                if let Some(up) = t.since.and_then(uptime) {
+                    g.text(f.bold, 18.0 * s, (ox + w - 150.0) * s, (y + 28.0) * s, &up, pal.ink);
                     g.text(f.text, 13.0 * s, (ox + w - 150.0) * s, (y + 52.0) * s, "Uptime", pal.muted);
                 }
-                let rows = [("Protocol", proto), ("Endpoint", "vpn.example.net:51820"), ("Address", "10.8.0.2/24"), ("DNS", "10.8.0.1")];
+                let rows = [("Protocol", kind_name(t).to_string()), ("Priority", (i + 1).to_string()), ("Routes it names", t.wanted.to_string()), ("Routes it holds", held.to_string())];
                 self.rows(g, f, pal, s, ox, y + 90.0, w, &rows);
             }
             1 => {
-                let mut lines = vec![];
-                for d in 0..5 {
-                    if let Some(st) = bay.status(p, d) {
-                        lines.push(format!("{:<18}{}", bay.dest(d).0, st));
-                    }
-                }
+                let lines: Vec<String> = t.requests.iter().map(|r| format!("{:<20}{}", r.prefix, standing_name(r.standing, r.shadowed_by.as_deref().and_then(|id| m.index(id)).map(|j| m.tunnels[j].name.as_str())))).collect();
+                let lines = if lines.is_empty() { vec!["Not connected, so nothing is asked for.".to_string()] } else { lines };
                 self.lines(g, f, pal, s, ox, y, w, &lines, true);
             }
-            2 => {
-                let lines: Vec<String> = ["09:12:03  Handshake completed", "09:12:04  Added route 10.20.0.0/16", "09:12:04  Default route held", "11:26:41  Keepalive received"].iter().map(|s| s.to_string()).collect();
-                self.lines(g, f, pal, s, ox, y, w, &lines, true);
-            }
-            3 => {
-                let lines: Vec<String> = ["[Interface]", "Address = 10.8.0.2/24", "DNS = 10.8.0.1", "", "[Peer]", "Endpoint = vpn.example.net:51820", "AllowedIPs = 0.0.0.0/0"].iter().map(|s| s.to_string()).collect();
-                self.lines(g, f, pal, s, ox, y, w, &lines, true);
+            2 | 3 => {
+                let what = if self.tab == 2 { "Logs" } else { "The configuration editor" };
+                self.lines(g, f, pal, s, ox, y, w, &[format!("{what} arrive in a later step.")], false);
             }
             _ => {
-                let base = 2 + p; // each profile has its own switches in the shared array
-                self.switch_row(g, f, pal, s, ox, y, w, &[("Connect when Plaitway starts", base), ("Use for the default route", 5 + p.min(2))]);
+                let base = 2 + 2 * i.min(2);
+                self.switch_row(g, f, pal, s, ox, y, w, &[("Connect when Plaitway starts", base), ("Use for the default route", base + 1)]);
             }
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn diagnostics(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, bay: &Bay, s: f32, ox: f32, oy: f32, w: f32) {
+    fn diagnostics(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, view: &View, s: f32, ox: f32, oy: f32, w: f32) {
         self.header(g, f, pal, s, ox, oy, "Diagnostics", "What the daemon owns on this machine");
         let y = self.tabs(g, f, pal, s, ox, oy + 74.0, w, &DIAG_TABS, pal.ink);
         if self.tab == 0 {
-            let owned = (0..5).filter(|&d| bay.holder(d).is_some()).count().to_string();
-            let rows = [("Daemon", "Running"), ("Helper", "Installed"), ("Default gateway", "192.168.1.1 via Ethernet"), ("Owned routes", owned.as_str()), ("Stale routes", "None")];
+            let routes = view.model.routes();
+            let held = routes.iter().filter(|r| r.holder.is_some()).count();
+            let daemon = match &view.link {
+                Link::Online => "Running".to_string(),
+                Link::Connecting => "Connecting".to_string(),
+                Link::Offline(why) => format!("Not reachable: {why}"),
+            };
+            let rows = [
+                ("Daemon", daemon),
+                ("Profiles", view.model.tunnels.len().to_string()),
+                ("Connected", view.model.tunnels.iter().filter(|t| t.connected()).count().to_string()),
+                ("Routes asked for", routes.len().to_string()),
+                ("Routes held", held.to_string()),
+            ];
             self.rows(g, f, pal, s, ox, y, w, &rows);
         } else {
-            let lines: Vec<String> = ["09:12:01  plaitwayd started", "09:12:03  home: connected", "09:12:04  reconcile: 5 routes owned", "11:40:12  office: connected", "11:40:12  reconcile: 1 route moved to office"].iter().map(|s| s.to_string()).collect();
-            self.lines(g, f, pal, s, ox, y, w, &lines, true);
+            self.lines(g, f, pal, s, ox, y, w, &["The daemon log arrives in a later step.".to_string()], false);
         }
     }
 
     fn settings(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, w: f32) {
         self.header(g, f, pal, s, ox, oy, "Settings", "Plaitway 0.6.1");
         let y = oy + 84.0;
-        let y = self.rows(g, f, pal, s, ox, y, w, &[("Language", "English")]);
+        let y = self.rows(g, f, pal, s, ox, y, w, &[("Language", "English".to_string())]);
         self.switch_row(g, f, pal, s, ox, y, w, &[("Start with Windows", 0), ("Keep running in the tray when closed", 1)]);
     }
+}
+
+pub fn state_name(s: State) -> &'static str {
+    match s {
+        State::Disconnected => "Not connected",
+        State::Connecting => "Connecting",
+        State::Connected => "Connected",
+        State::Disconnecting => "Disconnecting",
+        State::Failed => "Failed",
+        State::Reconnecting => "Reconnecting",
+        State::AwaitingCredentials => "Needs credentials",
+    }
+}
+
+fn standing_name(s: Standing, holder: Option<&str>) -> String {
+    match (s, holder) {
+        (Standing::Holds, _) => "holds".into(),
+        (Standing::Waits, Some(h)) => format!("waits behind {h}"),
+        (Standing::Waits, None) => "waits".into(),
+        (Standing::Blocked, _) => "blocked by a local subnet".into(),
+        (Standing::Failed, _) => "failed".into(),
+        (Standing::Pending, _) => "pending".into(),
+    }
+}
+
+/// "2 h 14 min" from the epoch second a tunnel came up.
+fn uptime(since: i64) -> Option<String> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    let secs = (now - since).max(0);
+    let (h, m) = (secs / 3600, secs % 3600 / 60);
+    Some(if h > 0 { format!("{h} h {m} min") } else if m > 0 { format!("{m} min") } else { format!("{secs} s") })
 }
 
 #[cfg(test)]
@@ -275,18 +326,26 @@ mod tests {
     #[test]
     fn clicking_a_region_runs_its_action_and_resets_the_tab() {
         let mut ui = Ui::new();
-        ui.region((0.0, 0.0, 100.0, 40.0), Act::Go(Page::Profile(1)));
+        ui.region((0.0, 0.0, 100.0, 40.0), Act::Go(Page::Profile("home".into())));
         ui.region((0.0, 50.0, 100.0, 40.0), Act::Tab(3));
         ui.region((0.0, 100.0, 100.0, 40.0), Act::Switch(0));
         assert_eq!(ui.click(500.0, 5.0), None);
         ui.tab = 2;
-        assert_eq!(ui.click(10.0, 10.0), Some(Act::Go(Page::Profile(1))));
-        assert_eq!((ui.page, ui.tab), (Page::Profile(1), 0));
+        assert_eq!(ui.click(10.0, 10.0), Some(Act::Go(Page::Profile("home".into()))));
+        assert_eq!((ui.page.clone(), ui.tab), (Page::Profile("home".into()), 0));
         ui.click(10.0, 60.0);
         assert_eq!(ui.tab, 3);
         let before = ui.switches[0];
         ui.click(10.0, 110.0);
         assert_ne!(ui.switches[0], before);
+    }
+
+    #[test]
+    fn a_toggle_is_handed_back_to_the_caller() {
+        let mut ui = Ui::new();
+        ui.region((0.0, 0.0, 10.0, 10.0), Act::Toggle("lab".into()));
+        assert_eq!(ui.click(5.0, 5.0), Some(Act::Toggle("lab".into())));
+        assert_eq!(ui.page, Page::Routing);
     }
 
     #[test]
@@ -305,7 +364,7 @@ mod tests {
         ui.region((0.0, 0.0, 10.0, 10.0), Act::Tab(0));
         assert!(ui.mouse_move(5.0, 5.0));
         assert!(!ui.mouse_move(6.0, 6.0));
-        assert!(ui.is_hover(Act::Tab(0)));
+        assert!(ui.is_hover(&Act::Tab(0)));
         assert!(ui.mouse_move(50.0, 50.0));
     }
 
@@ -317,9 +376,16 @@ mod tests {
         assert!(ui.key(0x27));
         assert!(!ui.key(0x27), "stops at the last tab");
         assert!(ui.key(0x25));
-        ui.page = Page::Profile(0);
+        ui.page = Page::Profile("x".into());
         ui.tab = 4;
         assert!(!ui.key(0x27));
     }
-}
 
+    #[test]
+    fn uptime_reads_naturally() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        assert_eq!(uptime(now - 8040).unwrap(), "2 h 14 min");
+        assert_eq!(uptime(now - 300).unwrap(), "5 min");
+        assert!(uptime(now + 100).unwrap().ends_with(" s"));
+    }
+}

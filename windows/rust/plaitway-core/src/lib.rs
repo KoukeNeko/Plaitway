@@ -6,3 +6,5 @@ mod session;
 
 pub use model::*;
 pub use session::{Link, Session, View};
+pub use plaitway_client::DEFAULT_PIPE;
+

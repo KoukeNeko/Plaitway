@@ -47,6 +47,8 @@ pub struct Tunnel {
     pub error: String,
     /// Prefixes the profile names itself, connected or not.
     pub wanted: usize,
+    /// Seconds since the epoch at which the tunnel came up, while connected.
+    pub since: Option<i64>,
     /// Live only while connected.
     pub requests: Vec<Request>,
 }
@@ -87,6 +89,7 @@ impl Tunnel {
             priority: p.settings.as_ref().map_or(0, |s| s.priority),
             error: p.last_error.clone(),
             wanted: p.summary.as_ref().map_or(0, |s| s.routes.len()),
+            since: p.status.as_ref().and_then(|s| s.connected_since.as_ref()).map(|t| t.seconds),
             requests,
         }
     }
@@ -245,4 +248,5 @@ mod tests {
         assert_eq!(m.tunnels.len(), 2);
     }
 }
+
 

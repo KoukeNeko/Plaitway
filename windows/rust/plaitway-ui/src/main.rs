@@ -8,7 +8,8 @@ mod pages;
 
 use std::{cell::RefCell, ffi::c_void};
 
-use bay::{Bay, Pal};
+use bay::{Bay, Out, Pal};
+use plaitway_core::{Link, Session, View};
 use gfx::Gfx;
 use pages::{Act, Fonts, Page, Ui};
 use windows::{
@@ -89,6 +90,8 @@ struct App {
     tracking: bool,
     client_tracking: bool,
     bay: Bay,
+    session: Session,
+    view: View,
     ui: Ui,
     f_mono: usize,
     frames: u32,
@@ -145,15 +148,16 @@ impl App {
             g.text(self.f_icons, 10.0 * s, (x + (bw - gw) / 2.0).round(), cap / 2.0, glyph, color);
         }
 
-        // Sidebar: Mica shows through; only the selected row and the profile dots are drawn.
+        // Sidebar: Mica shows through; only the current row and the profile dots are drawn.
         let (side, _, compact) = frame(w, s);
         let ui = &mut self.ui;
         ui.clear();
         let rw = (side - 18.0) * s;
+        let model = &self.view.model;
         // One navigation row: highlight when current, lighter when hovered, and a click region.
         let nav = |g: &mut Gfx, ui: &mut Ui, y: f32, h: f32, act: Act| {
-            let current = matches!(act, Act::Go(p) if p == ui.page);
-            if current || ui.is_hover(act) {
+            let current = matches!(&act, Act::Go(p) if *p == ui.page);
+            if current || ui.is_hover(&act) {
                 g.rect(8.0 * s, y, rw, h, 6.0 * s, if current { t.selected } else { t.hover });
             }
             if current {
@@ -167,29 +171,29 @@ impl App {
             g.text(self.f_text, 14.0 * s, 52.0 * s, cap + 26.0 * s, "Routing", ink);
             g.text(self.f_bold, 12.0 * s, 22.0 * s, cap + 78.0 * s, "PROFILES", muted);
         }
-        for (k, &i) in self.bay.order.iter().enumerate() {
-            let (name, proto, light, dark) = bay::PROFILES[i];
+        for (k, tun) in model.tunnels.iter().enumerate() {
             let cy = cap + (if compact { 92.0 + k as f32 * 36.0 } else { 118.0 + k as f32 * 56.0 }) * s;
-            nav(g, ui, cy - (if compact { 16.0 } else { 24.0 }) * s, (if compact { 32.0 } else { 48.0 }) * s, Act::Go(Page::Profile(i)));
-            let (held, wanted) = self.bay.holds(i);
-            let sub = if self.bay.on[i] { format!("{proto} · Holds {held} of {wanted}") } else { format!("{proto} · Not connected") };
-            let c = rgba(if t.dark { dark } else { light }, 1.0);
+            nav(g, ui, cy - (if compact { 16.0 } else { 24.0 }) * s, (if compact { 32.0 } else { 48.0 }) * s, Act::Go(Page::Profile(tun.id.clone())));
+            let (held, wanted) = tun.holds();
+            let kind = bay::kind_name(tun);
+            let sub = if tun.connected() { format!("{kind} · Holds {held} of {wanted}") } else { format!("{kind} · {}", pages::state_name(tun.state)) };
+            let c = bay::hue(model, k, t.dark);
             let dx = if compact { (side - 18.0) / 2.0 + 8.0 - 6.0 } else { 22.0 } * s;
-            if self.bay.on[i] {
+            if tun.enabled {
                 g.rect(dx, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, c);
             } else {
                 g.outline(dx, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, 2.0 * s, muted);
             }
             if !compact {
-                g.text(self.f_text, 14.0 * s, 46.0 * s, cy - 8.0 * s, name, ink);
+                g.text(self.f_text, 14.0 * s, 46.0 * s, cy - 8.0 * s, &tun.name, ink);
                 g.text(self.f_text, 12.0 * s, 46.0 * s, cy + 10.0 * s, &sub, muted);
             }
         }
 
         // Diagnostics and Settings sit at the bottom of the sidebar.
-        for (k, (label, glyph, page)) in [("Diagnostics", "\u{E9D9}", Page::Diagnostics), ("Settings", "\u{E713}", Page::Settings)].iter().enumerate() {
+        for (k, (label, glyph, page)) in [("Diagnostics", "\u{E9D9}", Page::Diagnostics), ("Settings", "\u{E713}", Page::Settings)].into_iter().enumerate() {
             let y = h - (100.0 - k as f32 * 46.0) * s;
-            nav(g, ui, y, 40.0 * s, Act::Go(*page));
+            nav(g, ui, y, 40.0 * s, Act::Go(page));
             g.text(self.f_icons, 14.0 * s, if compact { 8.0 * s + (rw - 14.0 * s) / 2.0 } else { 22.0 * s }, y + 20.0 * s, glyph, ink);
             if !compact {
                 g.text(self.f_text, 14.0 * s, 52.0 * s, y + 20.0 * s, label, ink);
@@ -204,13 +208,27 @@ impl App {
         let pal = Pal { dark: t.dark, ink, muted, line, card: if t.dark { rgba(0xFFFFFF, 0.07) } else { rgba(0xFFFFFF, 0.9) } };
         let (ox, oy, cw) = content(w, s);
         self.bay.compact = compact;
-        if self.ui.page == Page::Routing {
-            self.bay.draw(g, (self.f_text, self.f_bold), &pal, s, ox, oy, cw);
-        } else {
-            let fonts = Fonts { text: self.f_text, bold: self.f_bold, mono: self.f_mono };
-            self.ui.draw(g, &fonts, &pal, &self.bay, s, ox, oy, cw);
+        let fonts = Fonts { text: self.f_text, bold: self.f_bold, mono: self.f_mono };
+        match (&self.view.link, self.ui.page == Page::Routing) {
+            // Without the daemon there is nothing to draw but why.
+            (Link::Offline(why), true) => {
+                g.text(self.f_bold, 28.0 * s, ox * s, (oy + 14.0) * s, "plaitwayd is not running", ink);
+                g.text(self.f_text, 14.0 * s, ox * s, (oy + 50.0) * s, why, muted);
+                g.text(self.f_text, 14.0 * s, ox * s, (oy + 78.0) * s, "Trying again every second.", muted);
+            }
+            (Link::Connecting, true) => {
+                g.text(self.f_bold, 28.0 * s, ox * s, (oy + 14.0) * s, "Connecting to the daemon", ink);
+            }
+            (_, true) if self.view.model.tunnels.is_empty() => {
+                g.text(self.f_bold, 28.0 * s, ox * s, (oy + 14.0) * s, "No profiles yet", ink);
+                g.text(self.f_text, 14.0 * s, ox * s, (oy + 50.0) * s, "Import a WireGuard or OpenVPN profile to see its routes here.", muted);
+            }
+            (_, true) => self.bay.draw(g, (self.f_text, self.f_bold), &pal, &self.view.model, s, ox, oy, cw),
+            _ => self.ui.draw(g, &fonts, &pal, &self.view, s, ox, oy, cw),
         }
-
+        if let Some(e) = &self.view.error {
+            g.text(self.f_text, 13.0 * s, ox * s, h - 24.0 * s, e, rgba(0xFF8DB4, 1.0));
+        }
         self.frames += 1;
         let clear = if self.mica { [0.0; 4] } else { self.theme.solid };
         self.gfx.render(clear)
@@ -231,6 +249,19 @@ fn local(a: &mut App, x: f32, y: f32, w_px: f32) -> (f32, f32, f32) {
     let (s, (ox, oy, cw)) = (a.scale, content(w_px, a.scale));
     a.bay.compact = frame(w_px, s).2;
     (x / s - ox, y / s - oy, cw)
+}
+
+/// Carry out what the Routing page asked for.
+fn run(hwnd: HWND, a: &mut App, out: Out) {
+    match out {
+        Out::Nothing => {}
+        Out::Redraw => redraw(hwnd, a),
+        Out::SetEnabled(id, on) => a.session.set_enabled(&id, on),
+        Out::Reorder(ids) => {
+            a.session.reorder(ids);
+            redraw(hwnd, a);
+        }
+    }
 }
 
 /// Ask for a frame, and keep a timer running while the lines are drawing in.
@@ -364,7 +395,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     let (x, y, w) = local(a, mx, my, cw as f32);
                     dirty |= a.ui.mouse_move(mx, my);
                     if a.ui.page == Page::Routing {
-                        dirty |= a.bay.mouse_move(x, y, w);
+                        dirty |= a.bay.mouse_move(&a.view.model, x, y, w);
                     }
                 }
                 if a.hot != Hot::None {
@@ -392,24 +423,27 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             with_app(|a| {
                 let (x, y, w) = local(a, mx, my, cw as f32);
                 if let Some(act) = a.ui.click(mx, my) {
-                    if let Act::Connect(p) = act {
-                        a.bay.toggle(p);
+                    if let Act::Toggle(id) = act {
+                        let on = a.view.model.tunnels.iter().find(|t| t.id == id).is_some_and(|t| t.enabled);
+                        a.session.set_enabled(&id, !on);
                     }
                     redraw(hwnd, a);
-                } else if a.ui.page == Page::Routing && a.bay.press(x, y, w) {
+                } else if a.ui.page == Page::Routing {
+                    let out = a.bay.press(&a.view.model, x, y, w);
                     if a.bay.dragging() {
                         SetCapture(hwnd);
                     }
-                    redraw(hwnd, a);
+                    run(hwnd, a, out);
                 }
             });
             LRESULT(0)
         }
         WM_LBUTTONUP => {
             with_app(|a| {
-                if a.bay.release() {
+                if a.bay.dragging() {
                     let _ = ReleaseCapture();
-                    redraw(hwnd, a);
+                    let out = a.bay.release(&a.view.model);
+                    run(hwnd, a, out);
                 }
             });
             LRESULT(0)
@@ -417,9 +451,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_KEYDOWN => {
             with_app(|a| {
                 let vk = wparam.0 as u32;
-                if a.ui.key(vk) || (a.ui.page == Page::Routing && a.bay.key(vk)) {
+                if a.ui.key(vk) || (a.ui.page == Page::Routing && a.bay.key(&a.view.model, vk)) {
                     redraw(hwnd, a);
                 }
+            });
+            LRESULT(0)
+        }
+        // The session thread changed the view.
+        WM_APP => {
+            with_app(|a| {
+                a.view = a.session.view();
+                a.bay.sync(&a.view.model);
+                redraw(hwnd, a);
             });
             LRESULT(0)
         }
@@ -523,7 +566,14 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let f_bold = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
         let f_mono = gfx.load_font(&["Cascadia Mono", "Consolas"], DWRITE_FONT_WEIGHT_NORMAL)?;
         let f_icons = gfx.load_font(&["Segoe Fluent Icons", "Segoe MDL2 Assets"], DWRITE_FONT_WEIGHT_NORMAL)?;
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), ui: Ui::new(), f_mono, frames: 0, f_text, f_bold, f_icons };
+        // The session thread wakes the window with WM_APP whenever the daemon tells it something.
+        let handle = hwnd.0 as isize;
+        let pipe = std::env::var("PLAITWAY_PIPE").unwrap_or_else(|_| plaitway_core::DEFAULT_PIPE.to_string());
+        let session = Session::start(&pipe, move || {
+            let _ = PostMessageW(Some(HWND(handle as *mut c_void)), WM_APP, WPARAM(0), LPARAM(0));
+        });
+        let view = session.view();
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
@@ -540,6 +590,10 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
+
+
 
 
 
