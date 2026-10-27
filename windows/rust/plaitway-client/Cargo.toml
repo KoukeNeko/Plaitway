@@ -1,0 +1,23 @@
+[package]
+name = "plaitway-client"
+version = "0.1.0"
+edition = "2021"
+description = "gRPC client for plaitwayd over its Windows named pipe"
+
+[dependencies]
+prost = "0.13"
+prost-types = "0.13"
+tokio = { version = "1", features = ["rt", "net", "time", "macros"] }
+tonic = "0.12"
+tower = "0.5"
+hyper-util = { version = "0.1", features = ["tokio"] }
+
+[build-dependencies]
+protoc-bin-vendored = "3"
+tonic-build = "0.12"
+
+[dev-dependencies]
+async-stream = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "io-util"] }
+tokio-stream = "0.1"
+

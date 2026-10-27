@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["plaitway-ui", "plaitway-client"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
