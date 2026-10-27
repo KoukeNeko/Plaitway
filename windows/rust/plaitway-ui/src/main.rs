@@ -81,7 +81,6 @@ fn build_number() -> u32 {
 struct App {
     gfx: Gfx,
     theme: Theme,
-    build: u32,
     mica: bool,
     scale: f32,
     hot: Hot,
@@ -143,37 +142,77 @@ impl App {
         }
 
         // Sidebar: Mica shows through; only the selected row and the profile dots are drawn.
-        g.rect(8.0 * s, cap + 6.0 * s, (SIDEBAR_W - 18.0) * s, 40.0 * s, 6.0 * s, t.selected);
-        g.outline(8.0 * s, cap + 6.0 * s, (SIDEBAR_W - 18.0) * s, 40.0 * s, 6.0 * s, 1.0, line);
-        g.text(self.f_text, 14.0 * s, 44.0 * s, cap + 26.0 * s, "Routing", ink);
-        g.text(self.f_bold, 12.0 * s, 22.0 * s, cap + 78.0 * s, "PROFILES", muted);
-        for (i, (name, proto, light, dark)) in bay::PROFILES.iter().enumerate() {
-            let cy = cap + (118.0 + i as f32 * 56.0) * s;
+        let (side, _, compact) = frame(w, s);
+        g.rect(8.0 * s, cap + 6.0 * s, (side - 18.0) * s, 40.0 * s, 6.0 * s, t.selected);
+        g.outline(8.0 * s, cap + 6.0 * s, (side - 18.0) * s, 40.0 * s, 6.0 * s, 1.0, line);
+        if !compact {
+            g.text(self.f_text, 14.0 * s, 44.0 * s, cap + 26.0 * s, "Routing", ink);
+            g.text(self.f_bold, 12.0 * s, 22.0 * s, cap + 78.0 * s, "PROFILES", muted);
+        }
+        for (k, &i) in self.bay.order.iter().enumerate() {
+            let (name, proto, light, dark) = bay::PROFILES[i];
+            let cy = cap + (if compact { 92.0 + k as f32 * 36.0 } else { 118.0 + k as f32 * 56.0 }) * s;
             let (held, wanted) = self.bay.holds(i);
             let sub = if self.bay.on[i] { format!("{proto} · Holds {held} of {wanted}") } else { format!("{proto} · Not connected") };
-            let c = rgba(if t.dark { *dark } else { *light }, 1.0);
+            let c = rgba(if t.dark { dark } else { light }, 1.0);
+            let dx = if compact { (side - 18.0) / 2.0 + 8.0 - 6.0 } else { 22.0 } * s;
             if self.bay.on[i] {
-                g.rect(22.0 * s, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, c);
+                g.rect(dx, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, c);
             } else {
-                g.outline(22.0 * s, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, 2.0 * s, muted);
+                g.outline(dx, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, 2.0 * s, muted);
             }
-            g.text(self.f_text, 14.0 * s, 46.0 * s, cy - 8.0 * s, name, ink);
-            g.text(self.f_text, 12.0 * s, 46.0 * s, cy + 10.0 * s, &sub, muted);
+            if !compact {
+                g.text(self.f_text, 14.0 * s, 46.0 * s, cy - 8.0 * s, name, ink);
+                g.text(self.f_text, 12.0 * s, 46.0 * s, cy + 10.0 * s, &sub, muted);
+            }
         }
 
         // Content surface: a translucent layer over Mica. Its right and bottom corners are pushed off screen.
-        let (cx, cy0) = (SIDEBAR_W * s, cap);
+        let (cx, cy0) = (side * s, cap);
         g.rect(cx, cy0, w - cx + 20.0 * s, h - cy0 + 20.0 * s, 10.0 * s, t.surface);
         g.outline(cx, cy0, w - cx + 20.0 * s, h - cy0 + 20.0 * s, 10.0 * s, 1.0, line);
 
         let pal = Pal { dark: t.dark, ink, muted, line, card: if t.dark { rgba(0xFFFFFF, 0.07) } else { rgba(0xFFFFFF, 0.9) } };
-        let (ox, oy, cw) = (SIDEBAR_W + 32.0, CAPTION_H + 28.0, w / s - SIDEBAR_W - 64.0);
+        let (ox, oy, cw) = content(w, s);
+        self.bay.compact = compact;
         self.bay.draw(g, (self.f_text, self.f_bold), &pal, s, ox, oy, cw);
 
         self.frames += 1;
         let clear = if self.mica { [0.0; 4] } else { self.theme.solid };
         self.gfx.render(clear)
     }
+}
+
+/// Logical sidebar width, content padding and whether the window is narrow enough for the compact layout.
+fn frame(w_px: f32, s: f32) -> (f32, f32, bool) {
+    if w_px / s < bay::COMPACT_BELOW {
+        (64.0, 20.0, true)
+    } else {
+        (SIDEBAR_W, 32.0, false)
+    }
+}
+
+/// A client-area point in logical pixels from the content origin, plus the content width.
+fn local(a: &mut App, x: f32, y: f32, w_px: f32) -> (f32, f32, f32) {
+    let (s, (ox, oy, cw)) = (a.scale, content(w_px, a.scale));
+    a.bay.compact = frame(w_px, s).2;
+    (x / s - ox, y / s - oy, cw)
+}
+
+/// Ask for a frame, and keep a timer running while the lines are drawing in.
+fn redraw(hwnd: HWND, a: &App) {
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, false);
+        if a.bay.animating() {
+            SetTimer(Some(hwnd), 1, 16, None);
+        }
+    }
+}
+
+/// Logical origin and width of the page content for a client area `w_px` wide.
+fn content(w_px: f32, s: f32) -> (f32, f32, f32) {
+    let (side, pad, _) = frame(w_px, s);
+    (side + pad, CAPTION_H + 28.0, w_px / s - side - 2.0 * pad)
 }
 
 /// Left edge and width of a caption button, in pixels.
@@ -288,15 +327,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         let _ = TrackMouseEvent(&mut e);
                         a.client_tracking = true;
                     }
-                    let s = a.scale;
-                    dirty |= a.bay.mouse_move(mx / s - SIDEBAR_W - 32.0, my / s - CAPTION_H - 28.0, cw as f32 / s - SIDEBAR_W - 64.0);
+                    let (x, y, w) = local(a, mx, my, cw as f32);
+                    dirty |= a.bay.mouse_move(x, y, w);
                 }
                 if a.hot != Hot::None {
                     a.hot = Hot::None;
                     dirty = true;
                 }
                 if dirty {
-                    let _ = InvalidateRect(Some(hwnd), None, false);
+                    redraw(hwnd, a);
                 }
             });
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -304,8 +343,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_MOUSELEAVE => {
             with_app(|a| {
                 a.client_tracking = false;
-                if a.bay.leave() {
-                    let _ = InvalidateRect(Some(hwnd), None, false);
+                if !a.bay.dragging() && a.bay.leave() {
+                    redraw(hwnd, a);
                 }
             });
             LRESULT(0)
@@ -314,10 +353,40 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let (mx, my) = ((lparam.0 & 0xffff) as i16 as f32, ((lparam.0 >> 16) & 0xffff) as i16 as f32);
             let (cw, _) = client_size(hwnd);
             with_app(|a| {
-                let s = a.scale;
-                if a.bay.click(mx / s - SIDEBAR_W - 32.0, my / s - CAPTION_H - 28.0, cw as f32 / s - SIDEBAR_W - 64.0) {
-                    let _ = InvalidateRect(Some(hwnd), None, false);
+                let (x, y, w) = local(a, mx, my, cw as f32);
+                if a.bay.press(x, y, w) {
+                    if a.bay.dragging() {
+                        SetCapture(hwnd);
+                    }
+                    redraw(hwnd, a);
                 }
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            with_app(|a| {
+                if a.bay.release() {
+                    let _ = ReleaseCapture();
+                    redraw(hwnd, a);
+                }
+            });
+            LRESULT(0)
+        }
+        WM_KEYDOWN => {
+            with_app(|a| {
+                if a.bay.key(wparam.0 as u32) {
+                    redraw(hwnd, a);
+                }
+            });
+            LRESULT(0)
+        }
+        // Drives the line draw-in; it is killed as soon as the animation is over.
+        WM_TIMER => {
+            with_app(|a| {
+                if !a.bay.animating() {
+                    let _ = KillTimer(Some(hwnd), 1);
+                }
+                let _ = InvalidateRect(Some(hwnd), None, false);
             });
             LRESULT(0)
         }
@@ -410,11 +479,15 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let f_text = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_NORMAL)?;
         let f_bold = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
         let f_icons = gfx.load_font(&["Segoe Fluent Icons", "Segoe MDL2 Assets"], DWRITE_FONT_WEIGHT_NORMAL)?;
-        let mut app = App { gfx, theme: theme(false), build, mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
+        let mut animate = BOOL(1);
+        let _ = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut animate as *mut BOOL as *mut c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+        with_app(|a| a.bay.set_reduced_motion(!animate.as_bool()));
         let _ = ShowWindow(hwnd, SW_SHOW);
+        with_app(|a| redraw(hwnd, a));
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
@@ -423,3 +496,4 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+

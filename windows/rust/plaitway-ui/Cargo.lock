@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "plaitway-spike"
+name = "plaitway-ui"
 version = "0.1.0"
 dependencies = [
  "windows",
