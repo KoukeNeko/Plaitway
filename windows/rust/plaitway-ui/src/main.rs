@@ -93,6 +93,8 @@ struct App {
     session: Session,
     view: View,
     ui: Ui,
+    /// What the session was last asked to watch: the log (a profile id, empty for the daemon's) and whether diagnostics.
+    watching: (Option<String>, bool),
     f_mono: usize,
     frames: u32,
     f_text: usize,
@@ -224,7 +226,7 @@ impl App {
                 g.text(self.f_text, 14.0 * s, ox * s, (oy + 50.0) * s, "Import a WireGuard or OpenVPN profile to see its routes here.", muted);
             }
             (_, true) => self.bay.draw(g, (self.f_text, self.f_bold), &pal, &self.view.model, s, ox, oy, cw),
-            _ => self.ui.draw(g, &fonts, &pal, &self.view, s, ox, oy, cw),
+            _ => self.ui.draw(g, &fonts, &pal, &self.view, s, ox, oy, cw, h / s - oy - 24.0),
         }
         if let Some(e) = &self.view.error {
             g.text(self.f_text, 13.0 * s, ox * s, h - 24.0 * s, e, rgba(0xFF8DB4, 1.0));
@@ -249,6 +251,24 @@ fn local(a: &mut App, x: f32, y: f32, w_px: f32) -> (f32, f32, f32) {
     let (s, (ox, oy, cw)) = (a.scale, content(w_px, a.scale));
     a.bay.compact = frame(w_px, s).2;
     (x / s - ox, y / s - oy, cw)
+}
+
+/// Tell the session what the current page needs: a log on the Logs tabs, diagnostics on the Diagnostics ones.
+fn sync_watch(a: &mut App) {
+    let logs = match (&a.ui.page, a.ui.tab) {
+        (Page::Profile(id), 2) => Some(id.clone()),
+        (Page::Diagnostics, 2) => Some(String::new()),
+        _ => None,
+    };
+    let diag = a.ui.page == Page::Diagnostics && a.ui.tab < 2;
+    if logs != a.watching.0 {
+        a.session.watch_logs(logs.as_deref());
+        a.watching.0 = logs;
+    }
+    if diag != a.watching.1 {
+        a.session.watch_diagnostics(diag);
+        a.watching.1 = diag;
+    }
 }
 
 /// Carry out what the Routing page asked for.
@@ -423,10 +443,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             with_app(|a| {
                 let (x, y, w) = local(a, mx, my, cw as f32);
                 if let Some(act) = a.ui.click(mx, my) {
-                    if let Act::Toggle(id) = act {
-                        let on = a.view.model.tunnels.iter().find(|t| t.id == id).is_some_and(|t| t.enabled);
-                        a.session.set_enabled(&id, !on);
+                    match act {
+                        Act::Toggle(id) => {
+                            let on = a.view.model.tunnels.iter().find(|t| t.id == id).is_some_and(|t| t.enabled);
+                            a.session.set_enabled(&id, !on);
+                        }
+                        Act::Resync => a.session.resync(),
+                        Act::RemoveStale(key) => a.session.remove_stale(&key),
+                        _ => {}
                     }
+                    sync_watch(a);
                     redraw(hwnd, a);
                 } else if a.ui.page == Page::Routing {
                     let out = a.bay.press(&a.view.model, x, y, w);
@@ -451,7 +477,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_KEYDOWN => {
             with_app(|a| {
                 let vk = wparam.0 as u32;
-                if a.ui.key(vk) || (a.ui.page == Page::Routing && a.bay.key(&a.view.model, vk)) {
+                let tab = a.ui.key(vk);
+                sync_watch(a);
+                if tab || (a.ui.page == Page::Routing && a.bay.key(&a.view.model, vk)) {
                     redraw(hwnd, a);
                 }
             });
@@ -573,7 +601,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
             let _ = PostMessageW(Some(HWND(handle as *mut c_void)), WM_APP, WPARAM(0), LPARAM(0));
         });
         let view = session.view();
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), f_mono, frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
@@ -590,6 +618,8 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
 
 
 
