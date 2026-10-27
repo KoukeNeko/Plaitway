@@ -1,0 +1,29 @@
+{
+  "nativeViewport": "1280x800",
+  "candidates": [
+    {
+      "source": "a-patchbay.html",
+      "name": "A Patch Bay",
+      "concept": "See who holds what: routes on the left, tunnels on the right, one line each.",
+      "typography": "Segoe UI Variable for labels, Cascadia Mono for CIDR and rates",
+      "palette": ["#0a9b94", "#e2711d", "#c93a73", "#16222a", "#dfeceb"],
+      "traits": ["Mica light, one hue per tunnel", "Lost route drawn as a broken dashed line", "Patch-bay diagram is the hero"]
+    },
+    {
+      "source": "b-fluent.html",
+      "name": "B Native Fluent",
+      "concept": "Looks like part of Windows 11: calm, familiar, nothing to learn.",
+      "typography": "Segoe UI Variable throughout, Cascadia Mono for values",
+      "palette": ["#60cdff", "#6ccb5f", "#fce100", "#202327"],
+      "traits": ["Mica dark, system accent only", "Profile list plus stacked cards", "Closest to today's layout"]
+    },
+    {
+      "source": "c-console.html",
+      "name": "C Route Console",
+      "concept": "A route table you can read in one pass, with the why in a side drawer.",
+      "typography": "Cascadia Mono for the whole table, Segoe UI only for headings and prose",
+      "palette": ["#f0a02c", "#e5604b", "#d9d3c7", "#1b1a18"],
+      "traits": ["Graphite and amber, no per-tunnel colours", "Throughput band on top, detail drawer on the right", "Dense, sortable, filterable"]
+    }
+  ]
+}

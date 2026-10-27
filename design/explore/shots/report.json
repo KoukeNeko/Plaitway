@@ -1,0 +1,77 @@
+[
+  {
+    "file": "a-patchbay.png",
+    "target": "D:\\Documents\\Github\\Plaitway\\design\\explore\\a-patchbay.html",
+    "name": "A Patch Bay",
+    "state": null,
+    "size": "1280x800",
+    "zoom": 1,
+    "animationWaitMs": 0,
+    "issues": [],
+    "lint": []
+  },
+  {
+    "file": "b-fluent.png",
+    "target": "D:\\Documents\\Github\\Plaitway\\design\\explore\\b-fluent.html",
+    "name": "B Native Fluent",
+    "state": null,
+    "size": "1280x800",
+    "zoom": 1,
+    "animationWaitMs": 0,
+    "issues": [],
+    "lint": []
+  },
+  {
+    "file": "c-console.png",
+    "target": "D:\\Documents\\Github\\Plaitway\\design\\explore\\c-console.html",
+    "name": "C Route Console",
+    "state": null,
+    "size": "1280x800",
+    "zoom": 1,
+    "animationWaitMs": 0,
+    "issues": [],
+    "lint": []
+  },
+  {
+    "file": "sheet.png",
+    "width": 2000,
+    "height": 480,
+    "columns": 3,
+    "items": [
+      {
+        "naturalWidth": 1280,
+        "naturalHeight": 800,
+        "width": 640,
+        "height": 400,
+        "labelHeight": 32,
+        "x": 24,
+        "y": 24,
+        "label": "A Patch Bay",
+        "labelY": 432
+      },
+      {
+        "naturalWidth": 1280,
+        "naturalHeight": 800,
+        "width": 640,
+        "height": 400,
+        "labelHeight": 32,
+        "x": 680,
+        "y": 24,
+        "label": "B Native Fluent",
+        "labelY": 432
+      },
+      {
+        "naturalWidth": 1280,
+        "naturalHeight": 800,
+        "width": 640,
+        "height": 400,
+        "labelHeight": 32,
+        "x": 1336,
+        "y": 24,
+        "label": "C Route Console",
+        "labelY": 432
+      }
+    ],
+    "issues": []
+  }
+]

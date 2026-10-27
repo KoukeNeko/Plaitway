@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>C Route Console</title>
+<style>
+:root{--bg:rgba(27,26,24,.9);--pan:rgba(255,250,240,.04);--line:rgba(255,248,235,.10);--txt:#d9d3c7;--dim:#8f897c;--amb:#f0a02c;--red:#e5604b}
+*{box-sizing:border-box;margin:0}
+html,body{width:1280px;height:800px;overflow:hidden}
+body{font:13px/1.4 "Cascadia Mono","Cascadia Code",Consolas,monospace;color:var(--txt);background:#1b1a18;background-image:radial-gradient(700px 500px at 0 0,#3b3326 0%,transparent 70%)}
+.ui{font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif}
+.title{height:32px;display:flex;align-items:center;gap:10px;padding-left:14px;font:12px "Segoe UI Variable Text","Segoe UI",sans-serif}
+.title i{width:14px;height:14px;background:var(--amb);border-radius:3px}
+.title .ctl{margin-left:auto;display:flex}
+.title .ctl b{width:46px;height:32px;display:grid;place-items:center;font-weight:400}
+.band{height:64px;display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
+.band .n{width:300px;padding:8px 20px;display:grid;align-content:center}
+.band .n small{color:var(--dim);font-size:11px;letter-spacing:.04em}
+.band .n b{font-size:18px;font-weight:500;color:var(--amb)}
+.band svg{flex:1;height:64px}
+.body{display:grid;grid-template-columns:56px 1fr 340px;height:672px}
+.rail{border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:14px}
+.rail b{width:34px;height:34px;border-radius:6px;display:grid;place-items:center;font-weight:600;border:1px solid var(--line);color:var(--dim)}
+.rail b.on{border-color:var(--amb);color:var(--amb)}
+.rail em{margin-top:auto;margin-bottom:14px;color:var(--dim);font-style:normal;font-size:16px}
+.tbl{padding:0;overflow:hidden}
+.bar{height:48px;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid var(--line)}
+.bar h1{font:600 15px "Segoe UI Variable Text","Segoe UI",sans-serif;margin-right:auto}
+.chip{height:26px;padding:0 10px;display:flex;align-items:center;border:1px solid var(--line);border-radius:4px;color:var(--dim);font-size:12px}
+.chip.on{color:var(--amb);border-color:rgba(240,160,44,.5)}
+table{width:100%;border-collapse:collapse}
+th{font-weight:400;color:var(--dim);font-size:11px;letter-spacing:.06em;text-align:left;padding:0 20px;height:34px;border-bottom:1px solid var(--line)}
+td{padding:0 20px;height:44px;border-bottom:1px solid var(--line)}
+tr.sel td{background:rgba(240,160,44,.09)}
+tr.lost td{color:var(--dim)}
+.st{display:inline-flex;align-items:center;gap:8px}
+.st::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--amb)}
+.lost .st::before{background:none;border:1.5px solid var(--red)}
+.lost .st{color:var(--red)}
+.pill{display:inline-block;padding:1px 8px;border-radius:3px;background:var(--pan);border:1px solid var(--line)}
+.drawer{border-left:1px solid var(--line);padding:20px;background:rgba(255,250,240,.025)}
+.drawer small{color:var(--dim);font-size:11px;letter-spacing:.06em}
+.drawer h2{font-size:20px;font-weight:500;margin:6px 0 4px}
+.drawer .why{font:13.5px/1.5 "Segoe UI Variable Text","Segoe UI",sans-serif;color:var(--txt);margin:14px 0 18px;padding:12px 14px;border:1px solid rgba(229,96,75,.4);border-radius:6px;background:rgba(229,96,75,.07)}
+.kv{display:grid;grid-template-columns:90px 1fr;row-gap:8px;margin-bottom:20px}
+.kv span:nth-child(odd){color:var(--dim)}
+.log{color:var(--dim);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:12px}
+.log b{color:var(--amb);font-weight:400}
+.btns{display:flex;gap:8px;margin:0 0 20px}
+.btn{height:32px;padding:0 14px;border-radius:4px;border:1px solid var(--line);display:flex;align-items:center;font-family:"Segoe UI Variable Text","Segoe UI",sans-serif}
+.btn.p{background:var(--amb);color:#201400;border-color:transparent;font-weight:600}
+</style>
+</head>
+<body>
+<div class="title"><i></i>Plaitway<div class="ctl"><b>&#x2013;</b><b>&#x25A1;</b><b>&#x2715;</b></div></div>
+<div class="band">
+  <div class="n"><small>THROUGHPUT</small><b>&darr; 4.6 MB/s &nbsp;&uarr; 412 KB/s</b></div>
+  <svg viewBox="0 0 980 64" preserveAspectRatio="none" fill="none"><path d="M0 50L60 44L120 48L180 30L240 38L300 14L360 34L420 20L480 40L540 12L600 28L660 22L720 36L780 18L840 30L900 24L980 28V64H0Z" fill="#f0a02c" opacity=".14"/><path d="M0 50L60 44L120 48L180 30L240 38L300 14L360 34L420 20L480 40L540 12L600 28L660 22L720 36L780 18L840 30L900 24L980 28" stroke="#f0a02c" stroke-width="1.6"/></svg>
+</div>
+<div class="body">
+  <nav class="rail ui"><b class="on">R</b><b>H</b><b>O</b><b>L</b><em>&#x2699;</em></nav>
+  <section class="tbl">
+    <div class="bar"><h1>Route table</h1><span class="chip on">All</span><span class="chip">Home</span><span class="chip">Office</span><span class="chip">Lab</span><span class="chip">Not in effect &middot; 1</span></div>
+    <table>
+      <tr><th>DESTINATION</th><th>VIA</th><th>METRIC</th><th>STATE</th><th>SINCE</th></tr>
+      <tr><td>0.0.0.0/0</td><td><span class="pill">Home</span></td><td>5</td><td><span class="st">active</span></td><td>3:12:08</td></tr>
+      <tr><td>dns 1.1.1.1, 1.0.0.1</td><td><span class="pill">Home</span></td><td>&mdash;</td><td><span class="st">active</span></td><td>3:12:08</td></tr>
+      <tr><td>10.8.0.0/24</td><td><span class="pill">Home</span></td><td>5</td><td><span class="st">active</span></td><td>3:12:08</td></tr>
+      <tr><td>192.168.1.0/24</td><td><span class="pill">Office</span></td><td>10</td><td><span class="st">active</span></td><td>5:48:31</td></tr>
+      <tr><td>10.20.0.0/16</td><td><span class="pill">Office</span></td><td>10</td><td><span class="st">active</span></td><td>5:48:31</td></tr>
+      <tr><td>172.16.8.0/24</td><td><span class="pill">Lab</span></td><td>20</td><td><span class="st">active</span></td><td>0:41:12</td></tr>
+      <tr class="sel lost"><td style="color:var(--txt)">10.20.4.0/24</td><td><span class="pill">Lab</span></td><td>20</td><td><span class="st">not in effect</span></td><td>0:41:12</td></tr>
+      <tr><td>fd00:8::/64</td><td><span class="pill">Home</span></td><td>5</td><td><span class="st">active</span></td><td>3:12:08</td></tr>
+    </table>
+  </section>
+  <aside class="drawer">
+    <h2>10.20.4.0/24</h2>
+    <span class="pill">Lab</span>
+    <div class="why">Not in effect. Office holds 10.20.0.0/16 and comes first in priority.</div>
+    <div class="btns"><span class="btn p">Prefer Lab</span><span class="btn">Copy</span></div>
+    <div class="kv"><span>Wanted by</span><span>Lab</span><span>Held by</span><span>Office</span><span>Metric</span><span>20 (Office: 10)</span><span>Gateway</span><span>10.99.0.1</span></div>
+    <div class="log">
+      <div><b>21:04:12</b> Lab asked for 10.20.4.0/24</div>
+      <div><b>21:04:12</b> Skipped: shadowed by Office</div>
+      <div><b>21:04:13</b> Recorded before any change</div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>B Native Fluent</title>
+<style>
+:root{
+  --acc:#60cdff; --ok:#6ccb5f; --warn:#fce100;
+  --txt:#fff; --sub:rgba(255,255,255,.64); --dis:rgba(255,255,255,.36);
+  --card:rgba(255,255,255,.055); --stroke:rgba(255,255,255,.08);
+}
+*{box-sizing:border-box;margin:0}
+html,body{width:1280px;height:800px;overflow:hidden}
+body{font:14px/1.4 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;color:var(--txt);
+  background:radial-gradient(900px 600px at 15% 0%,#2a3b4a 0%,transparent 70%),radial-gradient(800px 600px at 100% 100%,#3a2f3d 0%,transparent 70%),#202327}
+.mono{font-family:"Cascadia Mono",Consolas,monospace}
+.title{height:32px;display:flex;align-items:center;gap:10px;padding-left:14px;font-size:12px}
+.title i{width:14px;height:14px;border-radius:4px;background:var(--acc)}
+.title .ctl{margin-left:auto;display:flex}
+.title .ctl b{width:46px;height:32px;display:grid;place-items:center;font-weight:400}
+.shell{display:grid;grid-template-columns:288px 1fr;height:768px}
+.side{padding:4px 12px 12px;display:flex;flex-direction:column;gap:2px}
+.side h2{font-size:12px;font-weight:600;color:var(--sub);padding:14px 12px 8px;display:flex;justify-content:space-between}
+.item{height:52px;border-radius:5px;display:flex;align-items:center;gap:12px;padding:0 12px;position:relative}
+.item.sel{background:rgba(255,255,255,.09)}
+.item.sel::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:2px;background:var(--acc)}
+.item .g{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;color:#1b1b1b;flex:none}
+.item .t{display:grid;line-height:1.25}
+.item .t small{color:var(--sub);font-size:12px}
+.item.small{height:40px}
+.foot{margin-top:auto}
+.content{padding:6px 40px 0 28px;overflow:hidden}
+.crumb{display:flex;align-items:center;gap:10px;height:56px}
+.crumb h1{font-size:28px;font-weight:600;line-height:1}
+.crumb span{color:var(--sub);font-size:13px;margin-top:8px}
+.card{background:var(--card);border:1px solid var(--stroke);border-radius:8px;margin-bottom:6px}
+.status{display:flex;align-items:center;gap:18px;padding:20px 20px;min-height:92px}
+.status .big{width:44px;height:44px;border-radius:50%;background:var(--ok);display:grid;place-items:center;color:#10300c;font-size:22px;font-weight:700}
+.status h3{font-size:20px;font-weight:600;line-height:1.2}
+.status p{color:var(--sub)}
+.status .up{margin-left:auto;text-align:right}
+.status .up b{font-size:20px;font-weight:600;display:block}
+.status .up small{color:var(--sub)}
+.btn{height:32px;padding:0 18px;border-radius:4px;background:rgba(255,255,255,.08);border:1px solid var(--stroke);display:flex;align-items:center;margin-left:16px}
+.btn.acc{background:var(--acc);color:#001a28;border-color:transparent;font-weight:600}
+.traffic{padding:18px 20px}
+.traffic .nums{display:flex;gap:56px;margin-bottom:10px}
+.traffic small{color:var(--sub);display:block;font-size:12px}
+.traffic b{font-size:20px;font-weight:600}
+.sechead{font-size:14px;font-weight:600;padding:16px 4px 8px}
+.row{display:flex;align-items:center;min-height:52px;padding:0 20px;border-top:1px solid var(--stroke)}
+.row:first-child{border-top:0}
+.row .k{width:200px;color:var(--sub)}
+.row .v{flex:1}
+.row .cp{width:32px;height:32px;display:grid;place-items:center;border-radius:4px;color:var(--sub)}
+.warn{display:flex;align-items:center;gap:12px;padding:0 20px;min-height:52px;background:rgba(252,225,0,.08);border-color:rgba(252,225,0,.2)}
+.warn i{width:20px;height:20px;border-radius:50%;background:var(--warn);color:#2b2500;display:grid;place-items:center;font-style:normal;font-weight:700;font-size:13px}
+.warn a{margin-left:auto;color:var(--acc)}
+</style>
+</head>
+<body>
+<div class="title"><i></i>Plaitway<div class="ctl"><b>&#x2013;</b><b>&#x25A1;</b><b>&#x2715;</b></div></div>
+<div class="shell">
+  <aside class="side">
+    <h2>Profiles <span style="font-size:16px;font-weight:400;color:var(--txt)">+</span></h2>
+    <div class="item sel"><span class="g" style="background:var(--ok)">&#x2713;</span><div class="t">Home<small>WireGuard &middot; Connected</small></div></div>
+    <div class="item"><span class="g" style="background:var(--ok)">&#x2713;</span><div class="t">Office<small>OpenVPN &middot; Connected</small></div></div>
+    <div class="item"><span class="g" style="background:var(--warn)">!</span><div class="t">Lab<small>WireGuard &middot; 1 route not in effect</small></div></div>
+    <div class="foot">
+      <div class="item small"><span class="g" style="background:none;color:var(--txt)">&#x2248;</span>Diagnostics</div>
+      <div class="item small"><span class="g" style="background:none;color:var(--txt)">&#x2699;</span>Settings</div>
+    </div>
+  </aside>
+  <main class="content">
+    <div class="crumb"><h1>Home</h1><span>WireGuard</span></div>
+
+    <div class="card status">
+      <div class="big">&#x2713;</div>
+      <div><h3>Connected</h3><p>Carries your internet traffic and DNS</p></div>
+      <div class="up"><b class="mono">3:12:08</b><small>Uptime</small></div>
+      <div class="btn">Disconnect</div>
+    </div>
+
+    <div class="card traffic">
+      <div class="nums">
+        <div><small>Received</small><b class="mono">4.2 MB/s</b><small class="mono">1.83 GB total</small></div>
+        <div><small>Sent</small><b class="mono">380 KB/s</b><small class="mono">212 MB total</small></div>
+      </div>
+      <svg viewBox="0 0 800 56" width="100%" height="56" preserveAspectRatio="none" fill="none"><path d="M0 44L50 38L100 41L150 20L200 30L250 12L300 26L350 14L400 32L450 8L500 20L550 14L600 28L650 18L700 24L800 16V56H0Z" fill="#60cdff" opacity=".16"/><path d="M0 44L50 38L100 41L150 20L200 30L250 12L300 26L350 14L400 32L450 8L500 20L550 14L600 28L650 18L700 24L800 16" stroke="#60cdff" stroke-width="2"/></svg>
+    </div>
+
+    <div class="sechead">Connection</div>
+    <div class="card">
+      <div class="row"><span class="k">Endpoint</span><span class="v mono">vpn.home.example:51820</span></div>
+      <div class="row"><span class="k">Address</span><span class="v mono">10.8.0.2/32</span></div>
+      <div class="row"><span class="k">DNS</span><span class="v mono">1.1.1.1, 1.0.0.1</span></div>
+      <div class="row"><span class="k">Routes</span><span class="v mono">0.0.0.0/0</span></div>
+      <div class="row"><span class="k">Public key</span><span class="v mono" style="color:var(--sub)">hX3q&hellip;7vTk=</span><span class="cp">&#x2398;</span></div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
