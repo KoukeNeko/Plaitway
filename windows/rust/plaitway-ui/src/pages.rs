@@ -2,10 +2,11 @@
 //! drawn; a click looks the region up, so drawing and hit-testing cannot drift apart.
 
 use windows::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
-use plaitway_core::{Diagnostics, Level, Link, LogView, Standing, State, Tunnel, View};
+use plaitway_core::{CredentialKind, Diagnostics, Level, Link, LogView, Standing, State, Tunnel, TunnelMode, View};
 
 use crate::{
     bay::{hue, kind_name, Pal},
+    edit::Field,
     gfx::Gfx,
 };
 
@@ -28,6 +29,20 @@ pub enum Act {
     Toggle(String),
     Resync,
     RemoveStale(String),
+    /// Pick a profile file and import it.
+    Import,
+    AskDelete,
+    CancelDelete,
+    /// Delete the profile with this id (after it was asked for).
+    Delete(String),
+    BeginRename,
+    /// Save the text of the profile being edited; true also restarts the connection.
+    Save(bool),
+    /// Send the typed username and password for the profile with this id.
+    Submit(String),
+    /// A switch of a profile: 0 connect at start, 1 keep the local network out of the tunnel.
+    ProfileSwitch(String, u8),
+    Mode(String, TunnelMode),
 }
 
 pub const PROFILE_TABS: [&str; 5] = ["Overview", "Routes", "Logs", "Configuration", "Settings"];
@@ -40,6 +55,12 @@ pub struct Ui {
     pub switches: [bool; 8],
     hits: Vec<(R, Act)>,
     hover: Option<Act>,
+    /// Where the text boxes go this frame, in client pixels.
+    pub edits: Vec<(Field, R)>,
+    /// The title of the profile is being edited.
+    pub renaming: bool,
+    /// The delete button was pressed once and asks again.
+    pub confirm_delete: bool,
     /// The lowest y any card reached in the last draw, in the same logical pixels it was drawn at.
     pub bottom: f32,
 }
@@ -52,7 +73,7 @@ pub struct Fonts {
 
 impl Ui {
     pub fn new() -> Self {
-        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], hits: Vec::new(), hover: None, bottom: 0.0 }
+        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, bottom: 0.0 }
     }
 
     pub fn clear(&mut self) {
@@ -87,10 +108,15 @@ impl Ui {
             Act::Go(p) => {
                 self.page = p.clone();
                 self.tab = 0;
+                self.renaming = false;
+                self.confirm_delete = false;
             }
+            Act::AskDelete => self.confirm_delete = true,
+            Act::CancelDelete | Act::Delete(_) => self.confirm_delete = false,
+            Act::BeginRename => self.renaming = true,
             Act::Tab(t) => self.tab = *t,
             Act::Switch(i) => self.switches[*i] = !self.switches[*i],
-            Act::Toggle(_) | Act::Resync | Act::RemoveStale(_) => {}
+            Act::Toggle(_) | Act::Resync | Act::RemoveStale(_) | Act::Import | Act::Save(_) | Act::Submit(_) | Act::ProfileSwitch(..) | Act::Mode(..) => {}
         }
         Some(act)
     }
@@ -116,6 +142,7 @@ impl Ui {
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, view: &View, s: f32, ox: f32, oy: f32, w: f32, h: f32) {
         self.bottom = oy;
+        self.edits.clear();
         match self.page.clone() {
             Page::Routing => {}
             Page::Profile(id) => match view.model.index(&id) {
@@ -180,14 +207,7 @@ impl Ui {
                 g.rect((ox + 1.0) * s, cy - 23.0 * s, (w - 2.0) * s, 1.0, 0.0, pal.line);
             }
             g.text(f.text, 14.0 * s, (ox + 18.0) * s, cy, k, pal.ink);
-            let (sx, sy) = ((ox + w - 18.0 - 40.0) * s, cy - 10.0 * s);
-            if self.switches[*idx] {
-                g.rect(sx, sy, 40.0 * s, 20.0 * s, 10.0 * s, pal.ink);
-                g.rect(sx + 23.0 * s, sy + 3.0 * s, 14.0 * s, 14.0 * s, 7.0 * s, if pal.dark { [0.12, 0.13, 0.15, 1.0] } else { [1.0; 4] });
-            } else {
-                g.outline(sx, sy, 40.0 * s, 20.0 * s, 10.0 * s, 1.0, pal.muted);
-                g.rect(sx + 4.0 * s, sy + 4.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, pal.muted);
-            }
+            self.draw_switch(g, pal, s, (ox + w - 18.0 - 40.0) * s, cy - 10.0 * s, self.switches[*idx]);
             self.region((ox * s, cy - 23.0 * s, w * s, 46.0 * s), Act::Switch(*idx));
         }
         self.bottom = self.bottom.max(y + h);
@@ -206,65 +226,188 @@ impl Ui {
         y + h + 14.0
     }
 
+    /// The Routing page while there is nothing to route: where to get a first profile.
+    pub fn empty(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, w: f32) {
+        self.edits.clear();
+        self.bottom = oy;
+        self.header(g, f, pal, s, ox, oy, "No profiles yet", "Import a WireGuard or OpenVPN profile to see its routes here.");
+        self.button(g, f, pal, s, ox, oy + 84.0, 168.0, 36.0, "Import a profile", Act::Import, false);
+        let (x, y, ww, hh) = (ox * s, (oy + 148.0) * s, w * s, 130.0 * s);
+        g.outline(x, y, ww, hh, 14.0 * s, 2.0 * s, pal.line);
+        let line = "or drop a .conf or .ovpn file here";
+        let lw = g.measure(f.text, 14.0 * s, line);
+        g.text(f.text, 14.0 * s, x + (ww - lw) / 2.0, y + hh / 2.0, line, pal.muted);
+        self.bottom = self.bottom.max(oy + 278.0);
+    }
+    /// A button with a label; `Some(act)` makes it clickable. `danger` draws it in the warning colour.
+    #[allow(clippy::too_many_arguments)]
+    fn button(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, x: f32, y: f32, w: f32, h: f32, label: &str, act: Act, danger: bool) {
+        let hover = self.is_hover(&act);
+        let (bx, by, bw, bh) = (x * s, y * s, w * s, h * s);
+        g.rect(bx, by, bw, bh, 6.0 * s, if hover { [pal.ink[0], pal.ink[1], pal.ink[2], 0.12] } else { pal.card });
+        g.outline(bx, by, bw, bh, 6.0 * s, 1.0, pal.line);
+        let lw = g.measure(f.text, 14.0 * s, label);
+        let c = if danger { if pal.dark { [1.0, 0.55, 0.71, 1.0] } else { [0.71, 0.14, 0.37, 1.0] } } else { pal.ink };
+        g.text(f.text, 14.0 * s, bx + (bw - lw) / 2.0, by + bh / 2.0, label, c);
+        self.region((bx, by, bw, bh), act);
+        self.bottom = self.bottom.max(y + h);
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn profile(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, view: &View, i: usize, s: f32, ox: f32, oy: f32, w: f32, h: f32) {
         let m = &view.model;
         let t: &Tunnel = &m.tunnels[i];
         let c = hue(m, i, pal.dark);
-        self.header(g, f, pal, s, ox, oy, &t.name, &format!("{} · priority {}", kind_name(t), i + 1));
-        // Connect / Disconnect at the right of the header.
-        let (bx, by, bw, bh) = ((ox + w - 112.0) * s, (oy + 6.0) * s, 112.0 * s, 34.0 * s);
-        let act = Act::Toggle(t.id.clone());
-        g.rect(bx, by, bw, bh, 6.0 * s, if self.is_hover(&act) { [pal.ink[0], pal.ink[1], pal.ink[2], 0.12] } else { pal.card });
-        g.outline(bx, by, bw, bh, 6.0 * s, 1.0, pal.line);
-        let label = if t.enabled { "Disconnect" } else { "Connect" };
-        let lw = g.measure(f.text, 14.0 * s, label);
-        g.text(f.text, 14.0 * s, bx + (bw - lw) / 2.0, by + bh / 2.0, label, pal.ink);
-        self.region((bx, by, bw, bh), act);
+        // The title; a click on it renames the profile.
+        if self.renaming {
+            self.edits.push((Field::Rename, (ox * s, (oy - 2.0) * s, 420.0 * s, 38.0 * s)));
+        } else {
+            let tw = g.text_fit(f.bold, 28.0 * s, ox * s, oy * s + 14.0 * s, &t.name, pal.ink, 520.0 * s);
+            self.region((ox * s, (oy - 6.0) * s, tw, 40.0 * s), Act::BeginRename);
+        }
+        g.text_fit(f.text, 14.0 * s, ox * s, oy * s + 50.0 * s, &format!("{} · priority {}", kind_name(t), i + 1), pal.muted, 520.0 * s);
+        if self.confirm_delete {
+            self.button(g, f, pal, s, ox + w - 84.0 - 92.0, oy + 6.0, 84.0, 34.0, "Cancel", Act::CancelDelete, false);
+            self.button(g, f, pal, s, ox + w - 84.0, oy + 6.0, 84.0, 34.0, "Delete", Act::Delete(t.id.clone()), true);
+            g.text(f.text, 13.0 * s, (ox + w - 84.0 - 92.0 - 250.0) * s, (oy + 23.0) * s, "Delete this profile for good?", pal.muted);
+        } else {
+            self.button(g, f, pal, s, ox + w - 112.0, oy + 6.0, 112.0, 34.0, if t.enabled { "Disconnect" } else { "Connect" }, Act::Toggle(t.id.clone()), false);
+            self.button(g, f, pal, s, ox + w - 112.0 - 8.0 - 84.0, oy + 6.0, 84.0, 34.0, "Delete", Act::AskDelete, false);
+        }
 
         let y = self.tabs(g, f, pal, s, ox, oy + 74.0, w, &PROFILE_TABS, c);
         match self.tab {
-            0 => {
-                let (held, wanted) = t.holds();
-                g.rect(ox * s, y * s, w * s, 76.0 * s, 10.0 * s, pal.card);
-                g.outline(ox * s, y * s, w * s, 76.0 * s, 10.0 * s, 1.0, pal.line);
-                if t.connected() {
-                    g.rect((ox + 18.0) * s, (y + 24.0) * s, 28.0 * s, 28.0 * s, 14.0 * s, c);
-                } else {
-                    g.outline((ox + 18.0) * s, (y + 24.0) * s, 28.0 * s, 28.0 * s, 14.0 * s, 2.0 * s, pal.muted);
-                }
-                g.text(f.bold, 18.0 * s, (ox + 60.0) * s, (y + 28.0) * s, state_name(t.state), pal.ink);
-                let sub = if t.connected() {
-                    format!("Holds {held} of {wanted} routes")
-                } else if !t.error.is_empty() {
-                    t.error.clone()
-                } else {
-                    "No routes held".to_string()
-                };
-                g.text(f.text, 13.0 * s, (ox + 60.0) * s, (y + 52.0) * s, &sub, pal.muted);
-                if let Some(up) = t.since.and_then(uptime) {
-                    g.text(f.bold, 18.0 * s, (ox + w - 150.0) * s, (y + 28.0) * s, &up, pal.ink);
-                    g.text(f.text, 13.0 * s, (ox + w - 150.0) * s, (y + 52.0) * s, "Uptime", pal.muted);
-                }
-                let rows = [("Protocol", kind_name(t).to_string()), ("Priority", (i + 1).to_string()), ("Routes it names", t.wanted.to_string()), ("Routes it holds", held.to_string())];
-                self.rows(g, f, pal, s, ox, y + 90.0, w, &rows);
-            }
+            0 => self.overview(g, f, pal, t, i, c, s, ox, y, w),
             1 => {
                 let lines: Vec<String> = t.requests.iter().map(|r| format!("{:<20}{}", r.prefix, standing_name(r.standing, r.shadowed_by.as_deref().and_then(|id| m.index(id)).map(|j| m.tunnels[j].name.as_str())))).collect();
                 let lines = if lines.is_empty() { vec!["Not connected, so nothing is asked for.".to_string()] } else { lines };
                 self.lines(g, f, pal, s, ox, y, w, &lines, true);
             }
             2 => self.log(g, f, pal, s, ox, y, w, h, view.log.as_ref().filter(|l| l.profile_id == t.id)),
-            3 => {
-                self.lines(g, f, pal, s, ox, y, w, &["The configuration editor arrives in a later step.".to_string()], false);
-            }
-            _ => {
-                let base = 2 + 2 * i.min(2);
-                self.switch_row(g, f, pal, s, ox, y, w, &[("Connect when Plaitway starts", base), ("Use for the default route", base + 1)]);
-            }
+            3 => self.configuration(g, f, pal, view, t, s, ox, y, w, h),
+            _ => self.profile_settings(g, f, pal, t, s, ox, y, w),
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn overview(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, t: &Tunnel, i: usize, c: [f32; 4], s: f32, ox: f32, y: f32, w: f32) {
+        let mut y = y;
+        if let Some(kind) = t.credential {
+            // The profile waits for a password: ask for it where the user is looking.
+            let (title, two) = match kind {
+                CredentialKind::UserPassword => ("This profile needs a username and password", true),
+                CredentialKind::KeyPassphrase => ("This profile needs the passphrase of its key", false),
+            };
+            g.rect(ox * s, y * s, w * s, 118.0 * s, 10.0 * s, pal.card);
+            g.outline(ox * s, y * s, w * s, 118.0 * s, 10.0 * s, 1.0, c);
+            g.text(f.bold, 14.0 * s, (ox + 18.0) * s, (y + 22.0) * s, title, pal.ink);
+            let half = (w - 36.0 - 12.0) / 2.0;
+            if two {
+                self.edits.push((Field::Username, ((ox + 18.0) * s, (y + 42.0) * s, half * s, 30.0 * s)));
+            }
+            let px = if two { ox + 18.0 + half + 12.0 } else { ox + 18.0 };
+            self.edits.push((Field::Password, (px * s, (y + 42.0) * s, if two { half } else { w - 36.0 } * s, 30.0 * s)));
+            self.button(g, f, pal, s, ox + w - 18.0 - 96.0, y + 80.0, 96.0, 28.0, "Connect", Act::Submit(t.id.clone()), false);
+            y += 132.0;
+        }
+        let (held, wanted) = t.holds();
+        g.rect(ox * s, y * s, w * s, 76.0 * s, 10.0 * s, pal.card);
+        g.outline(ox * s, y * s, w * s, 76.0 * s, 10.0 * s, 1.0, pal.line);
+        if t.connected() {
+            g.rect((ox + 18.0) * s, (y + 24.0) * s, 28.0 * s, 28.0 * s, 14.0 * s, c);
+        } else {
+            g.outline((ox + 18.0) * s, (y + 24.0) * s, 28.0 * s, 28.0 * s, 14.0 * s, 2.0 * s, pal.muted);
+        }
+        g.text(f.bold, 18.0 * s, (ox + 60.0) * s, (y + 28.0) * s, state_name(t.state), pal.ink);
+        let sub = if t.connected() {
+            format!("Holds {held} of {wanted} routes")
+        } else if !t.error.is_empty() {
+            t.error.clone()
+        } else {
+            "No routes held".to_string()
+        };
+        g.text_fit(f.text, 13.0 * s, (ox + 60.0) * s, (y + 52.0) * s, &sub, pal.muted, (w - 60.0 - 170.0) * s);
+        if let Some(up) = t.since.and_then(uptime) {
+            g.text(f.bold, 18.0 * s, (ox + w - 150.0) * s, (y + 28.0) * s, &up, pal.ink);
+            g.text(f.text, 13.0 * s, (ox + w - 150.0) * s, (y + 52.0) * s, "Uptime", pal.muted);
+        }
+        self.bottom = self.bottom.max(y + 76.0);
+        let join = |v: &[String]| if v.is_empty() { "none".to_string() } else { v.join(", ") };
+        let rows = [
+            ("Protocol", kind_name(t).to_string()),
+            ("Endpoint", join(&t.summary.endpoints)),
+            ("Address", join(&t.summary.addresses)),
+            ("DNS", join(&t.summary.dns)),
+            ("Priority", (i + 1).to_string()),
+            ("Routes it holds", format!("{held} of {wanted}")),
+        ];
+        self.rows(g, f, pal, s, ox, y + 90.0, w, &rows);
+    }
+
+    /// The text of the profile in a native editor, with Save under it.
+    #[allow(clippy::too_many_arguments)]
+    fn configuration(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, view: &View, t: &Tunnel, s: f32, ox: f32, y: f32, w: f32, h: f32) {
+        let text = view.content.as_ref().filter(|c| c.id == t.id).and_then(|c| c.text.as_deref());
+        let edit_h = (h - y - 24.0 - 52.0).max(120.0);
+        g.rect(ox * s, y * s, w * s, edit_h * s, 8.0 * s, pal.card);
+        g.outline(ox * s, y * s, w * s, edit_h * s, 8.0 * s, 1.0, pal.line);
+        if text.is_some() {
+            self.edits.push((Field::Config, ((ox + 1.0) * s, (y + 1.0) * s, (w - 2.0) * s, (edit_h - 2.0) * s)));
+        } else {
+            g.text(f.text, 13.0 * s, (ox + 18.0) * s, (y + 24.0) * s, "Loading the profile.", pal.muted);
+        }
+        let by = y + edit_h + 12.0;
+        self.button(g, f, pal, s, ox, by, 84.0, 34.0, "Save", Act::Save(false), false);
+        self.button(g, f, pal, s, ox + 92.0, by, 160.0, 34.0, "Save and reconnect", Act::Save(true), false);
+        let note = view.error.as_deref().or(view.info.as_deref()).unwrap_or("Ctrl+S saves.");
+        let first = note.lines().next().unwrap_or("");
+        g.text_fit(f.text, 13.0 * s, (ox + 268.0) * s, (by + 17.0) * s, first, pal.muted, (w - 268.0) * s);
+        self.bottom = self.bottom.max(by + 34.0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn profile_settings(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, t: &Tunnel, s: f32, ox: f32, y: f32, w: f32) {
+        let wireguard = t.kind == plaitway_core::Kind::WireGuard;
+        let rows: Vec<(&str, u8, bool)> = [("Connect when Plaitway starts", 0u8, t.settings.auto_connect), ("Keep the local network out of the tunnel", 1, t.settings.exclude_private_ips)].into_iter().filter(|r| wireguard || r.1 == 0).collect();
+        let h = rows.len() as f32 * 46.0;
+        g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
+        g.outline(ox * s, y * s, w * s, h * s, 10.0 * s, 1.0, pal.line);
+        for (k, (label, kind, on)) in rows.iter().enumerate() {
+            let cy = (y + 23.0 + k as f32 * 46.0) * s;
+            if k > 0 {
+                g.rect((ox + 1.0) * s, cy - 23.0 * s, (w - 2.0) * s, 1.0, 0.0, pal.line);
+            }
+            g.text(f.text, 14.0 * s, (ox + 18.0) * s, cy, label, pal.ink);
+            self.draw_switch(g, pal, s, (ox + w - 18.0 - 40.0) * s, cy - 10.0 * s, *on);
+            self.region((ox * s, cy - 23.0 * s, w * s, 46.0 * s), Act::ProfileSwitch(t.id.clone(), *kind));
+        }
+        let y = y + h + 14.0;
+        // Which routes the tunnel carries.
+        g.text(f.bold, 13.0 * s, ox * s, (y + 8.0) * s, "Traffic through the tunnel", pal.muted);
+        let mut x = ox;
+        for (label, mode) in [("As the profile says", TunnelMode::Auto), ("All traffic", TunnelMode::Full), ("Only its routes", TunnelMode::Split)] {
+            let wd = g.measure(f.text, 14.0 * s, label) / s + 32.0;
+            let on = t.settings.mode == mode;
+            let (bx, by, bw, bh) = (x * s, (y + 24.0) * s, wd * s, 34.0 * s);
+            g.rect(bx, by, bw, bh, 6.0 * s, if on { [pal.ink[0], pal.ink[1], pal.ink[2], 0.16] } else { pal.card });
+            g.outline(bx, by, bw, bh, 6.0 * s, if on { 2.0 * s } else { 1.0 }, if on { pal.ink } else { pal.line });
+            g.text(f.text, 14.0 * s, bx + 16.0 * s, by + bh / 2.0, label, pal.ink);
+            self.region((bx, by, bw, bh), Act::Mode(t.id.clone(), mode));
+            x += wd + 8.0;
+        }
+        self.bottom = self.bottom.max(y + 58.0);
+    }
+
+    /// The switch itself: a pill with a knob on the side it is set to.
+    fn draw_switch(&self, g: &mut Gfx, pal: &Pal, s: f32, sx: f32, sy: f32, on: bool) {
+        if on {
+            g.rect(sx, sy, 40.0 * s, 20.0 * s, 10.0 * s, pal.ink);
+            g.rect(sx + 23.0 * s, sy + 3.0 * s, 14.0 * s, 14.0 * s, 7.0 * s, if pal.dark { [0.12, 0.13, 0.15, 1.0] } else { [1.0; 4] });
+        } else {
+            g.outline(sx, sy, 40.0 * s, 20.0 * s, 10.0 * s, 1.0, pal.muted);
+            g.rect(sx + 4.0 * s, sy + 4.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, pal.muted);
+        }
+    }
     #[allow(clippy::too_many_arguments)]
     fn diagnostics(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, view: &View, s: f32, ox: f32, oy: f32, w: f32, h: f32) {
         self.header(g, f, pal, s, ox, oy, "Diagnostics", "What the daemon owns on this machine");
@@ -514,6 +657,8 @@ mod tests {
         assert!(uptime(now + 100).unwrap().ends_with(" s"));
     }
 }
+
+
 
 
 

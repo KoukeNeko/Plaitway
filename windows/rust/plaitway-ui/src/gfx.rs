@@ -169,7 +169,7 @@ impl Gfx {
             };
             let swap = factory.CreateSwapChainForComposition(&dev, &desc, None)?;
             let dcomp: IDCompositionDevice = DCompositionCreateDevice(&dxgi)?;
-            let target = dcomp.CreateTargetForHwnd(hwnd, true)?;
+            let target = dcomp.CreateTargetForHwnd(hwnd, false)?;
             let visual = dcomp.CreateVisual()?;
             visual.SetContent(&swap)?;
             target.SetRoot(&visual)?;
@@ -540,4 +540,5 @@ impl Gfx {
         }
     }
 }
+
 

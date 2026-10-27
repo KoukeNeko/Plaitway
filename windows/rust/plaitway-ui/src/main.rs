@@ -3,6 +3,7 @@
 #![windows_subsystem = "windows"]
 
 mod bay;
+mod edit;
 mod gfx;
 mod pages;
 mod shell;
@@ -10,6 +11,7 @@ mod shell;
 use std::{cell::RefCell, ffi::c_void};
 
 use bay::{Bay, Out, Pal};
+use edit::{Field, Hosted};
 use plaitway_core::{Link, Session, Store, UiPrefs, View};
 use gfx::Gfx;
 use pages::{Act, Fonts, Page, Ui};
@@ -19,8 +21,19 @@ use windows::{
     Win32::{
         Foundation::*,
         Graphics::{Dwm::*, DirectWrite::*, Gdi::*},
-        System::{LibraryLoader::GetModuleHandleW, Registry::*, SystemInformation::OSVERSIONINFOW},
-        UI::{Controls::MARGINS, HiDpi::*, Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
+        System::{
+            Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED},
+            LibraryLoader::GetModuleHandleW,
+            Registry::*,
+            SystemInformation::OSVERSIONINFOW,
+        },
+        UI::{
+            Controls::MARGINS,
+            HiDpi::*,
+            Input::KeyboardAndMouse::*,
+            Shell::{Common::COMDLG_FILTERSPEC, DragAcceptFiles, DragFinish, DragQueryFileW, FileOpenDialog, IFileOpenDialog, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, HDROP, SIGDN_FILESYSPATH},
+            WindowsAndMessaging::*,
+        },
     },
 };
 
@@ -29,6 +42,9 @@ const BUTTON_W: f32 = 46.0;
 const SIDEBAR_W: f32 = 248.0;
 const MICA_BUILD: u32 = 22621;
 const WM_MOUSELEAVE: u32 = 0x02A3;
+/// Notifications of an EDIT control.
+const EN_KILLFOCUS: u32 = 0x0200;
+const EN_CHANGE: u32 = 0x0300;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Hot {
@@ -95,7 +111,18 @@ struct App {
     view: View,
     ui: Ui,
     /// What the session was last asked to watch: the log (a profile id, empty for the daemon's) and whether diagnostics.
-    watching: (Option<String>, bool),
+    watching: (Option<String>, bool, Option<String>),
+    hosted: Hosted,
+    /// The id and text last put into the editor of a profile, to tell what the user changed from what arrived.
+    loaded: Option<(String, String)>,
+    /// The user typed in the editor since it was filled.
+    dirty: bool,
+    /// Set while the program, not the user, changes a text box.
+    programmatic: bool,
+    /// A text box to give the keyboard to after the next frame.
+    focus_pending: Option<Field>,
+    /// The child window the swap chain is attached to; the text boxes sit above it.
+    canvas: HWND,
     store: Store,
     prefs: UiPrefs,
     /// Set by the tray menu: the next close really closes.
@@ -191,6 +218,13 @@ impl App {
             g.text(self.f_text, 14.0 * s, 52.0 * s, cap + 26.0 * s, "Routing", ink);
             g.text(self.f_bold, 12.0 * s, 22.0 * s, cap + 78.0 * s, "PROFILES", muted);
         }
+        // Import a profile: a plus beside the heading, or under the routing button in the narrow rail.
+        let (px, py) = if compact { ((side - 18.0) / 2.0 + 8.0 - 7.0, cap / s + 38.0) } else { (side - 38.0, cap / s + 66.0) };
+        if ui.is_hover(&Act::Import) {
+            g.rect((px - 5.0) * s, (py - 5.0) * s, 24.0 * s, 24.0 * s, 6.0 * s, t.hover);
+        }
+        g.text(self.f_icons, 12.0 * s, px * s, (py + 7.0) * s, "\u{E710}", ink);
+        ui.region(((px - 5.0) * s, (py - 5.0) * s, 24.0 * s, 24.0 * s), Act::Import);
         for (k, tun) in model.tunnels.iter().enumerate() {
             let cy = cap + (if compact { 92.0 + k as f32 * 36.0 } else { 118.0 + k as f32 * 56.0 }) * s;
             nav(g, ui, cy - (if compact { 16.0 } else { 24.0 }) * s, (if compact { 32.0 } else { 48.0 }) * s, Act::Go(Page::Profile(tun.id.clone())));
@@ -247,10 +281,7 @@ impl App {
             (Link::Connecting, true) => {
                 g.text(self.f_bold, 28.0 * s, ox * s, (oy + 14.0) * s, "Connecting to the daemon", ink);
             }
-            (_, true) if self.view.model.tunnels.is_empty() => {
-                g.text(self.f_bold, 28.0 * s, ox * s, (oy + 14.0) * s, "No profiles yet", ink);
-                g.text(self.f_text, 14.0 * s, ox * s, (oy + 50.0) * s, "Import a WireGuard or OpenVPN profile to see its routes here.", muted);
-            }
+            (_, true) if self.view.model.tunnels.is_empty() => self.ui.empty(g, &fonts, &pal, s, ox, top, cw),
             (_, true) => {
                 self.bay.draw(g, (self.f_text, self.f_bold), &pal, &self.view.model, s, ox, top, cw);
                 self.max_scroll = (self.bay.height(&self.view.model, cw) + 24.0 - viewport).max(0.0);
@@ -274,7 +305,18 @@ impl App {
         }
         self.frames += 1;
         let clear = if self.mica { [0.0; 4] } else { self.theme.solid };
-        self.gfx.render(clear)
+        let shown = self.gfx.render(clear);
+
+        // The real text boxes go where the pages said, as long as that is inside the content.
+        let (dark, text_color) = (self.theme.dark, self.theme.ink);
+        let (area_top, area_bottom) = (cap, h);
+        let want: Vec<_> = self.ui.edits.iter().copied().filter(|(_, r)| r.1 >= area_top && r.1 + r.3 <= area_bottom).collect();
+        self.hosted.set_colors(text_color, if dark { [0.169, 0.188, 0.208, 1.0] } else { [1.0; 4] }, dark);
+        self.hosted.apply(&want, (96.0 * s).round() as u32, dark);
+        if let Some(f) = self.focus_pending.take() {
+            self.hosted.focus(f);
+        }
+        shown
     }
 }
 
@@ -311,6 +353,129 @@ fn local(a: &mut App, x: f32, y: f32, w_px: f32) -> (f32, f32, f32) {
     (x / s - ox, y / s - oy + a.scroll, cw)
 }
 
+/// The profile page that is open, if one is.
+fn open_profile(a: &App) -> Option<&plaitway_core::Tunnel> {
+    match &a.ui.page {
+        Page::Profile(id) => a.view.model.tunnels.iter().find(|t| &t.id == id),
+        _ => None,
+    }
+}
+
+/// Ask for a profile file. PLAITWAY_IMPORT_FILE names one without asking, for tests.
+fn pick_file(hwnd: HWND) -> Option<std::path::PathBuf> {
+    // Each click takes the next of the paths, which are separated by "|".
+    if let Ok(list) = std::env::var("PLAITWAY_IMPORT_FILE") {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let paths: Vec<&str> = list.split('|').collect();
+        let at = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst).min(paths.len() - 1);
+        return Some(paths[at].into());
+    }
+    unsafe {
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let types = [COMDLG_FILTERSPEC { pszName: w!("VPN profiles"), pszSpec: w!("*.ovpn;*.conf") }, COMDLG_FILTERSPEC { pszName: w!("All files"), pszSpec: w!("*.*") }];
+        dialog.SetFileTypes(&types).ok()?;
+        dialog.SetOptions(FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST).ok()?;
+        dialog.Show(Some(hwnd)).ok()?;
+        let name = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = name.to_string().ok();
+        CoTaskMemFree(Some(name.0 as *const c_void));
+        path.map(Into::into)
+    }
+}
+
+/// Send a profile file to the daemon. A file that cannot be read is reported the way a refusal is.
+fn import_path(a: &mut App, path: &std::path::Path) {
+    const LIMIT: u64 = 1 << 20;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    match std::fs::metadata(path).and_then(|m| if m.len() > LIMIT { Err(std::io::Error::other("it is larger than 1 MB, so it is not a profile")) } else { std::fs::read(path) }) {
+        Ok(bytes) => a.session.import("", &name, bytes),
+        Err(e) => a.view.error = Some(format!("cannot read {name}: {e}")),
+    }
+}
+
+fn save_config(a: &mut App, reconnect: bool) {
+    let Some(id) = open_profile(a).map(|t| t.id.clone()) else { return };
+    let text = a.hosted.text(Field::Config);
+    a.session.save_content(&id, &text, reconnect);
+    // What is in the box is now what is stored; the answer from the daemon will say the same.
+    a.loaded = Some((id, text));
+    a.dirty = false;
+}
+
+fn submit_credentials(a: &mut App, id: &str) {
+    let Some(kind) = a.view.model.tunnels.iter().find(|t| t.id == id).and_then(|t| t.credential) else { return };
+    let user = a.hosted.text(Field::Username);
+    let pass = a.hosted.text(Field::Password);
+    a.session.provide_credentials(id, kind, user.trim(), &pass);
+    a.hosted.clear(Field::Password);
+}
+
+fn change_settings(a: &mut App, id: &str, f: impl FnOnce(&mut plaitway_core::Settings)) {
+    if let Some(t) = a.view.model.tunnels.iter().find(|t| t.id == id) {
+        let mut s = t.settings;
+        f(&mut s);
+        a.session.set_settings(id, s);
+    }
+}
+
+/// Put the text of the profile into the editor when it arrives, unless the user has typed in it.
+fn sync_editor(a: &mut App) {
+    let Page::Profile(id) = a.ui.page.clone() else { return };
+    if a.ui.tab != 3 {
+        return;
+    }
+    let Some(text) = a.view.content.as_ref().filter(|c| c.id == id).and_then(|c| c.text.clone()) else { return };
+    let stale = a.loaded.as_ref().is_none_or(|(i, t)| *i != id || *t != text);
+    if stale && !a.dirty {
+        a.programmatic = true;
+        a.hosted.set_text(Field::Config, &text);
+        a.programmatic = false;
+        a.loaded = Some((id, text));
+    }
+}
+
+/// What a click on something of a page does.
+fn do_act(hwnd: HWND, a: &mut App, act: Act) {
+    match act {
+        Act::Toggle(id) => {
+            let on = a.view.model.tunnels.iter().find(|t| t.id == id).is_some_and(|t| t.enabled);
+            a.session.set_enabled(&id, !on);
+        }
+        Act::Switch(0) => shell::set_startup(a.ui.switches[0]),
+        Act::Switch(1) => {
+            a.prefs.close_to_tray = a.ui.switches[1];
+            let _ = a.store.save_ui(&a.prefs);
+        }
+        Act::Resync => a.session.resync(),
+        Act::RemoveStale(key) => a.session.remove_stale(&key),
+        Act::Import => {
+            if let Some(p) = pick_file(hwnd) {
+                import_path(a, &p);
+            }
+        }
+        Act::Delete(id) => {
+            a.session.delete(&id);
+            a.ui.page = Page::Routing;
+        }
+        Act::BeginRename => {
+            if let Some(name) = open_profile(a).map(|t| t.name.clone()) {
+                a.programmatic = true;
+                a.hosted.set_text(Field::Rename, &name);
+                a.programmatic = false;
+                a.focus_pending = Some(Field::Rename);
+            }
+        }
+        Act::Save(reconnect) => save_config(a, reconnect),
+        Act::Submit(id) => submit_credentials(a, &id),
+        Act::ProfileSwitch(id, 0) => change_settings(a, &id, |s| s.auto_connect = !s.auto_connect),
+        Act::ProfileSwitch(id, _) => change_settings(a, &id, |s| s.exclude_private_ips = !s.exclude_private_ips),
+        Act::Mode(id, mode) => change_settings(a, &id, |s| s.mode = mode),
+        _ => {}
+    }
+    sync_watch(a);
+    sync_editor(a);
+    redraw(hwnd, a);
+}
 /// Tell the session what the current page needs: a log on the Logs tabs, diagnostics on the Diagnostics ones.
 fn sync_watch(a: &mut App) {
     let logs = match (&a.ui.page, a.ui.tab) {
@@ -319,6 +484,16 @@ fn sync_watch(a: &mut App) {
         _ => None,
     };
     let diag = a.ui.page == Page::Diagnostics && a.ui.tab < 2;
+    let content = match (&a.ui.page, a.ui.tab) {
+        (Page::Profile(id), 3) => Some(id.clone()),
+        _ => None,
+    };
+    if content != a.watching.2 {
+        a.session.watch_content(content.as_deref());
+        a.watching.2 = content;
+        a.dirty = false;
+        a.loaded = None;
+    }
     if logs != a.watching.0 {
         a.session.watch_logs(logs.as_deref());
         a.watching.0 = logs;
@@ -387,6 +562,24 @@ fn hit_button(app: &App, x: f32, y: f32, w: f32) -> Hot {
         }
     }
     Hot::None
+}
+
+/// The canvas is only a surface: input goes to the window it covers, and where the window says
+/// something other than "client area" (caption, buttons, edges) the canvas lets it through.
+unsafe extern "system" fn canvas_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let parent = GetParent(hwnd).unwrap_or_default();
+    match msg {
+        WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_MOUSELEAVE | WM_MOUSEWHEEL => SendMessageW(parent, msg, Some(wparam), Some(lparam)),
+        WM_NCHITTEST => {
+            if SendMessageW(parent, WM_NCHITTEST, Some(wparam), Some(lparam)).0 as u32 == HTCLIENT {
+                LRESULT(HTCLIENT as isize)
+            } else {
+                LRESULT(HTTRANSPARENT as isize)
+            }
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -466,7 +659,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     a.tracking = false;
                 } else {
                     if !a.client_tracking {
-                        let mut e = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                        let mut e = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: a.canvas, dwHoverTime: 0 };
                         let _ = TrackMouseEvent(&mut e);
                         a.client_tracking = true;
                     }
@@ -500,23 +693,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let (cw, _) = client_size(hwnd);
             with_app(|a| {
                 let (x, y, w) = local(a, mx, my, cw as f32);
+                // A click outside a box takes the keyboard back from it.
+                let _ = SetFocus(Some(hwnd));
                 if let Some(act) = a.ui.click(mx, my) {
-                    match act {
-                        Act::Toggle(id) => {
-                            let on = a.view.model.tunnels.iter().find(|t| t.id == id).is_some_and(|t| t.enabled);
-                            a.session.set_enabled(&id, !on);
-                        }
-                        Act::Switch(0) => shell::set_startup(a.ui.switches[0]),
-                        Act::Switch(1) => {
-                            a.prefs.close_to_tray = a.ui.switches[1];
-                            let _ = a.store.save_ui(&a.prefs);
-                        }
-                        Act::Resync => a.session.resync(),
-                        Act::RemoveStale(key) => a.session.remove_stale(&key),
-                        _ => {}
-                    }
-                    sync_watch(a);
-                    redraw(hwnd, a);
+                    do_act(hwnd, a, act);
                 } else if a.ui.page == Page::Routing {
                     let out = a.bay.press(&a.view.model, x, y, w);
                     if a.bay.dragging() {
@@ -534,6 +714,72 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     let out = a.bay.release(&a.view.model);
                     run(hwnd, a, out);
                 }
+            });
+            LRESULT(0)
+        }
+        WM_CTLCOLOREDIT => with_app(|a| a.hosted.paint(HDC(wparam.0 as *mut c_void))).unwrap_or(LRESULT(0)),
+        WM_COMMAND => {
+            let (id, code) = (wparam.0 & 0xffff, (wparam.0 >> 16) & 0xffff);
+            with_app(|a| match (Hosted::field_of(id), code as u32) {
+                (Some(Field::Config), EN_CHANGE) if !a.programmatic => a.dirty = true,
+                // Leaving the title box without Enter drops the new name.
+                (Some(Field::Rename), EN_KILLFOCUS) if a.ui.renaming && !a.programmatic => {
+                    a.ui.renaming = false;
+                    redraw(hwnd, a);
+                }
+                _ => {}
+            });
+            LRESULT(0)
+        }
+        edit::WM_FIELD_ENTER => {
+            with_app(|a| match Hosted::field_of(wparam.0) {
+                Some(Field::Config) => do_act(hwnd, a, Act::Save(false)),
+                Some(Field::Username | Field::Password) => {
+                    if let Some(id) = open_profile(a).map(|t| t.id.clone()) {
+                        do_act(hwnd, a, Act::Submit(id));
+                    }
+                }
+                Some(Field::Rename) => {
+                    let name = a.hosted.text(Field::Rename).trim().to_string();
+                    if let Some((id, old)) = open_profile(a).map(|t| (t.id.clone(), t.name.clone())) {
+                        if !name.is_empty() && name != old {
+                            a.session.rename(&id, &name);
+                        }
+                    }
+                    a.ui.renaming = false;
+                    let _ = SetFocus(Some(hwnd));
+                    redraw(hwnd, a);
+                }
+                None => {}
+            });
+            LRESULT(0)
+        }
+        edit::WM_FIELD_ESCAPE => {
+            with_app(|a| {
+                if matches!(Hosted::field_of(wparam.0), Some(Field::Rename)) {
+                    a.ui.renaming = false;
+                }
+                let _ = SetFocus(Some(hwnd));
+                redraw(hwnd, a);
+            });
+            LRESULT(0)
+        }
+        WM_DROPFILES => {
+            let drop = HDROP(wparam.0 as *mut c_void);
+            let count = DragQueryFileW(drop, 0xFFFF_FFFF, None);
+            let mut paths = vec![];
+            for i in 0..count {
+                let n = DragQueryFileW(drop, i, None) as usize;
+                let mut buf = vec![0u16; n + 1];
+                DragQueryFileW(drop, i, Some(&mut buf));
+                paths.push(std::path::PathBuf::from(String::from_utf16_lossy(&buf[..n])));
+            }
+            DragFinish(drop);
+            with_app(|a| {
+                for p in &paths {
+                    import_path(a, p);
+                }
+                redraw(hwnd, a);
             });
             LRESULT(0)
         }
@@ -564,6 +810,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             with_app(|a| {
                 a.view = a.session.view();
                 a.bay.sync(&a.view.model);
+                sync_editor(a);
                 redraw(hwnd, a);
             });
             LRESULT(0)
@@ -596,10 +843,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             (*m).ptMinTrackSize = POINT { x: (900.0 * dpi) as i32, y: (600.0 * dpi) as i32 };
             LRESULT(0)
         }
+        // The text boxes are windows of their own, and follow this one.
+        WM_MOVE => {
+            with_app(|a| {
+                let (dpi, dark) = ((96.0 * a.scale).round() as u32, a.theme.dark);
+                a.hosted.place(dpi, dark);
+            });
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_SIZE => {
             if wparam.0 as u32 != SIZE_MINIMIZED {
                 let (w, h) = client_size(hwnd);
                 with_app(|a| {
+                    let _ = MoveWindow(a.canvas, 0, 0, w as i32, h as i32, false);
                     let _ = a.gfx.resize(w, h);
                 });
                 let _ = InvalidateRect(Some(hwnd), None, false);
@@ -676,6 +932,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 fn main() -> Result<()> {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let inst: HINSTANCE = GetModuleHandleW(None)?.into();
         let class = w!("PlaitwayUi");
         // One copy per daemon pipe; a second one asks the first to show itself and leaves.
@@ -702,7 +959,10 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
             set_attr(hwnd, 38, 2); // DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW
         }
 
-        let mut gfx = Gfx::new(hwnd, w, h)?;
+        // The swap chain lives in a child that covers the client area, so that real controls can sit above it.
+        RegisterClassExW(&WNDCLASSEXW { cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32, lpfnWndProc: Some(canvas_proc), hInstance: inst, hCursor: LoadCursorW(None, IDC_ARROW)?, lpszClassName: w!("PlaitwayCanvas"), ..Default::default() });
+        let canvas = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, w!("PlaitwayCanvas"), PCWSTR::null(), WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, w as i32, h as i32, Some(hwnd), None, Some(inst), None)?;
+        let mut gfx = Gfx::new(canvas, w, h)?;
         let f_text = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_NORMAL)?;
         let f_bold = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
         let f_mono = gfx.load_font(&["Cascadia Mono", "Consolas"], DWRITE_FONT_WEIGHT_NORMAL)?;
@@ -715,7 +975,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let view = session.view();
         let store = Store::new(Store::default_dir());
         let prefs = store.ui();
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false), store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false, None), canvas, hosted: Hosted::new(hwnd), loaded: None, dirty: false, programmatic: false, focus_pending: None, store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
@@ -727,6 +987,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
             a.ui.switches[1] = a.prefs.close_to_tray;
         });
         shell::add_tray(hwnd, icon);
+        DragAcceptFiles(hwnd, true);
         let placed = with_app(|a| a.prefs.window).flatten().is_some_and(|p| shell::restore(hwnd, &p));
         // `--hidden` (what the Run key starts) leaves the window in the notification area.
         if std::env::args().any(|a| a == "--hidden") {
@@ -743,6 +1004,17 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 
