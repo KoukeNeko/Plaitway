@@ -8,6 +8,7 @@ description = "Phase 0: Mica, composition swap chain and custom caption in one w
 accesskit = "0.25.2"
 accesskit_windows = "0.35.2"
 plaitway-core = { path = "../plaitway-core" }
+plaitway-helper = { path = "../plaitway-helper" }
 
 [dependencies.windows]
 version = "0.62"
@@ -38,6 +39,7 @@ features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
 ]
+
 
 
 

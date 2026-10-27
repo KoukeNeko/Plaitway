@@ -591,12 +591,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "plaitway-helper"
+version = "0.1.0"
+dependencies = [
+ "windows",
+]
+
+[[package]]
 name = "plaitway-ui"
 version = "0.1.0"
 dependencies = [
  "accesskit",
  "accesskit_windows",
  "plaitway-core",
+ "plaitway-helper",
  "windows",
 ]
 

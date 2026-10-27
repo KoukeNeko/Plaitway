@@ -7,6 +7,7 @@ mod bay;
 mod edit;
 mod gfx;
 mod pages;
+mod setup;
 mod shell;
 
 use std::{cell::RefCell, ffi::c_void};
@@ -46,6 +47,7 @@ const SIDEBAR_W: f32 = 248.0;
 const MICA_BUILD: u32 = 22621;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const WM_APP_LOSE_DEVICE: u32 = WM_APP + 9;
+const WM_HELPER_DONE: u32 = WM_APP + 12;
 /// Notifications of an EDIT control.
 const EN_KILLFOCUS: u32 = 0x0200;
 const EN_CHANGE: u32 = 0x0300;
@@ -145,6 +147,11 @@ struct App {
     focus_pending: Option<Field>,
     /// The child window the swap chain is attached to; the text boxes sit above it.
     canvas: HWND,
+    helper: plaitway_helper::Status,
+    helper_busy: bool,
+    helper_error: Option<String>,
+    /// How the last helper command ended, written by the thread that ran it.
+    helper_done: std::sync::Arc<std::sync::Mutex<Option<Option<String>>>>,
     /// UI Automation for screen readers; it builds the tree only while one is attached.
     access: Option<SubclassingAdapter>,
     access_targets: std::collections::HashMap<accesskit::NodeId, a11y::Target>,
@@ -305,13 +312,12 @@ impl App {
         let viewport = h / s - oy - 16.0;
         g.clip(cx, cy0 + 1.0, w - cx, h - cy0);
         let fonts = Fonts { text: self.f_text, bold: self.f_bold, mono: self.f_mono };
+        self.ui.helper = Some(setup::offer(&self.helper, matches!(self.view.link, Link::Online)));
+        self.ui.helper_error = self.helper_error.clone();
+        self.ui.helper_busy = self.helper_busy;
         match (&self.view.link, self.ui.page == Page::Routing) {
             // Without the daemon there is nothing to draw but why.
-            (Link::Offline(why), true) => {
-                g.text(self.f_bold, 28.0 * s, ox * s, (oy + 14.0) * s, "plaitwayd is not running", ink);
-                g.text(self.f_text, 14.0 * s, ox * s, (oy + 50.0) * s, why, muted);
-                g.text(self.f_text, 14.0 * s, ox * s, (oy + 78.0) * s, "Trying again every second.", muted);
-            }
+            (Link::Offline(why), true) => self.ui.unreachable(g, &fonts, &pal, s, ox, top, cw, why),
             (Link::Connecting, true) => {
                 g.text(self.f_bold, 28.0 * s, ox * s, (oy + 14.0) * s, "Connecting to the daemon", ink);
             }
@@ -524,6 +530,7 @@ fn do_act(hwnd: HWND, a: &mut App, act: Act) {
             a.prefs.close_to_tray = a.ui.switches[1];
             let _ = a.store.save_ui(&a.prefs);
         }
+        Act::Helper(cmd) => run_helper(hwnd, a, cmd),
         Act::Resync => a.session.resync(),
         Act::RemoveStale(key) => a.session.remove_stale(&key),
         Act::Import => {
@@ -559,6 +566,52 @@ fn system_language() -> plaitway_core::Lang {
     let mut buf = [0u16; 85];
     let n = unsafe { windows::Win32::Globalization::GetUserDefaultLocaleName(&mut buf) } as usize;
     plaitway_core::Lang::from_locale(&String::from_utf16_lossy(&buf[..n.saturating_sub(1)]))
+}
+
+/// What the Service Control Manager says of the helper, and whether its program may be run elevated.
+fn helper_status() -> plaitway_helper::Status {
+    with_installer(|i| i.status())
+}
+
+fn with_installer<R>(f: impl FnOnce(&plaitway_helper::Installer) -> R) -> R {
+    let service = plaitway_helper::WindowsService::new(plaitway_helper::SERVICE_NAME);
+    let trust = plaitway_helper::WindowsHelperTrust;
+    let launcher = plaitway_helper::ShellElevatedLauncher::default();
+    let exists = |p: &std::path::Path| p.is_file();
+    let app_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(std::path::Path::to_path_buf)).unwrap_or_default();
+    // Only a debug build looks in the repository it was built from; a release build never runs what a folder of the user holds.
+    let locator = plaitway_helper::Locator { app_dir, file_exists: &exists, trust: &trust, searches_repository: cfg!(debug_assertions) };
+    f(&plaitway_helper::Installer { service: &service, launcher: &launcher, locator })
+}
+
+/// Run a helper command on a thread of its own: Windows waits for the user, and the window must not.
+fn run_helper(hwnd: HWND, a: &mut App, cmd: setup::Command) {
+    if a.helper_busy {
+        return;
+    }
+    a.helper_busy = true;
+    a.helper_error = None;
+    let (done, handle) = (a.helper_done.clone(), hwnd.0 as isize);
+    std::thread::spawn(move || {
+        let error = with_installer(|i| {
+            let r = match cmd {
+                setup::Command::Install => i.install(),
+                setup::Command::Start => i.start(),
+                setup::Command::Reinstall => i.reinstall(),
+                setup::Command::Uninstall => i.uninstall(),
+            };
+            match r {
+                Ok(_) => None,
+                Err(plaitway_helper::Error::CommandFailed(code)) => Some(setup::printf("Helper command failed with exit code %lld", &[&code.to_string()])),
+                Err(plaitway_helper::Error::Missing(_)) => Some(plaitway_core::tr("The helper file is missing from this copy of Plaitway. Install Plaitway again.").into_owned()),
+                Err(plaitway_helper::Error::Launch(e)) => Some(format!("{e}. {}", plaitway_core::tr("Fallback: run plaitwayd.exe install -start as administrator"))),
+            }
+        });
+        *done.lock().unwrap() = Some(error);
+        unsafe {
+            let _ = PostMessageW(Some(HWND(handle as *mut c_void)), WM_HELPER_DONE, WPARAM(0), LPARAM(0));
+        }
+    });
 }
 
 /// Tell the session what the current page needs: a log on the Logs tabs, diagnostics on the Diagnostics ones.
@@ -873,6 +926,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             with_app(|a| scroll_by(hwnd, a, -delta * 56.0));
             LRESULT(0)
         }
+        WM_HELPER_DONE => {
+            with_app(|a| {
+                a.helper_busy = false;
+                a.helper_error = a.helper_done.lock().unwrap().take().flatten();
+                a.helper = helper_status();
+                redraw(hwnd, a);
+            });
+            LRESULT(0)
+        }
         // A screen reader asked for something to be pressed, or attached and wants a tree.
         a11y::WM_ACCESS_ACTIVE => {
             with_app(|a| redraw(hwnd, a));
@@ -947,6 +1009,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             LRESULT(0)
         }
         // Drives the line draw-in; it is killed as soon as the animation is over.
+        WM_TIMER if wparam.0 == 2 => {
+            // The helper changes without the app being told: look again now and then.
+            with_app(|a| {
+                let now = helper_status();
+                if now != a.helper {
+                    a.helper = now;
+                    redraw(hwnd, a);
+                }
+            });
+            LRESULT(0)
+        }
         WM_TIMER => {
             with_app(|a| {
                 if !a.bay.animating() {
@@ -1116,7 +1189,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let view = session.view();
         let store = Store::new(Store::default_dir());
         let prefs = store.ui();
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false, None), canvas, access: Some(access), access_targets: Default::default(), access_queue, hosted: Hosted::new(hwnd), loaded: None, dirty: false, programmatic: false, focus_pending: None, store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false, None), canvas, helper: helper_status(), helper_busy: false, helper_error: None, helper_done: Default::default(), access: Some(access), access_targets: Default::default(), access_queue, hosted: Hosted::new(hwnd), loaded: None, dirty: false, programmatic: false, focus_pending: None, store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
@@ -1131,6 +1204,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         });
         shell::add_tray(hwnd, icon);
         DragAcceptFiles(hwnd, true);
+        SetTimer(Some(hwnd), 2, 3000, None);
         let placed = with_app(|a| a.prefs.window).flatten().is_some_and(|p| shell::restore(hwnd, &p));
         // `--hidden` (what the Run key starts) leaves the window in the notification area.
         if std::env::args().any(|a| a == "--hidden") {
@@ -1147,6 +1221,9 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
+
 
 
 

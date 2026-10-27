@@ -64,6 +64,15 @@ pub fn language() -> Language {
 /// English text and its Traditional Chinese, for what the catalogs do not have. `{0}`, `{1}` are filled by `tr_fmt`.
 const EXTRA: &[(&str, &str)] = &[
     ("Routing", "路由"),
+    ("Waiting for Windows to ask for consent", "等待 Windows 要求確認"),
+    ("Helper not found", "找不到 helper"),
+    ("Helper not installed", "尚未安裝 helper"),
+    ("Helper state unknown", "無法得知 helper 的狀態"),
+    ("Install the helper", "安裝 helper"),
+    ("Update the helper", "更新 helper"),
+    ("Uninstall the helper", "解除安裝 helper"),
+    ("Helper", "Helper"),
+    ("Not installed", "未安裝"),
     ("Traffic", "流量"),
     ("none", "無"),
     ("None", "無"),
@@ -253,5 +262,7 @@ mod tests {
         }
     }
 }
+
+
 
 

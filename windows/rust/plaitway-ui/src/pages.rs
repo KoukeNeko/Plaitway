@@ -45,6 +45,8 @@ pub enum Act {
     Mode(String, TunnelMode),
     /// Move to the next language: the system's, English, Traditional Chinese.
     CycleLanguage,
+    /// A command of the helper service; asks Windows for consent.
+    Helper(crate::setup::Command),
 }
 
 /// How fast a tunnel carries bytes, sampled each time the daemon reports its counters.
@@ -90,6 +92,11 @@ pub struct Ui {
     pub confirm_delete: bool,
     /// What the keyboard is on, found again in each frame by what it does.
     pub focus: Option<Act>,
+    /// What is known of the helper service, set before each frame.
+    pub helper: Option<crate::setup::Offer>,
+    pub helper_error: Option<String>,
+    /// A helper command is running, waiting for the consent prompt of Windows.
+    pub helper_busy: bool,
     /// Rates by profile id.
     pub traffic: std::collections::HashMap<String, Traffic>,
     /// The lowest y any card reached in the last draw, in the same logical pixels it was drawn at.
@@ -104,7 +111,7 @@ pub struct Fonts {
 
 impl Ui {
     pub fn new() -> Self {
-        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], language: None, traffic: Default::default(), hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, focus: None, bottom: 0.0 }
+        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], language: None, helper: None, helper_error: None, helper_busy: false, traffic: Default::default(), hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, focus: None, bottom: 0.0 }
     }
 
     pub fn clear(&mut self) {
@@ -212,7 +219,7 @@ impl Ui {
             Act::BeginRename => self.renaming = true,
             Act::Tab(t) => self.tab = *t,
             Act::Switch(i) => self.switches[*i] = !self.switches[*i],
-            Act::Toggle(_) | Act::Resync | Act::RemoveStale(_) | Act::Import | Act::Save(_) | Act::Submit(_) | Act::ProfileSwitch(..) | Act::Mode(..) | Act::CycleLanguage => {}
+            Act::Toggle(_) | Act::Resync | Act::RemoveStale(_) | Act::Import | Act::Save(_) | Act::Submit(_) | Act::ProfileSwitch(..) | Act::Mode(..) | Act::CycleLanguage | Act::Helper(_) => {}
         }
     }
 
@@ -323,6 +330,16 @@ impl Ui {
         }
         self.bottom = self.bottom.max(y + h);
         y + h + 14.0
+    }
+
+    /// The Routing page while the daemon cannot be reached: why, and what can be done about the helper.
+    #[allow(clippy::too_many_arguments)]
+    pub fn unreachable(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, w: f32, why: &str) {
+        self.edits.clear();
+        self.bottom = oy;
+        self.header(g, f, pal, s, ox, oy, "plaitwayd is not running", why);
+        g.text(f.text, 14.0 * s, ox * s, (oy + 78.0) * s, "Trying again every second.", pal.muted);
+        self.helper_card(g, f, pal, s, ox, oy + 104.0, w);
     }
 
     /// The Routing page while there is nothing to route: where to get a first profile.
@@ -648,7 +665,45 @@ impl Ui {
         let y = self.rows(g, f, pal, s, ox, y, w, &[("Language", shown)]);
         // The whole row is the control: a press moves to the next language.
         self.region((ox * s, row_y * s, w * s, 46.0 * s), Act::CycleLanguage);
-        self.switch_row(g, f, pal, s, ox, y, w, &[("Start with Windows", 0), ("Keep running in the tray when closed", 1)]);
+        let y = self.switch_row(g, f, pal, s, ox, y, w, &[("Start with Windows", 0), ("Keep running in the tray when closed", 1)]);
+        if self.helper.is_some() {
+            self.helper_card(g, f, pal, s, ox, y, w);
+        }
+    }
+
+    /// The state of the helper service and the buttons that change it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn helper_card(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, y: f32, w: f32) -> f32 {
+        let Some(offer) = self.helper.take() else { return y };
+        let h = 54.0 + offer.lines.len() as f32 * 22.0 + if offer.commands.is_empty() && self.helper_error.is_none() { 0.0 } else { 48.0 };
+        g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
+        g.outline(ox * s, y * s, w * s, h * s, 10.0 * s, 1.0, pal.line);
+        g.text(f.bold, 12.0 * s, (ox + 18.0) * s, (y + 18.0) * s, "Helper", pal.muted);
+        g.text_fit(f.bold, 15.0 * s, (ox + 18.0) * s, (y + 40.0) * s, &offer.title, pal.ink, (w - 36.0) * s);
+        let mut ly = y + 62.0;
+        for line in &offer.lines {
+            g.text_fit(f.text, 13.0 * s, (ox + 18.0) * s, ly * s, line, pal.muted, (w - 36.0) * s);
+            ly += 22.0;
+        }
+        let mut x = ox + 18.0;
+        let by = ly - 8.0;
+        if self.helper_busy {
+            g.text(f.text, 13.0 * s, x * s, (by + 17.0) * s, "Waiting for Windows to ask for consent", pal.muted);
+        } else {
+            for (cmd, label) in &offer.commands {
+                let wd = g.measure(f.text, 14.0 * s, label) / s + 32.0;
+                self.button(g, f, pal, s, x, by, wd, 34.0, label, Act::Helper(*cmd), false);
+                x += wd + 8.0;
+            }
+            if let Some(e) = &self.helper_error {
+                let red = if pal.dark { [1.0, 0.55, 0.71, 1.0] } else { [0.71, 0.14, 0.37, 1.0] };
+                g.text_fit(f.text, 13.0 * s, (x + 8.0) * s, (by + 17.0) * s, e, red, (ox + w - x - 26.0) * s);
+            }
+        }
+        self.bottom = self.bottom.max(y + h);
+        let below = y + h + 14.0;
+        self.helper = Some(offer);
+        below
     }
 }
 
@@ -890,6 +945,7 @@ mod tests {
         assert!(uptime(now + 100).unwrap().ends_with(" s"));
     }
 }
+
 
 
 
