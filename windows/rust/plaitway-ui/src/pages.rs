@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn long_names_are_cut_for_the_tables() {
         assert_eq!(short("Home"), "Home");
-        assert_eq!(short("Nine char"), "Nine cha…");
+        assert_eq!(short("Ten chars!!"), "Ten char…");
         assert_eq!(short("123456789"), "123456789");
     }
 
@@ -514,6 +514,7 @@ mod tests {
         assert!(uptime(now + 100).unwrap().ends_with(" s"));
     }
 }
+
 
 
 
