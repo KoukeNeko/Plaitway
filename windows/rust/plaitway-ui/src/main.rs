@@ -5,11 +5,12 @@
 mod bay;
 mod gfx;
 mod pages;
+mod shell;
 
 use std::{cell::RefCell, ffi::c_void};
 
 use bay::{Bay, Out, Pal};
-use plaitway_core::{Link, Session, View};
+use plaitway_core::{Link, Session, Store, UiPrefs, View};
 use gfx::Gfx;
 use pages::{Act, Fonts, Page, Ui};
 use windows::{
@@ -95,6 +96,10 @@ struct App {
     ui: Ui,
     /// What the session was last asked to watch: the log (a profile id, empty for the daemon's) and whether diagnostics.
     watching: (Option<String>, bool),
+    store: Store,
+    prefs: UiPrefs,
+    /// Set by the tray menu: the next close really closes.
+    quitting: bool,
     /// How far the page is scrolled, in logical pixels, and how far it can be.
     scroll: f32,
     max_scroll: f32,
@@ -122,6 +127,14 @@ fn set_attr(hwnd: HWND, attr: i32, v: i32) {
 }
 
 impl App {
+    /// Keep where the window is for the next start.
+    fn remember_window(&mut self, hwnd: HWND) {
+        if let Some(p) = shell::placement(hwnd) {
+            self.prefs.window = Some(p);
+            let _ = self.store.save_ui(&self.prefs);
+        }
+    }
+
     fn apply_theme(&mut self, hwnd: HWND) {
         self.theme = theme(apps_use_dark());
         set_attr(hwnd, 20, self.theme.dark as i32); // DWMWA_USE_IMMERSIVE_DARK_MODE
@@ -262,6 +275,14 @@ impl App {
         self.frames += 1;
         let clear = if self.mica { [0.0; 4] } else { self.theme.solid };
         self.gfx.render(clear)
+    }
+}
+
+/// Bring the window back from the notification area, or from behind others.
+fn show_window(hwnd: HWND) {
+    unsafe {
+        let _ = ShowWindow(hwnd, if IsIconic(hwnd).as_bool() { SW_RESTORE } else { SW_SHOW });
+        let _ = SetForegroundWindow(hwnd);
     }
 }
 
@@ -485,6 +506,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                             let on = a.view.model.tunnels.iter().find(|t| t.id == id).is_some_and(|t| t.enabled);
                             a.session.set_enabled(&id, !on);
                         }
+                        Act::Switch(0) => shell::set_startup(a.ui.switches[0]),
+                        Act::Switch(1) => {
+                            a.prefs.close_to_tray = a.ui.switches[1];
+                            let _ = a.store.save_ui(&a.prefs);
+                        }
                         Act::Resync => a.session.resync(),
                         Act::RemoveStale(key) => a.session.remove_stale(&key),
                         _ => {}
@@ -606,7 +632,40 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             });
             LRESULT(0)
         }
+        WM_CLOSE => {
+            let to_tray = with_app(|a| {
+                a.remember_window(hwnd);
+                a.prefs.close_to_tray && !a.quitting
+            });
+            if to_tray == Some(true) {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                LRESULT(0)
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+        }
+        shell::WM_TRAY => {
+            match (lparam.0 & 0xffff) as u32 {
+                WM_LBUTTONUP => show_window(hwnd),
+                WM_RBUTTONUP | WM_CONTEXTMENU => match shell::tray_menu(hwnd) {
+                    shell::TrayChoice::Show => show_window(hwnd),
+                    shell::TrayChoice::Quit => {
+                        with_app(|a| a.quitting = true);
+                        let _ = DestroyWindow(hwnd);
+                    }
+                    shell::TrayChoice::Nothing => {}
+                },
+                _ => {}
+            }
+            LRESULT(0)
+        }
+        shell::WM_SHOW => {
+            show_window(hwnd);
+            LRESULT(0)
+        }
         WM_DESTROY => {
+            with_app(|a| a.remember_window(hwnd));
+            shell::remove_tray(hwnd);
             PostQuitMessage(0);
             LRESULT(0)
         }
@@ -618,8 +677,14 @@ fn main() -> Result<()> {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let inst: HINSTANCE = GetModuleHandleW(None)?.into();
-        let class = w!("PlaitwaySpike");
-        RegisterClassExW(&WNDCLASSEXW { cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32, style: CS_HREDRAW | CS_VREDRAW, lpfnWndProc: Some(wndproc), hInstance: inst, hCursor: LoadCursorW(None, IDC_ARROW)?, lpszClassName: class, ..Default::default() });
+        let class = w!("PlaitwayUi");
+        // One copy per daemon pipe; a second one asks the first to show itself and leaves.
+        let pipe = std::env::var("PLAITWAY_PIPE").unwrap_or_else(|_| plaitway_core::DEFAULT_PIPE.to_string());
+        if !shell::claim(&format!("PlaitwayUi-{}", pipe.replace('\\', "_")), class) {
+            return Ok(());
+        }
+        let icon = shell::icon();
+        RegisterClassExW(&WNDCLASSEXW { cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32, style: CS_HREDRAW | CS_VREDRAW, lpfnWndProc: Some(wndproc), hInstance: inst, hCursor: LoadCursorW(None, IDC_ARROW)?, hIcon: icon, hIconSm: icon, lpszClassName: class, ..Default::default() });
         let hwnd = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, class, w!("Plaitway"), WS_OVERLAPPEDWINDOW & !WS_SYSMENU, // no WS_SYSMENU: DWM then draws no caption buttons of its own beside ours
 CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
 
@@ -644,19 +709,31 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let f_icons = gfx.load_font(&["Segoe Fluent Icons", "Segoe MDL2 Assets"], DWRITE_FONT_WEIGHT_NORMAL)?;
         // The session thread wakes the window with WM_APP whenever the daemon tells it something.
         let handle = hwnd.0 as isize;
-        let pipe = std::env::var("PLAITWAY_PIPE").unwrap_or_else(|_| plaitway_core::DEFAULT_PIPE.to_string());
         let session = Session::start(&pipe, move || {
             let _ = PostMessageW(Some(HWND(handle as *mut c_void)), WM_APP, WPARAM(0), LPARAM(0));
         });
         let view = session.view();
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false), scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
+        let store = Store::new(Store::default_dir());
+        let prefs = store.ui();
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false), store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
         let mut animate = BOOL(1);
         let _ = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut animate as *mut BOOL as *mut c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
-        with_app(|a| a.bay.set_reduced_motion(!animate.as_bool()));
-        let _ = ShowWindow(hwnd, SW_SHOW);
+        with_app(|a| {
+            a.bay.set_reduced_motion(!animate.as_bool());
+            a.ui.switches[0] = shell::startup_command().is_some();
+            a.ui.switches[1] = a.prefs.close_to_tray;
+        });
+        shell::add_tray(hwnd, icon);
+        let placed = with_app(|a| a.prefs.window).flatten().is_some_and(|p| shell::restore(hwnd, &p));
+        // `--hidden` (what the Run key starts) leaves the window in the notification area.
+        if std::env::args().any(|a| a == "--hidden") {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        } else if !placed {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+        }
         with_app(|a| redraw(hwnd, a));
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -666,6 +743,9 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
+
 
 
 
