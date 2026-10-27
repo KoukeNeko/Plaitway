@@ -3,7 +3,7 @@
 use std::{io, time::Duration};
 
 use hyper_util::rt::TokioIo;
-use tokio::net::windows::named_pipe::ClientOptions;
+mod pipe;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
@@ -32,15 +32,26 @@ pub fn validate_pipe(path: &str) -> Result<&str, String> {
 async fn open(path: &str) -> io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
     // A busy pipe means every instance is serving someone; the daemon makes a new one within a moment.
     for _ in 0..20 {
-        match ClientOptions::new().open(path) {
+        match pipe::open(path) {
             Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => tokio::time::sleep(Duration::from_millis(50)).await,
             r => return r,
         }
     }
-    ClientOptions::new().open(path)
+    pipe::open(path)
 }
 
 /// Connect to the daemon on `pipe` and return a ready client.
+/// The error text with its causes, since tonic's own message is only "transport error".
+fn chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = e.to_string();
+    let mut at = e.source();
+    while let Some(c) = at {
+        text = format!("{text}: {c}");
+        at = c.source();
+    }
+    text
+}
+
 pub async fn connect(pipe: &str) -> Result<DaemonServiceClient<Channel>, Box<dyn std::error::Error + Send + Sync>> {
     let path = validate_pipe(pipe)?.to_string();
     // The URI is never dialled; tonic needs one to build the channel.
@@ -49,7 +60,8 @@ pub async fn connect(pipe: &str) -> Result<DaemonServiceClient<Channel>, Box<dyn
             let path = path.clone();
             async move { Ok::<_, io::Error>(TokioIo::new(open(&path).await?)) }
         }))
-        .await?;
+        .await
+        .map_err(|e| chain(&e))?;
     Ok(DaemonServiceClient::new(channel))
 }
 
@@ -66,6 +78,8 @@ mod tests {
         }
     }
 }
+
+
 
 
 
