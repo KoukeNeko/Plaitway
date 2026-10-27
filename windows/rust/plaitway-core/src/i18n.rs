@@ -64,6 +64,11 @@ pub fn language() -> Language {
 /// English text and its Traditional Chinese, for what the catalogs do not have. `{0}`, `{1}` are filled by `tr_fmt`.
 const EXTRA: &[(&str, &str)] = &[
     ("Routing", "路由"),
+    ("Traffic", "流量"),
+    ("none", "無"),
+    ("None", "無"),
+    ("On", "開"),
+    ("Off", "關"),
     ("PROFILES", "設定檔"),
     ("Show Plaitway", "顯示 Plaitway"),
     ("Language", "語言"),
@@ -248,4 +253,5 @@ mod tests {
         }
     }
 }
+
 

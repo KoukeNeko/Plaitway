@@ -940,6 +940,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             with_app(|a| {
                 a.view = a.session.view();
                 a.bay.sync(&a.view.model);
+                a.ui.record_traffic(&a.view.model, std::time::Instant::now());
                 sync_editor(a);
                 redraw(hwnd, a);
             });
@@ -1146,6 +1147,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
 
 
 

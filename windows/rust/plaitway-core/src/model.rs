@@ -106,6 +106,9 @@ pub struct Tunnel {
     pub wanted: usize,
     /// Seconds since the epoch at which the tunnel came up, while connected.
     pub since: Option<i64>,
+    /// Bytes received and sent since the tunnel came up; zero while it is down.
+    pub rx: u64,
+    pub tx: u64,
     /// Live only while connected.
     pub requests: Vec<Request>,
     pub settings: Settings,
@@ -152,6 +155,8 @@ impl Tunnel {
             error: p.last_error.clone(),
             wanted: p.summary.as_ref().map_or(0, |s| s.routes.len()),
             since: p.status.as_ref().and_then(|s| s.connected_since.as_ref()).map(|t| t.seconds),
+            rx: p.status.as_ref().map_or(0, |s| s.rx_bytes),
+            tx: p.status.as_ref().map_or(0, |s| s.tx_bytes),
             requests,
             settings: p.settings.as_ref().map_or_else(Settings::default, |s| Settings {
                 auto_connect: s.auto_connect,
@@ -352,6 +357,7 @@ mod tests {
         assert_eq!(m.tunnels.len(), 2);
     }
 }
+
 
 
 

@@ -25,7 +25,8 @@ $btn = $t | Where-Object { $_.Type -eq 'Button' -and $_.Name -like 'Settings*' }
 Ok "there is a Settings button" ($null -ne $btn)
 $pat = $btn.El.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern); $pat.Invoke(); Start-Sleep 1; Start-Sleep 1
 $t = Tree
-Ok "after Invoke the Settings page is showing" ($t | Where-Object { $_.Name -eq 'Language' })
+Ok "after Invoke the Settings page is showing" ($t | Where-Object { $_.Name -like 'Language*' })
 Ok "its switches are switches or toggles" (($t | Where-Object { $_.Name -like 'Start with Windows*' }).Count -ge 1)
 $ui.Kill(); $fd.Kill()
+
 

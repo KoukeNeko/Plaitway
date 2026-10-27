@@ -2,7 +2,7 @@
 //! drawn; a click looks the region up, so drawing and hit-testing cannot drift apart.
 
 use windows::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
-use plaitway_core::{tr, tr_fmt, CredentialKind, Diagnostics, Level, Link, LogView, Standing, State, Tunnel, TunnelMode, View};
+use plaitway_core::{tr, tr_fmt, CredentialKind, Diagnostics, Level, Link, LogView, Model, Standing, State, Tunnel, TunnelMode, View};
 
 use crate::{
     bay::{hue, kind_name, Pal},
@@ -47,6 +47,29 @@ pub enum Act {
     CycleLanguage,
 }
 
+/// How fast a tunnel carries bytes, sampled each time the daemon reports its counters.
+#[derive(Default)]
+pub struct Traffic {
+    last: Option<(std::time::Instant, u64, u64)>,
+    /// Bytes per second, newest last.
+    pub down: std::collections::VecDeque<f32>,
+    pub up: std::collections::VecDeque<f32>,
+}
+
+/// Samples kept: about two minutes at the daemon's pace.
+const TRAFFIC_KEEP: usize = 120;
+
+/// "1.2 MB", "340 KB", "12 B".
+pub fn bytes(n: f64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let (mut v, mut u) = (n, 0);
+    while v >= 1000.0 && u < UNITS.len() - 1 {
+        v /= 1024.0;
+        u += 1;
+    }
+    if u == 0 || v >= 100.0 { format!("{:.0} {}", v, UNITS[u]) } else { format!("{:.1} {}", v, UNITS[u]) }
+}
+
 pub const PROFILE_TABS: [&str; 5] = ["Overview", "Routes", "Logs", "Configuration", "Settings"];
 pub const DIAG_TABS: [&str; 3] = ["Overview", "Journal", "Daemon log"];
 type R = (f32, f32, f32, f32);
@@ -67,6 +90,8 @@ pub struct Ui {
     pub confirm_delete: bool,
     /// What the keyboard is on, found again in each frame by what it does.
     pub focus: Option<Act>,
+    /// Rates by profile id.
+    pub traffic: std::collections::HashMap<String, Traffic>,
     /// The lowest y any card reached in the last draw, in the same logical pixels it was drawn at.
     pub bottom: f32,
 }
@@ -79,7 +104,7 @@ pub struct Fonts {
 
 impl Ui {
     pub fn new() -> Self {
-        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], language: None, hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, focus: None, bottom: 0.0 }
+        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], language: None, traffic: Default::default(), hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, focus: None, bottom: 0.0 }
     }
 
     pub fn clear(&mut self) {
@@ -105,6 +130,31 @@ impl Ui {
         let changed = h != self.hover;
         self.hover = h;
         changed
+    }
+
+    /// Note the counters of every connected tunnel; the rate is the change since the last note.
+    pub fn record_traffic(&mut self, m: &Model, now: std::time::Instant) {
+        self.traffic.retain(|id, _| m.tunnels.iter().any(|t| &t.id == id && t.connected()));
+        for t in m.tunnels.iter().filter(|t| t.connected()) {
+            let e = self.traffic.entry(t.id.clone()).or_default();
+            match e.last {
+                Some((at, rx, tx)) => {
+                    let dt = now.duration_since(at).as_secs_f32();
+                    if dt < 0.5 {
+                        continue;
+                    }
+                    // A counter that went back means the tunnel was restarted.
+                    e.down.push_back(t.rx.saturating_sub(rx) as f32 / dt);
+                    e.up.push_back(t.tx.saturating_sub(tx) as f32 / dt);
+                    while e.down.len() > TRAFFIC_KEEP {
+                        e.down.pop_front();
+                        e.up.pop_front();
+                    }
+                }
+                None => {}
+            }
+            e.last = Some((now, t.rx, t.tx));
+        }
     }
 
     /// Tab (or Shift+Tab) moves the keyboard to the next thing that can be pressed, in the order they were drawn.
@@ -381,6 +431,10 @@ impl Ui {
             g.text(f.text, 13.0 * s, (ox + w - 150.0) * s, (y + 52.0) * s, "Uptime", pal.muted);
         }
         self.bottom = self.bottom.max(y + 76.0);
+        let mut y = y + 90.0;
+        if t.connected() {
+            y = self.traffic_card(g, f, pal, t, c, s, ox, y, w);
+        }
         let join = |v: &[String]| if v.is_empty() { tr("none").into_owned() } else { v.join(", ") };
         let rows = [
             ("Protocol", kind_name(t).to_string()),
@@ -390,7 +444,40 @@ impl Ui {
             ("Priority", (i + 1).to_string()),
             ("Routes it holds", format!("{held} of {wanted}")),
         ];
-        self.rows(g, f, pal, s, ox, y + 90.0, w, &rows);
+        self.rows(g, f, pal, s, ox, y, w, &rows);
+    }
+
+    /// Two lines over the last couple of minutes: bytes in and bytes out, with the current rates.
+    #[allow(clippy::too_many_arguments)]
+    fn traffic_card(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, t: &Tunnel, c: [f32; 4], s: f32, ox: f32, y: f32, w: f32) -> f32 {
+        let h = 116.0;
+        g.rect(ox * s, y * s, w * s, h * s, 10.0 * s, pal.card);
+        g.outline(ox * s, y * s, w * s, h * s, 10.0 * s, 1.0, pal.line);
+        let empty = Traffic::default();
+        let tr_ = self.traffic.get(&t.id).unwrap_or(&empty);
+        let (down, up) = (tr_.down.back().copied().unwrap_or(0.0), tr_.up.back().copied().unwrap_or(0.0));
+        g.text(f.bold, 13.0 * s, (ox + 18.0) * s, (y + 20.0) * s, "Traffic", pal.ink);
+        let left = format!("↓ {}/s   {}", bytes(down as f64), bytes(t.rx as f64));
+        let right = format!("↑ {}/s   {}", bytes(up as f64), bytes(t.tx as f64));
+        g.text_fit(f.text, 13.0 * s, (ox + 120.0) * s, (y + 20.0) * s, &left, c, (w / 2.0 - 130.0) * s);
+        g.text_fit(f.text, 13.0 * s, (ox + w / 2.0 + 10.0) * s, (y + 20.0) * s, &right, pal.muted, (w / 2.0 - 30.0) * s);
+        // The chart: both lines share one scale, so which is larger can be seen.
+        let (cx, cy, cw, ch) = ((ox + 18.0) * s, (y + 38.0) * s, (w - 36.0) * s, (h - 54.0) * s);
+        g.rect(cx, cy + ch, cw, 1.0, 0.0, pal.line);
+        let top = tr_.down.iter().chain(tr_.up.iter()).copied().fold(1.0f32, f32::max);
+        for (series, color, width) in [(&tr_.up, pal.muted, 1.5), (&tr_.down, c, 2.0)] {
+            let n = series.len();
+            if n < 2 {
+                continue;
+            }
+            let pt = |i: usize| (cx + cw * (TRAFFIC_KEEP - n + i) as f32 / (TRAFFIC_KEEP - 1) as f32, cy + ch - ch * series[i] / top);
+            for i in 1..n {
+                let (a, b) = (pt(i - 1), pt(i));
+                g.line_flat(a.0, a.1, b.0, b.1, width * s, color);
+            }
+        }
+        self.bottom = self.bottom.max(y + h);
+        y + h + 14.0
     }
 
     /// The text of the profile in a native editor, with Save under it.
@@ -739,6 +826,63 @@ mod tests {
     }
 
     #[test]
+    fn byte_counts_read_naturally() {
+        assert_eq!(bytes(0.0), "0 B");
+        assert_eq!(bytes(999.0), "999 B");
+        assert_eq!(bytes(1536.0), "1.5 KB");
+        assert_eq!(bytes(5.0 * 1024.0 * 1024.0), "5.0 MB");
+        assert_eq!(bytes(340.0 * 1024.0 * 1024.0), "340 MB");
+    }
+
+    fn connected(id: &str, rx: u64, tx: u64) -> plaitway_core::Tunnel {
+        plaitway_core::Tunnel { id: id.into(), name: id.into(), enabled: true, state: State::Connected, rx, tx, ..Default::default() }
+    }
+
+    #[test]
+    fn a_rate_is_the_change_in_the_counter_over_the_time_between() {
+        let mut ui = Ui::new();
+        let t0 = std::time::Instant::now();
+        ui.record_traffic(&Model { tunnels: vec![connected("a", 1000, 100)] }, t0);
+        assert!(ui.traffic["a"].down.is_empty(), "one note has no rate yet");
+        ui.record_traffic(&Model { tunnels: vec![connected("a", 3000, 300)] }, t0 + std::time::Duration::from_secs(2));
+        assert_eq!(ui.traffic["a"].down.back(), Some(&1000.0));
+        assert_eq!(ui.traffic["a"].up.back(), Some(&100.0));
+        // Notes closer together than half a second are skipped, so a burst of updates does not make noise.
+        ui.record_traffic(&Model { tunnels: vec![connected("a", 9000, 900)] }, t0 + std::time::Duration::from_millis(2200));
+        assert_eq!(ui.traffic["a"].down.len(), 1);
+    }
+
+    #[test]
+    fn a_counter_that_went_back_is_a_restart_not_a_negative_rate() {
+        let mut ui = Ui::new();
+        let t0 = std::time::Instant::now();
+        ui.record_traffic(&Model { tunnels: vec![connected("a", 5000, 500)] }, t0);
+        ui.record_traffic(&Model { tunnels: vec![connected("a", 100, 10)] }, t0 + std::time::Duration::from_secs(1));
+        assert_eq!(ui.traffic["a"].down.back(), Some(&0.0));
+    }
+
+    #[test]
+    fn a_tunnel_that_goes_down_loses_its_history() {
+        let mut ui = Ui::new();
+        let t0 = std::time::Instant::now();
+        ui.record_traffic(&Model { tunnels: vec![connected("a", 1, 1)] }, t0);
+        let mut down = connected("a", 0, 0);
+        down.state = State::Disconnected;
+        ui.record_traffic(&Model { tunnels: vec![down] }, t0 + std::time::Duration::from_secs(1));
+        assert!(ui.traffic.is_empty());
+    }
+
+    #[test]
+    fn the_history_is_bounded() {
+        let mut ui = Ui::new();
+        let t0 = std::time::Instant::now();
+        for i in 0..400u64 {
+            ui.record_traffic(&Model { tunnels: vec![connected("a", i * 10, i)] }, t0 + std::time::Duration::from_secs(i));
+        }
+        assert_eq!(ui.traffic["a"].down.len(), TRAFFIC_KEEP);
+    }
+
+    #[test]
     fn uptime_reads_naturally() {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         assert_eq!(uptime(now - 8040).unwrap(), "2 h 14 min");
@@ -746,6 +890,7 @@ mod tests {
         assert!(uptime(now + 100).unwrap().ends_with(" s"));
     }
 }
+
 
 
 

@@ -121,3 +121,12 @@ A Cargo workspace with `plaitway-ui` (window, D3D11 renderer, pages) and `plaitw
 
 Checked end to end on this machine: the page fills from the daemon, Disconnect and Connect go through it and the lines follow, a drag sends the new order, killing the daemon shows "plaitwayd is not running" and starting it again restores the page. Logs and diagnostics are real too: the Logs tab and the daemon log follow `WatchLogs` (tail, then live lines), Diagnostics shows `GetDiagnostics` (network, owned routes, stale routes with Remove, journal) and has Resync. Not done: import, credentials, and everything in `AppCore` beyond the profile model (helper setup, settings store, editor model).
 
+
+### State at the end of the long run (`windows/rust`)
+Four crates: `plaitway-client` (gRPC over the pipe, with the access mask and owner check the daemon expects), `plaitway-core` (model, session, settings store, translations), `plaitway-fake` (a daemon that follows the proto, and `pwctl` to look at one), `plaitway-ui` (window, renderer, pages, text boxes, tray, accessibility).
+
+Done and checked against a real `plaitwayd -fake` and by driving the window (`windows/rust/scripts`): routing page, drag to reorder, every profile page, logs, diagnostics, import (dialog, drop, plus button), rename, delete, credentials, editing the profile text, profile settings, Settings page, tray and one running copy, start with Windows, window placement, scrolling, text cut with an ellipsis, traffic chart, keyboard focus ring, high contrast, rebuilding the graphics after a lost device, UI Automation for screen readers, Traditional Chinese with font fallback.
+
+Not done: installing or upgrading the helper (`HelperTrust` and the elevated launcher of `AppCore`; security sensitive, and testing it would touch the real service), the installer and removing the WinUI app, a run on a real Windows 10 machine, a real change of display scale or a move between screens of different scale, a screen reader session by a person, translations beyond zh-Hant (the catalogs have only that one), WireGuard profiles from a real provider (`wgcf`).
+
+Findings worth remembering: DirectComposition draws above every child window, so real controls must be owned top-level windows; GDI controls on a glass client area have no alpha; the real daemon refuses `GENERIC_READ|GENERIC_WRITE` on its pipe; `-fake` swaps the reconciler for one that never shadows a route, so ownership by priority can only be seen against a real one.
