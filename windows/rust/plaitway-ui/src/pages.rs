@@ -140,7 +140,13 @@ impl Ui {
     /// Apply a click. `Toggle` is returned to the caller, which owns the session.
     pub fn click(&mut self, x: f32, y: f32) -> Option<Act> {
         let act = self.at(x, y)?;
-        match &act {
+        self.apply(&act);
+        Some(act)
+    }
+
+    /// What pressing something does to the page itself; the rest is for the caller.
+    pub fn apply(&mut self, act: &Act) {
+        match act {
             Act::Go(p) => {
                 self.page = p.clone();
                 self.tab = 0;
@@ -154,9 +160,12 @@ impl Ui {
             Act::Switch(i) => self.switches[*i] = !self.switches[*i],
             Act::Toggle(_) | Act::Resync | Act::RemoveStale(_) | Act::Import | Act::Save(_) | Act::Submit(_) | Act::ProfileSwitch(..) | Act::Mode(..) => {}
         }
-        Some(act)
     }
 
+    /// Everything that can be pressed on the page, as drawn.
+    pub fn regions(&self) -> &[(R, Act)] {
+        &self.hits
+    }
     /// Left and right arrows walk the tabs of a page that has them.
     pub fn key(&mut self, vk: u32) -> bool {
         let n = match self.page {
@@ -725,6 +734,7 @@ mod tests {
         assert!(uptime(now + 100).unwrap().ends_with(" s"));
     }
 }
+
 
 
 

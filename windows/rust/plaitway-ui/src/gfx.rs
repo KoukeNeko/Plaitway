@@ -114,6 +114,8 @@ pub struct Gfx {
     _dcomp: IDCompositionDevice,
     _target: Option<IDCompositionTarget>,
     _visual: Option<IDCompositionVisual>,
+    /// The text drawn in this frame and where, for the accessibility tree: (x, y, width, height, text).
+    texts: Vec<(f32, f32, f32, f32, String)>,
     /// What `load_font` was asked for, to ask again after the device is rebuilt.
     font_specs: Vec<(Vec<String>, i32)>,
     dw: IDWriteFactory,
@@ -278,6 +280,7 @@ impl Gfx {
                 _target: Some(target),
                 _visual: Some(visual),
                 font_specs: Vec::new(),
+                texts: Vec::new(),
                 dw,
                 fonts: Vec::new(),
                 glyphs: HashMap::new(),
@@ -449,7 +452,16 @@ impl Gfx {
             }
             pen += a;
         }
+        // Icons from the symbol fonts have no words to read out.
+        if !text.is_empty() && !text.chars().next().is_some_and(|c| ('\u{E000}'..='\u{F8FF}').contains(&c)) {
+            self.texts.push((x, cy - size * 0.75, pen - x, size * 1.5, text.to_string()));
+        }
         pen - x
+    }
+
+    /// The text drawn since the last call.
+    pub fn take_texts(&mut self) -> Vec<(f32, f32, f32, f32, String)> {
+        std::mem::take(&mut self.texts)
     }
 
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, col: [f32; 4]) {
@@ -584,3 +596,4 @@ mod tests {
         assert!(!is_device_lost(DXGI_ERROR_WAS_STILL_DRAWING));
     }
 }
+

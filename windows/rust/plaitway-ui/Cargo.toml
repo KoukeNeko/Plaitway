@@ -5,6 +5,8 @@ edition = "2021"
 description = "Phase 0: Mica, composition swap chain and custom caption in one window"
 
 [dependencies]
+accesskit = "0.25.2"
+accesskit_windows = "0.35.2"
 plaitway-core = { path = "../plaitway-core" }
 
 [dependencies.windows]

@@ -11,6 +11,17 @@ use plaitway_core::{Model, Standing, State, Tunnel};
 use crate::gfx::Gfx;
 
 pub const COMPACT_BELOW: f32 = 1000.0;
+
+/// A rectangle in client pixels.
+pub type Rect = (f32, f32, f32, f32);
+
+/// Something on the Routing page that can be pressed.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Item {
+    Route(usize),
+    /// Connect or disconnect the tunnel with this id.
+    Toggle(String),
+}
 const ROUTE_H: f32 = 56.0;
 const ROUTE_GAP: f32 = 16.0;
 const ROUTE_W: f32 = 260.0;
@@ -256,6 +267,19 @@ impl Bay {
         let changed = sel != self.sel;
         self.sel = sel;
         changed
+    }
+
+    /// What can be pressed on the page, in pixels, for the accessibility tree.
+    pub fn items(&self, m: &Model, ox: f32, oy: f32, w: f32, s: f32) -> Vec<(Rect, String, Item)> {
+        let routes = m.routes();
+        let l = self.layout(w, routes.len(), m.tunnels.len());
+        let at = |r: (f32, f32, f32, f32)| (ox * s + r.0 * s, oy * s + r.1 * s, r.2 * s, r.3 * s);
+        let mut out: Vec<(Rect, String, Item)> = routes.iter().enumerate().map(|(d, row)| (at(l.routes[d]), why(m, row), Item::Route(d))).collect();
+        for (k, &t) in self.order(m.tunnels.len()).iter().enumerate() {
+            let tun = &m.tunnels[t];
+            out.push((at(l.btns[k]), format!("{} {}", if tun.enabled { "Disconnect" } else { "Connect" }, tun.name), Item::Toggle(tun.id.clone())));
+        }
+        out
     }
 
     /// Height of the page below its origin, for scrolling.
@@ -650,6 +674,7 @@ mod tests {
         assert!(b.animating());
     }
 }
+
 
 
 

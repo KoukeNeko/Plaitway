@@ -2,6 +2,7 @@
 //! a transparent composition swap chain, and a caption drawn by us that keeps Snap Layouts.
 #![windows_subsystem = "windows"]
 
+mod a11y;
 mod bay;
 mod edit;
 mod gfx;
@@ -10,6 +11,7 @@ mod shell;
 
 use std::{cell::RefCell, ffi::c_void};
 
+use accesskit_windows::SubclassingAdapter;
 use bay::{Bay, Out, Pal};
 use edit::{Field, Hosted};
 use plaitway_core::{Link, Session, Store, UiPrefs, View};
@@ -143,6 +145,10 @@ struct App {
     focus_pending: Option<Field>,
     /// The child window the swap chain is attached to; the text boxes sit above it.
     canvas: HWND,
+    /// UI Automation for screen readers; it builds the tree only while one is attached.
+    access: Option<SubclassingAdapter>,
+    access_targets: std::collections::HashMap<accesskit::NodeId, a11y::Target>,
+    access_queue: std::sync::Arc<std::sync::Mutex<Vec<accesskit::NodeId>>>,
     store: Store,
     prefs: UiPrefs,
     /// Set by the tray menu: the next close really closes.
@@ -353,6 +359,27 @@ impl App {
         self.hosted.apply(&want, (96.0 * s).round() as u32, dark);
         if let Some(f) = self.focus_pending.take() {
             self.hosted.focus(f);
+        }
+        // What a screen reader gets.
+        let texts = self.gfx.take_texts();
+        if let Some(ad) = &mut self.access {
+            let routing = self.ui.page == Page::Routing && matches!(self.view.link, Link::Online) && !self.view.model.tunnels.is_empty();
+            let items = if routing { self.bay.items(&self.view.model, ox, top, cw, s) } else { vec![] };
+            let title = "Plaitway";
+            let (regions, focus) = (self.ui.regions(), self.ui.focus.as_ref());
+            let mut targets = None;
+            let events = ad.update_if_active(|| {
+                let frame = a11y::Frame { title, size: (w, h), texts: &texts, regions, items: &items, edits: &want, focus, viewport: (cx, cap, w - cx, h - cap) };
+                let (update, t) = a11y::build(&frame);
+                targets = Some(t);
+                update
+            });
+            if let Some(t) = targets {
+                self.access_targets = t;
+            }
+            if let Some(events) = events {
+                events.raise();
+            }
         }
         shown
     }
@@ -826,6 +853,32 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             with_app(|a| scroll_by(hwnd, a, -delta * 56.0));
             LRESULT(0)
         }
+        // A screen reader asked for something to be pressed, or attached and wants a tree.
+        a11y::WM_ACCESS_ACTIVE => {
+            with_app(|a| redraw(hwnd, a));
+            LRESULT(0)
+        }
+        a11y::WM_ACCESS_ACTION => {
+            with_app(|a| {
+                let ids: Vec<_> = std::mem::take(&mut *a.access_queue.lock().unwrap());
+                for id in ids {
+                    match a.access_targets.get(&id).cloned() {
+                        Some(a11y::Target::Act(act)) => {
+                            a.ui.apply(&act);
+                            do_act(hwnd, a, act);
+                        }
+                        Some(a11y::Target::Route(d)) => {
+                            a.bay.sel = d;
+                            redraw(hwnd, a);
+                        }
+                        Some(a11y::Target::Toggle(id)) => do_act(hwnd, a, Act::Toggle(id)),
+                        Some(a11y::Target::Field(f)) => a.hosted.focus(f),
+                        None => {}
+                    }
+                }
+            });
+            LRESULT(0)
+        }
         // Sent by a test: rebuild the graphics the way a lost device does.
         WM_APP_LOSE_DEVICE => {
             with_app(|a| {
@@ -1002,6 +1055,10 @@ fn main() -> Result<()> {
         let hwnd = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, class, w!("Plaitway"), WS_OVERLAPPEDWINDOW & !WS_SYSMENU, // no WS_SYSMENU: DWM then draws no caption buttons of its own beside ours
 CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
 
+        // Before the window is shown for the first time, as the adapter requires.
+        let access_queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let access = SubclassingAdapter::new(hwnd, a11y::Activate(hwnd.0 as isize), a11y::Actions { hwnd: hwnd.0 as isize, queue: access_queue.clone() });
+
         let scale = GetDpiForWindow(hwnd) as f32 / 96.0;
         let _ = SetWindowPos(hwnd, None, 0, 0, (1280.0 * scale) as i32, (800.0 * scale) as i32, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         let (w, h) = client_size(hwnd);
@@ -1032,7 +1089,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let view = session.view();
         let store = Store::new(Store::default_dir());
         let prefs = store.ui();
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false, None), canvas, hosted: Hosted::new(hwnd), loaded: None, dirty: false, programmatic: false, focus_pending: None, store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false, None), canvas, access: Some(access), access_targets: Default::default(), access_queue, hosted: Hosted::new(hwnd), loaded: None, dirty: false, programmatic: false, focus_pending: None, store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
@@ -1061,6 +1118,8 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
 
 
 
