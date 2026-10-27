@@ -75,15 +75,21 @@ fn update(s: &Mutex<View>, wake: &Wake, f: impl FnOnce(&mut View)) {
     wake();
 }
 
+/// What was on screen can no longer be trusted once the daemon is gone.
+fn offline(v: &mut View, why: String) {
+    v.link = Link::Offline(why);
+    v.model = Model::default();
+}
+
 async fn run(pipe: String, s: Arc<Mutex<View>>, wake: Wake, mut cmds: mpsc::UnboundedReceiver<Cmd>) {
     loop {
         update(&s, &wake, |v| v.link = Link::Connecting);
         match connect(&pipe).await {
             Ok(client) => {
                 let end = serve(client, &s, &wake, &mut cmds).await;
-                update(&s, &wake, |v| v.link = Link::Offline(end));
+                update(&s, &wake, |v| offline(v, end));
             }
-            Err(e) => update(&s, &wake, |v| v.link = Link::Offline(e.to_string())),
+            Err(e) => update(&s, &wake, |v| offline(v, e.to_string())),
         }
         // Commands sent while offline would act on a state the user can no longer see.
         while cmds.try_recv().is_ok() {}
@@ -119,4 +125,5 @@ async fn serve(mut client: plaitway_client::DaemonServiceClient<plaitway_client:
         }
     }
 }
+
 

@@ -115,3 +115,8 @@ A Cargo workspace with `plaitway-ui` (window, D3D11 renderer, pages) and `plaitw
 | 2 Client | generated from `proto/plaitway/v1/plaitway.proto` with a vendored `protoc`; a call, a failing call, a stream and a refused remote pipe, all over a real named pipe against an in-process server | 4 tests |
 | 3 Pages | navigation, profile tabs (Overview, Routes, Logs, Configuration, Settings), Diagnostics, Settings with switches, on fake data | 4 tests on navigation; screenshots |
 | Not done | the UI does not use the client yet (no `plaitwayd` here: Go is not installed); `plaitway-core` port of `AppCore`; hosted editor and password field, tray, file dialog, empty and setup pages, scrolling, text trimming, accessibility (UIA), high contrast, localisation, a real Windows 10 run | |
+
+### The UI on the daemon
+`plaitway-fake` is a daemon that follows the proto (lowest priority number wins a prefix, the others are shadowed) and serves it on a named pipe. `plaitway-core` holds the model (`Model::routes()` groups what connected profiles ask for) and a session thread that watches profiles, runs commands and reconnects every second. `plaitway-ui` draws that model; it never decides who holds a route. Run it with `target\release\fake-daemon.exe \\.\pipe\plaitway-demo` and `PLAITWAY_PIPE=\\.\pipe\plaitway-demo target\release\plaitway-ui.exe`.
+
+Checked end to end on this machine: the page fills from the daemon, Disconnect and Connect go through it and the lines follow, a drag sends the new order, killing the daemon shows "plaitwayd is not running" and starting it again restores the page. Not done: the log stream, diagnostics, import, credentials, and everything in `AppCore` beyond the profile model (helper setup, settings store, editor model).
