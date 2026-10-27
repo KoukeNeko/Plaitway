@@ -112,8 +112,10 @@ pub struct Gfx {
     blend: ID3D11BlendState,
     raster: ID3D11RasterizerState,
     _dcomp: IDCompositionDevice,
-    _target: IDCompositionTarget,
-    _visual: IDCompositionVisual,
+    _target: Option<IDCompositionTarget>,
+    _visual: Option<IDCompositionVisual>,
+    /// What `load_font` was asked for, to ask again after the device is rebuilt.
+    font_specs: Vec<(Vec<String>, i32)>,
     dw: IDWriteFactory,
     fonts: Vec<Font>,
     glyphs: HashMap<(usize, u16, u32), Glyph>,
@@ -273,8 +275,9 @@ impl Gfx {
                 blend: blend.unwrap(),
                 raster: raster.unwrap(),
                 _dcomp: dcomp,
-                _target: target,
-                _visual: visual,
+                _target: Some(target),
+                _visual: Some(visual),
+                font_specs: Vec::new(),
                 dw,
                 fonts: Vec::new(),
                 glyphs: HashMap::new(),
@@ -314,8 +317,26 @@ impl Gfx {
         self.shelf = (1, 1, 0);
     }
 
+    /// Build the device, the swap chain and every cache again, after the graphics adapter was reset or
+    /// removed. Fonts keep their numbers.
+    pub fn recover(&mut self, canvas: HWND) -> Result<()> {
+        let specs = std::mem::take(&mut self.font_specs);
+        let (w, h) = self.size;
+        // The window can have one composition target at a time: let go of the old one first.
+        self._target = None;
+        self._visual = None;
+        self.rtv = None;
+        *self = Gfx::new(canvas, w, h)?;
+        for (families, weight) in specs {
+            let names: Vec<&str> = families.iter().map(String::as_str).collect();
+            self.load_font(&names, DWRITE_FONT_WEIGHT(weight))?;
+        }
+        Ok(())
+    }
+
     /// First installed family of `families`, at `weight`. Returns its index for `text`.
     pub fn load_font(&mut self, families: &[&str], weight: DWRITE_FONT_WEIGHT) -> Result<usize> {
+        self.font_specs.push((families.iter().map(|f| f.to_string()).collect(), weight.0));
         unsafe {
             let mut coll = None;
             self.dw.GetSystemFontCollection(&mut coll, false)?;
@@ -542,3 +563,24 @@ impl Gfx {
 }
 
 
+
+/// The adapter was reset or taken away (a driver update, a GPU switch, a remote session): the device and
+/// everything made with it have to be made again.
+pub fn is_device_lost(code: HRESULT) -> bool {
+    code == DXGI_ERROR_DEVICE_REMOVED || code == DXGI_ERROR_DEVICE_RESET || code == DXGI_ERROR_DRIVER_INTERNAL_ERROR
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_removed_or_reset_device_is_lost_and_other_errors_are_not() {
+        assert!(is_device_lost(DXGI_ERROR_DEVICE_REMOVED));
+        assert!(is_device_lost(DXGI_ERROR_DEVICE_RESET));
+        assert!(is_device_lost(DXGI_ERROR_DRIVER_INTERNAL_ERROR));
+        assert!(!is_device_lost(E_FAIL));
+        assert!(!is_device_lost(S_OK));
+        assert!(!is_device_lost(DXGI_ERROR_WAS_STILL_DRAWING));
+    }
+}

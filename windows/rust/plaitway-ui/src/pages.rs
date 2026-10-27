@@ -61,6 +61,8 @@ pub struct Ui {
     pub renaming: bool,
     /// The delete button was pressed once and asks again.
     pub confirm_delete: bool,
+    /// What the keyboard is on, found again in each frame by what it does.
+    pub focus: Option<Act>,
     /// The lowest y any card reached in the last draw, in the same logical pixels it was drawn at.
     pub bottom: f32,
 }
@@ -73,7 +75,7 @@ pub struct Fonts {
 
 impl Ui {
     pub fn new() -> Self {
-        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, bottom: 0.0 }
+        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, focus: None, bottom: 0.0 }
     }
 
     pub fn clear(&mut self) {
@@ -99,6 +101,40 @@ impl Ui {
         let changed = h != self.hover;
         self.hover = h;
         changed
+    }
+
+    /// Tab (or Shift+Tab) moves the keyboard to the next thing that can be pressed, in the order they were drawn.
+    pub fn focus_move(&mut self, back: bool) {
+        let mut acts: Vec<Act> = Vec::new();
+        for (_, a) in &self.hits {
+            if !acts.contains(a) {
+                acts.push(a.clone());
+            }
+        }
+        if acts.is_empty() {
+            self.focus = None;
+            return;
+        }
+        let at = self.focus.as_ref().and_then(|f| acts.iter().position(|a| a == f));
+        let next = match (at, back) {
+            (None, false) => 0,
+            (None, true) => acts.len() - 1,
+            (Some(i), false) => (i + 1) % acts.len(),
+            (Some(i), true) => (i + acts.len() - 1) % acts.len(),
+        };
+        self.focus = Some(acts[next].clone());
+    }
+
+    /// Where the keyboard is, if what it was on is still on the page.
+    pub fn focus_rect(&self) -> Option<R> {
+        let f = self.focus.as_ref()?;
+        self.hits.iter().find(|(_, a)| a == f).map(|(r, _)| *r)
+    }
+
+    /// Enter or Space on what the keyboard is on.
+    pub fn activate(&mut self) -> Option<Act> {
+        let r = self.focus_rect()?;
+        self.click(r.0 + r.2 / 2.0, r.1 + r.3 / 2.0)
     }
 
     /// Apply a click. `Toggle` is returned to the caller, which owns the session.
@@ -650,6 +686,38 @@ mod tests {
     }
 
     #[test]
+    fn tab_walks_the_things_that_can_be_pressed_and_wraps() {
+        let mut ui = Ui::new();
+        ui.region((0.0, 0.0, 10.0, 10.0), Act::Go(Page::Settings));
+        ui.region((20.0, 0.0, 10.0, 10.0), Act::Tab(1));
+        ui.region((40.0, 0.0, 10.0, 10.0), Act::Resync);
+        ui.focus_move(false);
+        assert_eq!(ui.focus, Some(Act::Go(Page::Settings)));
+        ui.focus_move(false);
+        ui.focus_move(false);
+        assert_eq!(ui.focus, Some(Act::Resync));
+        ui.focus_move(false);
+        assert_eq!(ui.focus, Some(Act::Go(Page::Settings)), "wraps round");
+        ui.focus_move(true);
+        assert_eq!(ui.focus, Some(Act::Resync), "Shift+Tab goes back, and wraps the other way");
+    }
+
+    #[test]
+    fn enter_presses_what_the_keyboard_is_on() {
+        let mut ui = Ui::new();
+        ui.region((0.0, 0.0, 10.0, 10.0), Act::Go(Page::Diagnostics));
+        assert_eq!(ui.activate(), None, "nothing is focused yet");
+        ui.focus_move(false);
+        assert_eq!(ui.focus_rect(), Some((0.0, 0.0, 10.0, 10.0)));
+        assert_eq!(ui.activate(), Some(Act::Go(Page::Diagnostics)));
+        assert_eq!(ui.page, Page::Diagnostics);
+        ui.clear();
+        assert_eq!(ui.focus_rect(), None, "a page without it has nowhere to draw the ring");
+        ui.focus_move(false);
+        assert_eq!(ui.focus, None);
+    }
+
+    #[test]
     fn uptime_reads_naturally() {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         assert_eq!(uptime(now - 8040).unwrap(), "2 h 14 min");
@@ -657,6 +725,7 @@ mod tests {
         assert!(uptime(now + 100).unwrap().ends_with(" s"));
     }
 }
+
 
 
 

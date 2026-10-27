@@ -28,6 +28,7 @@ use windows::{
             SystemInformation::OSVERSIONINFOW,
         },
         UI::{
+            Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW},
             Controls::MARGINS,
             HiDpi::*,
             Input::KeyboardAndMouse::*,
@@ -42,6 +43,7 @@ const BUTTON_W: f32 = 46.0;
 const SIDEBAR_W: f32 = 248.0;
 const MICA_BUILD: u32 = 22621;
 const WM_MOUSELEAVE: u32 = 0x02A3;
+const WM_APP_LOSE_DEVICE: u32 = WM_APP + 9;
 /// Notifications of an EDIT control.
 const EN_KILLFOCUS: u32 = 0x0200;
 const EN_CHANGE: u32 = 0x0300;
@@ -56,6 +58,8 @@ enum Hot {
 
 struct Theme {
     dark: bool,
+    /// Windows is in a high contrast theme: the colours are the ones the user chose, and nothing is translucent.
+    hc: bool,
     ink: [f32; 4],
     muted: [f32; 4],
     line: [f32; 4],
@@ -71,10 +75,26 @@ fn rgba(hex: u32, a: f32) -> [f32; 4] {
 
 fn theme(dark: bool) -> Theme {
     if dark {
-        Theme { dark, ink: rgba(0xEEF3F5, 1.0), muted: rgba(0xA3B0B7, 1.0), line: rgba(0xFFFFFF, 0.12), surface: rgba(0xFFFFFF, 0.055), selected: rgba(0xFFFFFF, 0.11), hover: rgba(0xFFFFFF, 0.08), solid: rgba(0x202427, 1.0) }
+        Theme { dark, hc: false, ink: rgba(0xEEF3F5, 1.0), muted: rgba(0xA3B0B7, 1.0), line: rgba(0xFFFFFF, 0.12), surface: rgba(0xFFFFFF, 0.055), selected: rgba(0xFFFFFF, 0.11), hover: rgba(0xFFFFFF, 0.08), solid: rgba(0x202427, 1.0) }
     } else {
-        Theme { dark, ink: rgba(0x16222A, 1.0), muted: rgba(0x5B6A72, 1.0), line: rgba(0x16222A, 0.12), surface: rgba(0xFFFFFF, 0.68), selected: rgba(0xFFFFFF, 0.75), hover: rgba(0x16222A, 0.06), solid: rgba(0xE9EEF0, 1.0) }
+        Theme { dark, hc: false, ink: rgba(0x16222A, 1.0), muted: rgba(0x5B6A72, 1.0), line: rgba(0x16222A, 0.12), surface: rgba(0xFFFFFF, 0.68), selected: rgba(0xFFFFFF, 0.75), hover: rgba(0x16222A, 0.06), solid: rgba(0xE9EEF0, 1.0) }
     }
+}
+
+/// The colours of the high contrast theme, when one is on.
+fn high_contrast() -> Option<Theme> {
+    let mut hc = HIGHCONTRASTW { cbSize: std::mem::size_of::<HIGHCONTRASTW>() as u32, ..Default::default() };
+    let on = unsafe { SystemParametersInfoW(SPI_GETHIGHCONTRAST, hc.cbSize, Some(&mut hc as *mut HIGHCONTRASTW as *mut c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok() } && hc.dwFlags.0 & HCF_HIGHCONTRASTON.0 != 0;
+    // PLAITWAY_HC=1 draws the high contrast theme with the colours Windows has now, to look at it.
+    if !on && std::env::var_os("PLAITWAY_HC").is_none() {
+        return None;
+    }
+    let sys = |i: SYS_COLOR_INDEX| {
+        let c = unsafe { GetSysColor(i) };
+        [(c & 255) as f32 / 255.0, ((c >> 8) & 255) as f32 / 255.0, ((c >> 16) & 255) as f32 / 255.0, 1.0]
+    };
+    let (text, window, highlight) = (sys(COLOR_WINDOWTEXT), sys(COLOR_WINDOW), sys(COLOR_HIGHLIGHT));
+    Some(Theme { dark: window[0] + window[1] + window[2] < 1.5, hc: true, ink: text, muted: text, line: text, surface: window, selected: highlight, hover: highlight, solid: window })
 }
 
 fn apps_use_dark() -> bool {
@@ -163,7 +183,7 @@ impl App {
     }
 
     fn apply_theme(&mut self, hwnd: HWND) {
-        self.theme = theme(apps_use_dark());
+        self.theme = high_contrast().unwrap_or_else(|| theme(apps_use_dark()));
         set_attr(hwnd, 20, self.theme.dark as i32); // DWMWA_USE_IMMERSIVE_DARK_MODE
     }
 
@@ -176,6 +196,10 @@ impl App {
         let maximized = unsafe { IsZoomed(hwnd).as_bool() };
         let cap = CAPTION_H * s;
 
+        // High contrast: an opaque page in the chosen colours, over whatever the backdrop is.
+        if t.hc {
+            g.rect(0.0, 0.0, w, h, 0.0, t.solid);
+        }
         // Title bar: icon, name, caption buttons.
         g.rect(14.0 * s, (cap - 14.0 * s) / 2.0, 14.0 * s, 14.0 * s, 4.0 * s, rgba(0x0A9B94, 1.0));
         g.text(self.f_text, 12.0 * s, 36.0 * s, cap / 2.0, "Plaitway", ink);
@@ -260,7 +284,7 @@ impl App {
         g.rect(cx, cy0, w - cx + 20.0 * s, h - cy0 + 20.0 * s, 10.0 * s, t.surface);
         g.outline(cx, cy0, w - cx + 20.0 * s, h - cy0 + 20.0 * s, 10.0 * s, 1.0, line);
 
-        let pal = Pal { dark: t.dark, ink, muted, line, card: if t.dark { rgba(0xFFFFFF, 0.07) } else { rgba(0xFFFFFF, 0.9) } };
+        let pal = Pal { dark: t.dark, ink, muted, line, card: if t.hc { t.solid } else if t.dark { rgba(0xFFFFFF, 0.07) } else { rgba(0xFFFFFF, 0.9) } };
         let (ox, oy, cw) = content(w, s);
         self.bay.compact = compact;
         if self.scroll_key != (self.ui.page.clone(), self.ui.tab) {
@@ -303,9 +327,23 @@ impl App {
         if let Some(e) = &self.view.error {
             g.text(self.f_text, 13.0 * s, ox * s, h - 24.0 * s, e, rgba(0xFF8DB4, 1.0));
         }
+        // The ring of the keyboard, over everything else.
+        if let Some((fx, fy, fw, fh)) = self.ui.focus_rect() {
+            self.gfx.outline(fx - 2.0 * s, fy - 2.0 * s, fw + 4.0 * s, fh + 4.0 * s, 8.0 * s, 2.0 * s, ink);
+        }
+
         self.frames += 1;
         let clear = if self.mica { [0.0; 4] } else { self.theme.solid };
-        let shown = self.gfx.render(clear);
+        let mut shown = self.gfx.render(clear);
+        if let Err(e) = &shown {
+            // The graphics adapter went away: build everything again and draw once more.
+            if gfx::is_device_lost(e.code()) {
+                shown = self.gfx.recover(self.canvas);
+                unsafe {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+            }
+        }
 
         // The real text boxes go where the pages said, as long as that is inside the content.
         let (dark, text_color) = (self.theme.dark, self.theme.ink);
@@ -788,11 +826,30 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             with_app(|a| scroll_by(hwnd, a, -delta * 56.0));
             LRESULT(0)
         }
+        // Sent by a test: rebuild the graphics the way a lost device does.
+        WM_APP_LOSE_DEVICE => {
+            with_app(|a| {
+                let _ = a.gfx.recover(a.canvas);
+                redraw(hwnd, a);
+            });
+            LRESULT(0)
+        }
         WM_KEYDOWN => {
             with_app(|a| {
                 let vk = wparam.0 as u32;
                 let page = (a.gfx.size.1 as f32 / a.scale) * 0.8;
+                let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
+                // Tab and Shift+Tab move the keyboard over the buttons; Enter and Space press the one it is on.
                 match vk {
+                    0x09 => {
+                        a.ui.focus_move(shift);
+                        redraw(hwnd, a);
+                    }
+                    0x0D | 0x20 if a.ui.focus.is_some() => {
+                        if let Some(act) = a.ui.activate() {
+                            do_act(hwnd, a, act);
+                        }
+                    }
                     0x21 => scroll_by(hwnd, a, -page),
                     0x22 => scroll_by(hwnd, a, page),
                     _ => {}
@@ -1004,6 +1061,13 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
+
+
+
+
+
 
 
 
