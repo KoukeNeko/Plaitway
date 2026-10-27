@@ -24,6 +24,7 @@ struct Inst { float4 rect : RECT; float4 col : COLOR; float4 uv : UV; float4 p :
 struct Out {
     float4 pos : SV_Position; float2 loc : LOC; float2 uv : TEXCOORD;
     nointerpolation float4 col : COLOR; nointerpolation float4 p : PARAMS; nointerpolation float2 half_size : HALF;
+    nointerpolation float4 seg : SEG;
 };
 Out vs(uint vid : SV_VertexID, Inst i) {
     float2 c = float2(vid & 1, vid >> 1);
@@ -34,13 +35,27 @@ Out vs(uint vid : SV_VertexID, Inst i) {
     o.half_size = i.rect.zw * 0.5;
     o.uv = lerp(i.uv.xy, i.uv.zw, c);
     o.col = i.col; o.p = i.p;
+    float2 mid = i.rect.xy + i.rect.zw * 0.5;
+    o.seg = float4(i.uv.xy - mid, i.uv.zw - mid);
     return o;
 }
 Texture2D atlas : register(t0);
 SamplerState smp : register(s0);
 float4 ps(Out i) : SV_Target {
     float a;
-    if (i.p.y > 0.5) {
+    if (i.p.y > 1.5) {
+        float2 pa = i.loc - i.seg.xy, ba = i.seg.zw - i.seg.xy;
+        if (i.p.z > 0) {
+            // Flat ends whose edge coverage adds up to 1 across a joint, so a translucent polyline has no beads.
+            float len = max(length(ba), 1e-4);
+            float u = dot(pa, ba) / len;
+            float d = abs(pa.x * ba.y - pa.y * ba.x) / len - i.p.x * 0.5;
+            a = saturate(0.5 - d) * saturate(u + 0.5) * saturate(len - u + 0.5);
+        } else {
+            float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0, 1);
+            a = saturate(0.5 - (length(pa - ba * t) - i.p.x * 0.5));
+        }
+    } else if (i.p.y > 0.5) {
         a = atlas.Sample(smp, i.uv).r;
     } else {
         float2 q = abs(i.loc) - i.half_size + i.p.x;
@@ -107,7 +122,7 @@ pub struct Gfx {
     inst: Vec<Inst>,
 }
 
-const MAX_INST: usize = 4096;
+const MAX_INST: usize = 8192;
 
 fn compile(entry: PCSTR, target: PCSTR) -> Result<ID3DBlob> {
     let mut blob = None;
@@ -419,6 +434,22 @@ impl Gfx {
 
     pub fn outline(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, width: f32, col: [f32; 4]) {
         self.push(Inst { rect: [x, y, w, h], col, uv: [0.0; 4], p: [radius, 0.0, width, 0.0] });
+    }
+
+    /// A line with round ends, `width` thick.
+    pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, col: [f32; 4]) {
+        self.segment(x0, y0, x1, y1, width, col, 0.0);
+    }
+
+    /// A line with flat ends, for joining into a polyline.
+    pub fn line_flat(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, col: [f32; 4]) {
+        self.segment(x0, y0, x1, y1, width, col, 1.0);
+    }
+
+    fn segment(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, width: f32, col: [f32; 4], flat: f32) {
+        let pad = width / 2.0 + 1.0;
+        let (lx, ly) = (x0.min(x1) - pad, y0.min(y1) - pad);
+        self.push(Inst { rect: [lx, ly, x0.max(x1) + pad - lx, y0.max(y1) + pad - ly], col, uv: [x0, y0, x1, y1], p: [width, 2.0, flat, 0.0] });
     }
 
     fn push(&mut self, i: Inst) {

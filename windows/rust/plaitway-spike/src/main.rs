@@ -2,10 +2,12 @@
 //! a transparent composition swap chain, and a caption drawn by us that keeps Snap Layouts.
 #![windows_subsystem = "windows"]
 
+mod bay;
 mod gfx;
 
 use std::{cell::RefCell, ffi::c_void};
 
+use bay::{Bay, Pal};
 use gfx::Gfx;
 use windows::{
     core::*,
@@ -22,6 +24,7 @@ const CAPTION_H: f32 = 32.0;
 const BUTTON_W: f32 = 46.0;
 const SIDEBAR_W: f32 = 248.0;
 const MICA_BUILD: u32 = 22621;
+const WM_MOUSELEAVE: u32 = 0x02A3;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Hot {
@@ -83,6 +86,8 @@ struct App {
     scale: f32,
     hot: Hot,
     tracking: bool,
+    client_tracking: bool,
+    bay: Bay,
     frames: u32,
     f_text: usize,
     f_bold: usize,
@@ -142,12 +147,18 @@ impl App {
         g.outline(8.0 * s, cap + 6.0 * s, (SIDEBAR_W - 18.0) * s, 40.0 * s, 6.0 * s, 1.0, line);
         g.text(self.f_text, 14.0 * s, 44.0 * s, cap + 26.0 * s, "Routing", ink);
         g.text(self.f_bold, 12.0 * s, 22.0 * s, cap + 78.0 * s, "PROFILES", muted);
-        let profiles = [("Home", "WireGuard · Holds 3 of 3", 0x0A9B94u32), ("Office", "OpenVPN · Holds 1 of 4", 0xD9680F), ("Lab", "WireGuard · Holds 1 of 2", 0xC0306B)];
-        for (i, (name, sub, c)) in profiles.iter().enumerate() {
+        for (i, (name, proto, light, dark)) in bay::PROFILES.iter().enumerate() {
             let cy = cap + (118.0 + i as f32 * 56.0) * s;
-            g.rect(22.0 * s, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, rgba(*c, 1.0));
+            let (held, wanted) = self.bay.holds(i);
+            let sub = if self.bay.on[i] { format!("{proto} · Holds {held} of {wanted}") } else { format!("{proto} · Not connected") };
+            let c = rgba(if t.dark { *dark } else { *light }, 1.0);
+            if self.bay.on[i] {
+                g.rect(22.0 * s, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, c);
+            } else {
+                g.outline(22.0 * s, cy - 6.0 * s, 12.0 * s, 12.0 * s, 6.0 * s, 2.0 * s, muted);
+            }
             g.text(self.f_text, 14.0 * s, 46.0 * s, cy - 8.0 * s, name, ink);
-            g.text(self.f_text, 12.0 * s, 46.0 * s, cy + 10.0 * s, sub, muted);
+            g.text(self.f_text, 12.0 * s, 46.0 * s, cy + 10.0 * s, &sub, muted);
         }
 
         // Content surface: a translucent layer over Mica. Its right and bottom corners are pushed off screen.
@@ -155,24 +166,9 @@ impl App {
         g.rect(cx, cy0, w - cx + 20.0 * s, h - cy0 + 20.0 * s, 10.0 * s, t.surface);
         g.outline(cx, cy0, w - cx + 20.0 * s, h - cy0 + 20.0 * s, 10.0 * s, 1.0, line);
 
-        let (px, mut y) = (cx + 32.0 * s, cy0 + 56.0 * s);
-        g.text(self.f_bold, 28.0 * s, px, y, "Phase 0 spike", ink);
-        y += 40.0 * s;
-        let backdrop = if self.mica { format!("Backdrop: Mica (build {})", self.build) } else { format!("Backdrop: solid colour, no Mica (build {})", self.build) };
-        let dpi = (96.0 * s).round() as u32;
-        let rows = [backdrop, format!("Scale: {}% ({} dpi)", (s * 100.0).round(), dpi), format!("Theme: {}", if t.dark { "dark" } else { "light" }), format!("Frames drawn since start: {}", self.frames + 1)];
-        for r in rows {
-            g.text(self.f_text, 14.0 * s, px, y, &r, muted);
-            y += 26.0 * s;
-        }
-        y += 18.0 * s;
-        for (i, (name, c)) in [("Home", 0x0A9B94u32), ("Office", 0xD9680F), ("Lab", 0xC0306B)].iter().enumerate() {
-            let x = px + i as f32 * 132.0 * s;
-            g.rect(x, y, 120.0 * s, 64.0 * s, 10.0 * s, rgba(*c, if t.dark { 0.22 } else { 0.14 }));
-            g.outline(x, y, 120.0 * s, 64.0 * s, 10.0 * s, 1.0, rgba(*c, 0.5));
-            g.text(self.f_bold, 14.0 * s, x + 14.0 * s, y + 22.0 * s, name, ink);
-            g.text(self.f_text, 12.0 * s, x + 14.0 * s, y + 44.0 * s, "Connected", muted);
-        }
+        let pal = Pal { dark: t.dark, ink, muted, line, card: if t.dark { rgba(0xFFFFFF, 0.07) } else { rgba(0xFFFFFF, 0.9) } };
+        let (ox, oy, cw) = (SIDEBAR_W + 32.0, CAPTION_H + 28.0, w / s - SIDEBAR_W - 64.0);
+        self.bay.draw(g, (self.f_text, self.f_bold), &pal, s, ox, oy, cw);
 
         self.frames += 1;
         let clear = if self.mica { [0.0; 4] } else { self.theme.solid };
@@ -280,14 +276,50 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_NCMOUSELEAVE | WM_MOUSEMOVE => {
+            let (mx, my) = ((lparam.0 & 0xffff) as i16 as f32, ((lparam.0 >> 16) & 0xffff) as i16 as f32);
+            let (cw, _) = client_size(hwnd);
             with_app(|a| {
-                a.tracking = false;
+                let mut dirty = false;
+                if msg == WM_NCMOUSELEAVE {
+                    a.tracking = false;
+                } else {
+                    if !a.client_tracking {
+                        let mut e = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                        let _ = TrackMouseEvent(&mut e);
+                        a.client_tracking = true;
+                    }
+                    let s = a.scale;
+                    dirty |= a.bay.mouse_move(mx / s - SIDEBAR_W - 32.0, my / s - CAPTION_H - 28.0, cw as f32 / s - SIDEBAR_W - 64.0);
+                }
                 if a.hot != Hot::None {
                     a.hot = Hot::None;
+                    dirty = true;
+                }
+                if dirty {
                     let _ = InvalidateRect(Some(hwnd), None, false);
                 }
             });
             DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_MOUSELEAVE => {
+            with_app(|a| {
+                a.client_tracking = false;
+                if a.bay.leave() {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            let (mx, my) = ((lparam.0 & 0xffff) as i16 as f32, ((lparam.0 >> 16) & 0xffff) as i16 as f32);
+            let (cw, _) = client_size(hwnd);
+            with_app(|a| {
+                let s = a.scale;
+                if a.bay.click(mx / s - SIDEBAR_W - 32.0, my / s - CAPTION_H - 28.0, cw as f32 / s - SIDEBAR_W - 64.0) {
+                    let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+            });
+            LRESULT(0)
         }
         // The default handler would draw its own caption buttons; the click is turned into the command here.
         WM_NCLBUTTONDOWN if matches!(wparam.0 as u32, HTMINBUTTON | HTMAXBUTTON | HTCLOSE) => LRESULT(0),
@@ -378,7 +410,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let f_text = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_NORMAL)?;
         let f_bold = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
         let f_icons = gfx.load_font(&["Segoe Fluent Icons", "Segoe MDL2 Assets"], DWRITE_FONT_WEIGHT_NORMAL)?;
-        let mut app = App { gfx, theme: theme(false), build, mica, scale, hot: Hot::None, tracking: false, frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), build, mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
