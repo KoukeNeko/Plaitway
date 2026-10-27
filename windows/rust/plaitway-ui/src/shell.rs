@@ -130,9 +130,10 @@ pub enum TrayChoice {
 pub fn tray_menu(hwnd: HWND) -> TrayChoice {
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return TrayChoice::Nothing };
-        let _ = AppendMenuW(menu, MF_STRING, CMD_SHOW, w!("Show Plaitway"));
+        let wide = |text: &str| -> Vec<u16> { plaitway_core::tr(text).encode_utf16().chain(Some(0)).collect() };
+        let _ = AppendMenuW(menu, MF_STRING, CMD_SHOW, PCWSTR(wide("Show Plaitway").as_ptr()));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING, CMD_QUIT, w!("Quit"));
+        let _ = AppendMenuW(menu, MF_STRING, CMD_QUIT, PCWSTR(wide("Quit").as_ptr()));
         let mut at = POINT::default();
         let _ = GetCursorPos(&mut at);
         // Without this the menu would not close when the user clicks elsewhere.
@@ -192,5 +193,6 @@ pub fn restore(hwnd: HWND, p: &plaitway_core::Placement) -> bool {
         SetWindowPlacement(hwnd, &wp).is_ok()
     }
 }
+
 
 

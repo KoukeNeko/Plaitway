@@ -2,7 +2,7 @@
 //! drawn; a click looks the region up, so drawing and hit-testing cannot drift apart.
 
 use windows::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
-use plaitway_core::{CredentialKind, Diagnostics, Level, Link, LogView, Standing, State, Tunnel, TunnelMode, View};
+use plaitway_core::{tr, tr_fmt, CredentialKind, Diagnostics, Level, Link, LogView, Standing, State, Tunnel, TunnelMode, View};
 
 use crate::{
     bay::{hue, kind_name, Pal},
@@ -43,6 +43,8 @@ pub enum Act {
     /// A switch of a profile: 0 connect at start, 1 keep the local network out of the tunnel.
     ProfileSwitch(String, u8),
     Mode(String, TunnelMode),
+    /// Move to the next language: the system's, English, Traditional Chinese.
+    CycleLanguage,
 }
 
 pub const PROFILE_TABS: [&str; 5] = ["Overview", "Routes", "Logs", "Configuration", "Settings"];
@@ -53,6 +55,8 @@ pub struct Ui {
     pub page: Page,
     pub tab: usize,
     pub switches: [bool; 8],
+    /// The language chosen in Settings; None follows Windows.
+    pub language: Option<plaitway_core::Lang>,
     hits: Vec<(R, Act)>,
     hover: Option<Act>,
     /// Where the text boxes go this frame, in client pixels.
@@ -75,7 +79,7 @@ pub struct Fonts {
 
 impl Ui {
     pub fn new() -> Self {
-        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, focus: None, bottom: 0.0 }
+        Ui { page: Page::Routing, tab: 0, switches: [true, true, false, true, true, false, true, false], language: None, hits: Vec::new(), hover: None, edits: Vec::new(), renaming: false, confirm_delete: false, focus: None, bottom: 0.0 }
     }
 
     pub fn clear(&mut self) {
@@ -158,7 +162,7 @@ impl Ui {
             Act::BeginRename => self.renaming = true,
             Act::Tab(t) => self.tab = *t,
             Act::Switch(i) => self.switches[*i] = !self.switches[*i],
-            Act::Toggle(_) | Act::Resync | Act::RemoveStale(_) | Act::Import | Act::Save(_) | Act::Submit(_) | Act::ProfileSwitch(..) | Act::Mode(..) => {}
+            Act::Toggle(_) | Act::Resync | Act::RemoveStale(_) | Act::Import | Act::Save(_) | Act::Submit(_) | Act::ProfileSwitch(..) | Act::Mode(..) | Act::CycleLanguage => {}
         }
     }
 
@@ -202,7 +206,7 @@ impl Ui {
     #[allow(clippy::too_many_arguments)]
     fn header(&self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, title: &str, sub: &str) {
         g.text(f.bold, 28.0 * s, ox * s, oy * s + 14.0 * s, title, pal.ink);
-        g.text_fit(f.text, 14.0 * s, ox * s, oy * s + 50.0 * s, sub, pal.muted, 640.0 * s);
+        g.text_fit(f.text, 14.0 * s, ox * s, oy * s + 50.0 * s, &tr(sub), pal.muted, 640.0 * s);
     }
 
     /// A row of tabs; returns the y just below it, in logical pixels.
@@ -310,7 +314,7 @@ impl Ui {
             let tw = g.text_fit(f.bold, 28.0 * s, ox * s, oy * s + 14.0 * s, &t.name, pal.ink, 520.0 * s);
             self.region((ox * s, (oy - 6.0) * s, tw, 40.0 * s), Act::BeginRename);
         }
-        g.text_fit(f.text, 14.0 * s, ox * s, oy * s + 50.0 * s, &format!("{} · priority {}", kind_name(t), i + 1), pal.muted, 520.0 * s);
+        g.text_fit(f.text, 14.0 * s, ox * s, oy * s + 50.0 * s, &tr_fmt("{0} · priority {1}", &[kind_name(t), &(i + 1).to_string()]), pal.muted, 520.0 * s);
         if self.confirm_delete {
             self.button(g, f, pal, s, ox + w - 84.0 - 92.0, oy + 6.0, 84.0, 34.0, "Cancel", Act::CancelDelete, false);
             self.button(g, f, pal, s, ox + w - 84.0, oy + 6.0, 84.0, 34.0, "Delete", Act::Delete(t.id.clone()), true);
@@ -325,7 +329,7 @@ impl Ui {
             0 => self.overview(g, f, pal, t, i, c, s, ox, y, w),
             1 => {
                 let lines: Vec<String> = t.requests.iter().map(|r| format!("{:<20}{}", r.prefix, standing_name(r.standing, r.shadowed_by.as_deref().and_then(|id| m.index(id)).map(|j| m.tunnels[j].name.as_str())))).collect();
-                let lines = if lines.is_empty() { vec!["Not connected, so nothing is asked for.".to_string()] } else { lines };
+                let lines = if lines.is_empty() { vec![tr("Not connected, so nothing is asked for.").into_owned()] } else { lines };
                 self.lines(g, f, pal, s, ox, y, w, &lines, true);
             }
             2 => self.log(g, f, pal, s, ox, y, w, h, view.log.as_ref().filter(|l| l.profile_id == t.id)),
@@ -365,11 +369,11 @@ impl Ui {
         }
         g.text(f.bold, 18.0 * s, (ox + 60.0) * s, (y + 28.0) * s, state_name(t.state), pal.ink);
         let sub = if t.connected() {
-            format!("Holds {held} of {wanted} routes")
+            tr_fmt("Holds {0} of {1} routes", &[&held.to_string(), &wanted.to_string()])
         } else if !t.error.is_empty() {
             t.error.clone()
         } else {
-            "No routes held".to_string()
+            tr("No routes held").into_owned()
         };
         g.text_fit(f.text, 13.0 * s, (ox + 60.0) * s, (y + 52.0) * s, &sub, pal.muted, (w - 60.0 - 170.0) * s);
         if let Some(up) = t.since.and_then(uptime) {
@@ -377,7 +381,7 @@ impl Ui {
             g.text(f.text, 13.0 * s, (ox + w - 150.0) * s, (y + 52.0) * s, "Uptime", pal.muted);
         }
         self.bottom = self.bottom.max(y + 76.0);
-        let join = |v: &[String]| if v.is_empty() { "none".to_string() } else { v.join(", ") };
+        let join = |v: &[String]| if v.is_empty() { tr("none").into_owned() } else { v.join(", ") };
         let rows = [
             ("Protocol", kind_name(t).to_string()),
             ("Endpoint", join(&t.summary.endpoints)),
@@ -466,8 +470,8 @@ impl Ui {
 
         let y = self.tabs(g, f, pal, s, ox, oy + 74.0, w, &DIAG_TABS, pal.ink);
         let daemon = match &view.link {
-            Link::Online => "Running".to_string(),
-            Link::Connecting => "Connecting".to_string(),
+            Link::Online => tr("Running").into_owned(),
+            Link::Connecting => tr("Connecting").into_owned(),
             Link::Offline(why) => format!("Not reachable: {why}"),
         };
         match (self.tab, &view.diagnostics) {
@@ -478,7 +482,7 @@ impl Ui {
             (0, Some(d)) => self.diag_overview(g, f, pal, d, &view.model, daemon, s, ox, y, w),
             (_, Some(d)) => {
                 let lines: Vec<String> = d.journal.iter().take(((h - y - 48.0) / 24.0).max(1.0) as usize).map(|j| format!("{}  {:<8}{:<18}{}", local_hms(j.time), short(&name_of(&view.model, &j.owner)), j.key, j.state)).collect();
-                let lines = if lines.is_empty() { vec!["Nothing has changed yet.".to_string()] } else { lines };
+                let lines = if lines.is_empty() { vec![tr("Nothing has changed yet.").into_owned()] } else { lines };
                 self.lines(g, f, pal, s, ox, y, w, &lines, true);
             }
         }
@@ -494,20 +498,20 @@ impl Ui {
         };
         let y = self.rows(g, f, pal, s, ox, y, w, &[("Daemon", daemon), ("Version", version), ("Default gateway", gateway), ("Network changed", changed)]);
 
-        g.text(f.bold, 13.0 * s, ox * s, (y + 8.0) * s, &format!("Routes the daemon owns ({})", d.owned.len()), pal.muted);
+        g.text(f.bold, 13.0 * s, ox * s, (y + 8.0) * s, &tr_fmt("Routes the daemon owns ({0})", &[&d.owned.len().to_string()]), pal.muted);
         let mut lines: Vec<String> = d.owned.iter().take(6).map(|r| format!("{:<20}{:<10}{}", r.prefix, short(&name_of(m, &r.owner)), if r.kind == plaitway_core::RouteKind::Bypass { format!("{} (keeps the endpoint reachable)", r.via) } else { r.via.clone() })).collect();
         if d.owned.len() > 6 {
             lines.push(format!("and {} more", d.owned.len() - 6));
         }
         if lines.is_empty() {
-            lines.push("None".to_string());
+            lines.push(tr("None").into_owned());
         }
         let y = self.lines(g, f, pal, s, ox, y + 24.0, w, &lines, true);
 
-        g.text(f.bold, 13.0 * s, ox * s, (y + 8.0) * s, &format!("Stale routes ({})", d.stale.len()), pal.muted);
+        g.text(f.bold, 13.0 * s, ox * s, (y + 8.0) * s, &tr_fmt("Stale routes ({0})", &[&d.stale.len().to_string()]), pal.muted);
         let mut y = y + 24.0;
         if d.stale.is_empty() {
-            self.lines(g, f, pal, s, ox, y, w, &["None. Everything on this machine is accounted for.".to_string()], false);
+            self.lines(g, f, pal, s, ox, y, w, &[tr("None. Everything on this machine is accounted for.").into_owned()], false);
             return;
         }
         for st in d.stale.iter().take(3) {
@@ -548,7 +552,15 @@ impl Ui {
     fn settings(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, w: f32) {
         self.header(g, f, pal, s, ox, oy, "Settings", "Plaitway 0.6.1");
         let y = oy + 84.0;
-        let y = self.rows(g, f, pal, s, ox, y, w, &[("Language", "English".to_string())]);
+        let shown = match self.language {
+            None => tr("System default").into_owned(),
+            Some(plaitway_core::Lang::English) => tr("English").into_owned(),
+            Some(plaitway_core::Lang::TraditionalChinese) => tr("Traditional Chinese").into_owned(),
+        };
+        let row_y = y;
+        let y = self.rows(g, f, pal, s, ox, y, w, &[("Language", shown)]);
+        // The whole row is the control: a press moves to the next language.
+        self.region((ox * s, row_y * s, w * s, 46.0 * s), Act::CycleLanguage);
         self.switch_row(g, f, pal, s, ox, y, w, &[("Start with Windows", 0), ("Keep running in the tray when closed", 1)]);
     }
 }
@@ -734,6 +746,8 @@ mod tests {
         assert!(uptime(now + 100).unwrap().ends_with(" s"));
     }
 }
+
+
 
 
 

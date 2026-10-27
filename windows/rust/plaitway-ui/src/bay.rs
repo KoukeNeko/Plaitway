@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use plaitway_core::{Model, Standing, State, Tunnel};
+use plaitway_core::{tr, tr_fmt, Model, Standing, State, Tunnel};
 
 use crate::gfx::Gfx;
 
@@ -105,8 +105,8 @@ pub fn hue(model: &Model, i: usize, dark: bool) -> [f32; 4] {
 
 fn title(prefix: &str) -> (String, String) {
     match prefix {
-        "0.0.0.0/0" => ("Default route".into(), "All internet traffic".into()),
-        "::/0" => ("Default route (IPv6)".into(), "All internet traffic".into()),
+        "0.0.0.0/0" => (tr("Default route").into_owned(), tr("All internet traffic").into_owned()),
+        "::/0" => (format!("{} (IPv6)", tr("Default route")), tr("All internet traffic").into_owned()),
         p => (p.into(), String::new()),
     }
 }
@@ -297,7 +297,7 @@ impl Bay {
         let held = routes.iter().filter(|r| r.holder.is_some()).count();
 
         g.text(f.1, 28.0 * s, ox * s, oy * s + 14.0 * s, "Routing", pal.ink);
-        let sub = format!("{} of {} routes are held by a tunnel", held, routes.len());
+        let sub = tr_fmt("{0} of {1} routes are held by a tunnel", &[&held.to_string(), &routes.len().to_string()]);
         g.text(f.0, 14.0 * s, ox * s, oy * s + 50.0 * s, &sub, pal.muted);
 
         if !self.compact {
@@ -319,7 +319,7 @@ impl Bay {
             let (name, mut desc) = title(&row.prefix);
             if desc.is_empty() {
                 let names: Vec<&str> = row.requests.iter().map(|r| m.tunnels[r.0].name.as_str()).collect();
-                desc = format!("Asked by {}", names.join(", "));
+                desc = tr_fmt("Asked by {0}", &[&names.join(", ")]);
             }
             let room = rw - 28.0 * s - if self.compact { 0.0 } else { 24.0 * s };
             g.text_fit(f.1, 15.0 * s, x + 14.0 * s, y + 20.0 * s, &name, pal.ink, room);
@@ -329,7 +329,7 @@ impl Bay {
                 let mut cx = x + 14.0 * s;
                 let cy = y + 62.0 * s;
                 for &(t, standing) in &row.requests {
-                    let label = format!("{} {}", m.tunnels[t].name, verb(standing));
+                    let label = tr_fmt(verb_key(standing), &[&m.tunnels[t].name]);
                     let cw = g.measure(f.0, 12.0 * s, &label) + 18.0 * s;
                     let c = hue(m, t, pal.dark);
                     if standing == Standing::Holds {
@@ -367,7 +367,7 @@ impl Bay {
         if self.compact {
             g.rect(x, y, tw, th, 8.0 * s, if on { c_alpha(c, 0.13) } else { pal.card });
             g.outline(x, y, tw, th, 8.0 * s, 1.0, if on { c_alpha(c, 0.28) } else { pal.line });
-            g.text_fit(f.1, 13.0 * s, x + 14.0 * s, y + th / 2.0, &format!("{} · {}", tun.name, if on { "On" } else { "Off" }), pal.ink, tw - 28.0 * s);
+            g.text_fit(f.1, 13.0 * s, x + 14.0 * s, y + th / 2.0, &format!("{} · {}", tun.name, tr(if on { "On" } else { "Off" })), pal.ink, tw - 28.0 * s);
             return;
         }
         let lifted = matches!(self.drag, Some((d, _)) if d == t);
@@ -433,13 +433,14 @@ impl Bay {
     }
 }
 
-fn verb(s: Standing) -> &'static str {
+/// The template of a chip: "Home holds", "Office waits".
+fn verb_key(s: Standing) -> &'static str {
     match s {
-        Standing::Holds => "holds",
-        Standing::Waits => "waits",
-        Standing::Blocked => "is blocked",
-        Standing::Failed => "failed",
-        Standing::Pending => "is pending",
+        Standing::Holds => "{0} holds",
+        Standing::Waits => "{0} waits",
+        Standing::Blocked => "{0} is blocked",
+        Standing::Failed => "{0} failed",
+        Standing::Pending => "{0} is pending",
     }
 }
 
@@ -451,34 +452,33 @@ pub fn kind_name(t: &Tunnel) -> &'static str {
 }
 
 fn state_line(t: &Tunnel, slot: usize) -> String {
+    let n = (slot + 1).to_string();
     match t.state {
         State::Connected => {
             let (h, w) = t.holds();
-            format!("Priority {} · Holds {} of {} routes", slot + 1, h, w)
+            tr_fmt("Priority {0} · Holds {1} of {2} routes", &[&n, &h.to_string(), &w.to_string()])
         }
-        State::Connecting | State::Reconnecting => format!("Priority {} · Connecting", slot + 1),
-        State::Disconnecting => format!("Priority {} · Disconnecting", slot + 1),
-        State::AwaitingCredentials => format!("Priority {} · Needs credentials", slot + 1),
+        State::Connecting | State::Reconnecting => tr_fmt("Priority {0} · Connecting", &[&n]),
+        State::Disconnecting => tr_fmt("Priority {0} · Disconnecting", &[&n]),
+        State::AwaitingCredentials => tr_fmt("Priority {0} · Needs credentials", &[&n]),
         State::Failed if !t.error.is_empty() => t.error.clone(),
-        State::Failed => format!("Priority {} · Failed", slot + 1),
-        State::Disconnected => format!("Priority {} · Not connected", slot + 1),
+        State::Failed => tr_fmt("Priority {0} · Failed", &[&n]),
+        State::Disconnected => tr_fmt("Priority {0} · Not connected", &[&n]),
     }
 }
-
 /// The sentence under the page: who holds the route and who waits behind.
 pub fn why(m: &Model, row: &plaitway_core::RouteRow) -> String {
     let name = title(&row.prefix).0;
     let Some(h) = row.holder else {
-        return format!("{name}: no tunnel holds it");
+        return tr_fmt("{0}: no tunnel holds it", &[&name]);
     };
     let waiting: Vec<&str> = row.requests.iter().filter(|r| r.0 != h && r.1 == Standing::Waits).map(|r| m.tunnels[r.0].name.as_str()).collect();
     if waiting.is_empty() {
-        format!("{name}: {} holds it", m.tunnels[h].name)
+        tr_fmt("{0}: {1} holds it", &[&name, &m.tunnels[h].name])
     } else {
-        format!("{name}: {} holds it, {} waits behind", m.tunnels[h].name, waiting.join(" and "))
+        tr_fmt("{0}: {1} holds it, {2} waits behind", &[&name, &m.tunnels[h].name, &waiting.join(" · ")])
     }
 }
-
 /// A cubic with horizontal tangents at both ends, flattened.
 fn bezier(x0: f32, y0: f32, x1: f32, y1: f32) -> Vec<(f32, f32)> {
     let dx = (x1 - x0) * 0.5;
@@ -674,6 +674,7 @@ mod tests {
         assert!(b.animating());
     }
 }
+
 
 
 

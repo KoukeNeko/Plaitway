@@ -79,6 +79,8 @@ pub struct Inst {
 }
 
 struct Font {
+    /// Another font to take a character from when this one has none, the way a browser does for Chinese.
+    fallback: Option<usize>,
     face: IDWriteFontFace,
     upem: f32,
     asc: f32,
@@ -116,6 +118,8 @@ pub struct Gfx {
     _visual: Option<IDCompositionVisual>,
     /// The text drawn in this frame and where, for the accessibility tree: (x, y, width, height, text).
     texts: Vec<(f32, f32, f32, f32, String)>,
+    /// (font, fallback) pairs, to set again after the device is rebuilt.
+    fallbacks: Vec<(usize, usize)>,
     /// What `load_font` was asked for, to ask again after the device is rebuilt.
     font_specs: Vec<(Vec<String>, i32)>,
     dw: IDWriteFactory,
@@ -280,6 +284,7 @@ impl Gfx {
                 _target: Some(target),
                 _visual: Some(visual),
                 font_specs: Vec::new(),
+                fallbacks: Vec::new(),
                 texts: Vec::new(),
                 dw,
                 fonts: Vec::new(),
@@ -324,6 +329,7 @@ impl Gfx {
     /// removed. Fonts keep their numbers.
     pub fn recover(&mut self, canvas: HWND) -> Result<()> {
         let specs = std::mem::take(&mut self.font_specs);
+        let fallbacks = std::mem::take(&mut self.fallbacks);
         let (w, h) = self.size;
         // The window can have one composition target at a time: let go of the old one first.
         self._target = None;
@@ -333,6 +339,9 @@ impl Gfx {
         for (families, weight) in specs {
             let names: Vec<&str> = families.iter().map(String::as_str).collect();
             self.load_font(&names, DWRITE_FONT_WEIGHT(weight))?;
+        }
+        for (font, fb) in fallbacks {
+            self.set_fallback(font, fb);
         }
         Ok(())
     }
@@ -355,7 +364,7 @@ impl Gfx {
                 let face = font.CreateFontFace()?;
                 let mut m = DWRITE_FONT_METRICS::default();
                 face.GetMetrics(&mut m);
-                self.fonts.push(Font { face, upem: m.designUnitsPerEm as f32, asc: m.ascent as f32, desc: m.descent as f32 });
+                self.fonts.push(Font { fallback: None, face, upem: m.designUnitsPerEm as f32, asc: m.ascent as f32, desc: m.descent as f32 });
                 return Ok(self.fonts.len() - 1);
             }
         }
@@ -415,8 +424,27 @@ impl Gfx {
         }
     }
 
-    fn indices(&self, font: usize, text: &str) -> Vec<u16> {
+    /// Characters from `font`, and from its fallback for the ones it has no glyph for: (font, glyph) of each.
+    fn shape(&self, font: usize, text: &str) -> Vec<(usize, u16)> {
         let cps: Vec<u32> = text.chars().map(|c| c as u32).collect();
+        let primary = self.glyph_indices(font, &cps);
+        cps.iter()
+            .zip(primary)
+            .map(|(&cp, g)| {
+                if g == 0 && cp > 0x20 {
+                    if let Some(fb) = self.fonts[font].fallback {
+                        let g2 = self.glyph_indices(fb, &[cp])[0];
+                        if g2 != 0 {
+                            return (fb, g2);
+                        }
+                    }
+                }
+                (font, g)
+            })
+            .collect()
+    }
+
+    fn glyph_indices(&self, font: usize, cps: &[u32]) -> Vec<u16> {
         let mut gi = vec![0u16; cps.len()];
         unsafe {
             let _ = self.fonts[font].face.GetGlyphIndices(cps.as_ptr(), cps.len() as u32, gi.as_mut_ptr());
@@ -424,33 +452,46 @@ impl Gfx {
         gi
     }
 
-    fn advances(&self, font: usize, gi: &[u16], size: f32) -> Vec<f32> {
-        let mut m = vec![DWRITE_GLYPH_METRICS::default(); gi.len()];
+    fn advance(&self, font: usize, gi: u16, size: f32) -> f32 {
+        let mut m = [DWRITE_GLYPH_METRICS::default()];
         unsafe {
-            let _ = self.fonts[font].face.GetDesignGlyphMetrics(gi.as_ptr(), gi.len() as u32, m.as_mut_ptr(), false);
+            let _ = self.fonts[font].face.GetDesignGlyphMetrics(&gi, 1, m.as_mut_ptr(), false);
         }
-        m.iter().map(|g| g.advanceWidth as f32 * size / self.fonts[font].upem).collect()
+        m[0].advanceWidth as f32 * size / self.fonts[font].upem
     }
 
+    /// Use `fallback` for the characters `font` has no glyph for.
+    pub fn set_fallback(&mut self, font: usize, fallback: usize) {
+        self.fonts[font].fallback = Some(fallback);
+        self.fallbacks.push((font, fallback));
+    }
+    /// Width of `text` in the language that is set.
     pub fn measure(&self, font: usize, size: f32, text: &str) -> f32 {
-        let gi = self.indices(font, text);
-        self.advances(font, &gi, size).iter().sum()
+        self.measure_raw(font, size, &plaitway_core::tr(text))
+    }
+
+    /// Width of `text` exactly as given: for what the user wrote, which is never translated.
+    pub fn measure_raw(&self, font: usize, size: f32, text: &str) -> f32 {
+        self.shape(font, text).iter().map(|&(f, g)| self.advance(f, g, size)).sum()
     }
 
     /// Draw `text` with its x-height box centred on `cy`. Returns the advance width.
     pub fn text(&mut self, font: usize, size: f32, x: f32, cy: f32, text: &str, col: [f32; 4]) -> f32 {
+        let shown = plaitway_core::tr(text);
+        self.draw_text(font, size, x, cy, &shown, col)
+    }
+
+    fn draw_text(&mut self, font: usize, size: f32, x: f32, cy: f32, text: &str, col: [f32; 4]) -> f32 {
         let f = &self.fonts[font];
         let baseline = (cy + (f.asc - f.desc) / 2.0 * size / f.upem).round();
-        let gi = self.indices(font, text);
-        let adv = self.advances(font, &gi, size);
         let mut pen = x;
-        for (g, a) in gi.iter().zip(adv.iter()) {
-            if let Some(gl) = self.glyph(font, *g, size) {
+        for (fnt, g) in self.shape(font, text) {
+            if let Some(gl) = self.glyph(fnt, g, size) {
                 if gl.w > 0.0 {
                     self.push(Inst { rect: [(pen + gl.left).round(), baseline + gl.top, gl.w, gl.h], col, uv: gl.uv, p: [0.0, 1.0, 0.0, 0.0] });
                 }
             }
-            pen += a;
+            pen += self.advance(fnt, g, size);
         }
         // Icons from the symbol fonts have no words to read out.
         if !text.is_empty() && !text.chars().next().is_some_and(|c| ('\u{E000}'..='\u{F8FF}').contains(&c)) {
@@ -501,11 +542,11 @@ impl Gfx {
     #[allow(clippy::too_many_arguments)]
     pub fn text_fit(&mut self, font: usize, size: f32, x: f32, cy: f32, text: &str, col: [f32; 4], max_w: f32) -> f32 {
         let shown = self.fit(font, size, text, max_w);
-        self.text(font, size, x, cy, &shown, col)
+        self.draw_text(font, size, x, cy, &shown, col)
     }
 
     pub fn fit(&self, font: usize, size: f32, text: &str, max_w: f32) -> String {
-        if self.measure(font, size, text) <= max_w {
+        if self.measure_raw(font, size, text) <= max_w {
             return text.to_string();
         }
         let chars: Vec<char> = text.chars().collect();
@@ -513,7 +554,7 @@ impl Gfx {
         while lo < hi {
             let mid = (lo + hi).div_ceil(2);
             let cut: String = chars[..mid].iter().collect::<String>() + "…";
-            if self.measure(font, size, &cut) <= max_w {
+            if self.measure_raw(font, size, &cut) <= max_w {
                 lo = mid;
             } else {
                 hi = mid - 1;
@@ -596,4 +637,7 @@ mod tests {
         assert!(!is_device_lost(DXGI_ERROR_WAS_STILL_DRAWING));
     }
 }
+
+
+
 

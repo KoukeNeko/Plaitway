@@ -260,7 +260,11 @@ impl App {
             nav(g, ui, cy - (if compact { 16.0 } else { 24.0 }) * s, (if compact { 32.0 } else { 48.0 }) * s, Act::Go(Page::Profile(tun.id.clone())));
             let (held, wanted) = tun.holds();
             let kind = bay::kind_name(tun);
-            let sub = if tun.connected() { format!("{kind} · Holds {held} of {wanted}") } else { format!("{kind} · {}", pages::state_name(tun.state)) };
+            let sub = if tun.connected() {
+                format!("{kind} · {}", plaitway_core::tr_fmt("Holds {0} of {1} routes", &[&held.to_string(), &wanted.to_string()]))
+            } else {
+                format!("{kind} · {}", plaitway_core::tr(pages::state_name(tun.state)))
+            };
             let c = bay::hue(model, k, t.dark);
             let dx = if compact { (side - 18.0) / 2.0 + 8.0 - 6.0 } else { 22.0 } * s;
             if tun.enabled {
@@ -506,6 +510,15 @@ fn do_act(hwnd: HWND, a: &mut App, act: Act) {
             let on = a.view.model.tunnels.iter().find(|t| t.id == id).is_some_and(|t| t.enabled);
             a.session.set_enabled(&id, !on);
         }
+        Act::CycleLanguage => {
+            a.ui.language = match a.ui.language {
+                None => Some(plaitway_core::Lang::English),
+                Some(plaitway_core::Lang::English) => Some(plaitway_core::Lang::TraditionalChinese),
+                Some(plaitway_core::Lang::TraditionalChinese) => None,
+            };
+            plaitway_core::set_language(a.ui.language.unwrap_or_else(system_language));
+            let _ = a.store.save_language(&plaitway_core::Language { language: a.ui.language.map(|l| l.code().to_string()) });
+        }
         Act::Switch(0) => shell::set_startup(a.ui.switches[0]),
         Act::Switch(1) => {
             a.prefs.close_to_tray = a.ui.switches[1];
@@ -541,6 +554,13 @@ fn do_act(hwnd: HWND, a: &mut App, act: Act) {
     sync_editor(a);
     redraw(hwnd, a);
 }
+/// What Windows is set to.
+fn system_language() -> plaitway_core::Lang {
+    let mut buf = [0u16; 85];
+    let n = unsafe { windows::Win32::Globalization::GetUserDefaultLocaleName(&mut buf) } as usize;
+    plaitway_core::Lang::from_locale(&String::from_utf16_lossy(&buf[..n.saturating_sub(1)]))
+}
+
 /// Tell the session what the current page needs: a log on the Logs tabs, diagnostics on the Diagnostics ones.
 fn sync_watch(a: &mut App) {
     let logs = match (&a.ui.page, a.ui.tab) {
@@ -1080,6 +1100,12 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let f_text = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_NORMAL)?;
         let f_bold = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
         let f_mono = gfx.load_font(&["Cascadia Mono", "Consolas"], DWRITE_FONT_WEIGHT_NORMAL)?;
+        // Chinese is not in the Latin fonts; these are used for the characters they lack.
+        let cjk = gfx.load_font(&["Microsoft JhengHei UI", "Microsoft JhengHei", "MingLiU"], DWRITE_FONT_WEIGHT_NORMAL)?;
+        let cjk_bold = gfx.load_font(&["Microsoft JhengHei UI", "Microsoft JhengHei", "MingLiU"], DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
+        gfx.set_fallback(f_text, cjk);
+        gfx.set_fallback(f_bold, cjk_bold);
+        gfx.set_fallback(f_mono, cjk);
         let f_icons = gfx.load_font(&["Segoe Fluent Icons", "Segoe MDL2 Assets"], DWRITE_FONT_WEIGHT_NORMAL)?;
         // The session thread wakes the window with WM_APP whenever the daemon tells it something.
         let handle = hwnd.0 as isize;
@@ -1098,6 +1124,8 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         with_app(|a| {
             a.bay.set_reduced_motion(!animate.as_bool());
             a.ui.switches[0] = shell::startup_command().is_some();
+            a.ui.language = a.store.language().language.as_deref().and_then(plaitway_core::Lang::from_code);
+            plaitway_core::set_language(a.ui.language.unwrap_or_else(system_language));
             a.ui.switches[1] = a.prefs.close_to_tray;
         });
         shell::add_tray(hwnd, icon);
@@ -1118,6 +1146,8 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
 
 
 
