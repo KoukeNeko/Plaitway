@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Checks a finished Plaitway MSI without installing it.
 
@@ -27,7 +27,10 @@ Where the package is unpacked. Default: a new folder below %TEMP%; it is removed
 param(
     [string[]] $Package,
 
-    [string] $ScratchDirectory
+    [string] $ScratchDirectory,
+
+    # The package carries the Rust app: no compiled XAML, and the notices of its crates.
+    [switch] $RustApp
 )
 
 Set-StrictMode -Version Latest
@@ -45,6 +48,7 @@ $RequiredFiles = @(
     # The app's compiled XAML and strings: a publish without them dies at the first resource lookup.
     'app\Plaitway.pri',
     'licenses\LICENSE.txt', 'licenses\THIRD_PARTY_NOTICES.md')
+if ($RustApp) { $RequiredFiles = @($RequiredFiles | Where-Object { $_ -ne 'app\Plaitway.pri' }) + 'licenses\THIRD_PARTY_NOTICES_RUST.md' }
 $WintunSigner = 'WireGuard LLC'
 $HelperActionOrder = @(
     # Each pair is (earlier, later) in InstallExecuteSequence.

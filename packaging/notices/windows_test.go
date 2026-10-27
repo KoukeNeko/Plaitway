@@ -256,6 +256,21 @@ func TestRenderWindowsHasNoSourceOfferAndSaysOpenVPNIsNotShipped(t *testing.T) {
 	}
 }
 
+func TestRenderWindowsRustPointsAtTheCrateNoticesAndNamesNoDotnet(t *testing.T) {
+	mk := func(name string) component {
+		return component{name: name, version: "1", license: "MIT", source: "src", docs: []document{{"MIT", mitText}}}
+	}
+	out := renderWindowsRust(mk("Wintun"), []component{mk("goMod")})
+	flat := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{"THIRD_PARTY_NOTICES_RUST.md", "ships no OpenVPN", "## Trademarks", "goMod"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("the Rust app notices lack %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, ".NET") || strings.Contains(out, "NuGet") {
+		t.Errorf("the Rust app notices mention .NET:\n%s", out)
+	}
+}
 // macosRenderDigest is the SHA-256 of render's output for the fixed components
 // below, taken before the Windows document was added. The macOS document must
 // not change because of it.

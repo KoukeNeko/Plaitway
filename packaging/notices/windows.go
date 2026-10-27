@@ -76,6 +76,9 @@ var (
 // windowsInputs is where the Windows document finds its data.
 type windowsInputs struct {
 	publishDir, assetsFile, nugetRoot, goarch string
+	// rustApp: the app is the Rust one, which has no .NET runtime and no NuGet packages; its crates have
+	// their own notices file, shipped beside this one.
+	rustApp bool
 }
 
 func windowsFlags() *windowsInputs {
@@ -84,6 +87,7 @@ func windowsFlags() *windowsInputs {
 	flag.StringVar(&inputs.assetsFile, "assets", "", "with -windows: project.assets.json of the app (default: "+appAssetsPath+")")
 	flag.StringVar(&inputs.nugetRoot, "nuget", "", "with -windows: the NuGet package cache (default: $"+nugetPackagesEnv+", else ~/"+nugetPackagesInHome+")")
 	flag.StringVar(&inputs.goarch, "goarch", "amd64", "with -windows: amd64 or arm64")
+	flag.BoolVar(&inputs.rustApp, "rust-app", false, "with -windows: the app is the Rust one; no -publish is needed and the .NET sections are left out")
 	return inputs
 }
 
@@ -97,6 +101,17 @@ func runWindows(root, outPath string, inputs windowsInputs) {
 }
 
 func generateWindows(root string, inputs windowsInputs) (string, error) {
+	if inputs.rustApp {
+		goMods, err := goComponentsFor(root, goTarget{"windows", inputs.goarch, "0"})
+		if err != nil {
+			return "", err
+		}
+		wintun, err := wintunComponent(root)
+		if err != nil {
+			return "", err
+		}
+		return renderWindowsRust(wintun, goMods), nil
+	}
 	if inputs.publishDir == "" {
 		return "", errors.New("-publish is required with -windows: the app's publish folder")
 	}
@@ -131,6 +146,34 @@ func generateWindows(root string, inputs windowsInputs) (string, error) {
 		return "", err
 	}
 	return renderWindows(wintun, goMods, packages, dotnet), nil
+}
+
+// renderWindowsRust is the document of an installer whose app is the Rust one: the programs and Go modules of the
+// package, and a pointer to the crates' own file.
+func renderWindowsRust(wintun component, goMods []component) string {
+	var b strings.Builder
+	b.WriteString(`# Third-party notices
+
+Plaitway for Windows contains the software listed below. This file is generated
+by packaging/notices from the upstream sources; do not edit it by hand.
+
+The installer ships no OpenVPN. The helper runs the OpenVPN that is installed on
+the computer, if there is one.
+
+The Rust crates the app is built from are listed, with their licence texts, in
+THIRD_PARTY_NOTICES_RUST.md beside this file.
+
+## Bundled programs
+
+`)
+	writeTable(&b, []component{wintun})
+	b.WriteString("\n## Go modules compiled into plaitwayd and plaitway\n\n")
+	writeTable(&b, goMods)
+	b.WriteString(trademarksSection(`\nWindows is a trademark of the Microsoft group of companies. Wintun is a project
+of WireGuard LLC.
+`))
+	writeTexts(&b, append([]component{wintun}, goMods...))
+	return b.String()
 }
 
 func defaultNugetRoot() (string, error) {

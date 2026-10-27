@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Builds the Plaitway MSI: stages the payload, then builds the package.
 
@@ -29,6 +29,10 @@ The RFC 3161 server for the signatures. Default: the one in lib\Sign.ps1.
 .PARAMETER AllowUntrustedRoot
 Accepts a certificate that this machine does not trust (a self-signed one), to try the script out.
 
+.PARAMETER RustApp
+Ships the Rust app (windows\rust) instead of the WinUI one. It is built with cargo and laid out by
+windows\rust\scripts\stage-app.ps1: one program, app\Plaitway.exe, and the notices of its crates in licenses\.
+
 .PARAMETER SkipAppPublish
 Reuses the app in <OutputDirectory>\payload\app of an earlier run. For trying out
 a change of the installer itself.
@@ -41,6 +45,8 @@ param(
     [string] $OutputDirectory,
 
     [switch] $SkipAppPublish,
+
+    [switch] $RustApp,
 
     [string] $CertificateThumbprint,
 
@@ -71,6 +77,8 @@ $ProductCodeNamespace = 'plaitway-msi-product-code'
 $PayloadExecutables = @('plaitwayd.exe', 'plaitway.exe', 'wintun.dll', 'app\Plaitway.exe')
 # What Plaitway itself builds and therefore signs, relative to the payload; the files of others keep their signatures.
 $OwnPayloadPatterns = @('plaitwayd.exe', 'plaitway.exe', 'app\Plaitway.exe', 'app\Plaitway.dll', 'app\Plaitway.*.dll')
+# The Rust app is one program: it has no assemblies to sign.
+if ($RustApp) { $OwnPayloadPatterns = @('plaitwayd.exe', 'plaitway.exe', 'app\Plaitway.exe') }
 $SigningOptions = @{}
 
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $RepositoryRoot 'build\windows' }
@@ -142,6 +150,12 @@ function Publish-App([string] $Version, [string] $Destination) {
         '-o', $Destination)
 }
 
+function Publish-RustApp([string] $Destination, [string] $Stage) {
+    Write-Step 'cargo build the app (Rust) and stage it'
+    Invoke-Native 'powershell' @('-NoProfile', '-File', (Join-Path $RepositoryRoot 'windows\rust\scripts\stage-app.ps1'), '-Output', $Stage)
+    Copy-Item -LiteralPath (Join-Path $Stage 'app') -Destination $Destination -Recurse
+}
+
 # The licence of the package as RTF for the setup dialog: the text of LICENSE, escaped.
 function ConvertTo-Rtf([string] $Text) {
     $builder = New-Object System.Text.StringBuilder
@@ -166,14 +180,20 @@ function ConvertTo-Rtf([string] $Text) {
     return $builder.ToString()
 }
 
-function Write-Licenses([string] $Destination, [string] $PublishedApp) {
+function Write-Licenses([string] $Destination, [string] $PublishedApp, [string] $RustStage) {
     Write-Step 'notices and licence'
     $licenses = Join-Path $Destination 'licenses'
     [void] (New-Item -ItemType Directory -Path $licenses)
     $licenseText = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'LICENSE') -Raw
     [IO.File]::WriteAllText((Join-Path $licenses 'LICENSE.txt'), $licenseText, (New-Object System.Text.UTF8Encoding $false))
     [IO.File]::WriteAllText((Join-Path $Destination 'License.rtf'), (ConvertTo-Rtf $licenseText), [Text.Encoding]::ASCII)
-    Invoke-Native 'go' @('run', './packaging/notices', '-windows', '-publish', $PublishedApp, '-goarch', $GoMachine, '-o', (Join-Path $licenses 'THIRD_PARTY_NOTICES.md'))
+    if ($RustStage) {
+        Invoke-Native 'go' @('run', './packaging/notices', '-windows', '-rust-app', '-goarch', $GoMachine, '-o', (Join-Path $licenses 'THIRD_PARTY_NOTICES.md'))
+        Copy-Item -LiteralPath (Join-Path $RustStage 'licenses\THIRD_PARTY_NOTICES_RUST.md') -Destination $licenses
+    }
+    else {
+        Invoke-Native 'go' @('run', './packaging/notices', '-windows', '-publish', $PublishedApp, '-goarch', $GoMachine, '-o', (Join-Path $licenses 'THIRD_PARTY_NOTICES.md'))
+    }
 }
 
 function Get-FileHashLines([string] $Directory, [string[]] $Include) {
@@ -212,7 +232,7 @@ function Build-Package([string] $Version, [string] $Fingerprint) {
     Invoke-Native 'dotnet' @(
         'build', $project, '-c', 'Release', '-nologo',
         "-p:InstallerPlatform=$InstallerPlatform", "-p:ProductVersion=$Version", "-p:ProductCode=$productCode",
-        "-p:PayloadDir=$PayloadDirectory", "-p:Cultures=$InstallerCulture")
+        "-p:PayloadDir=$PayloadDirectory", "-p:Cultures=$InstallerCulture", "-p:RustApp=$($RustApp.IsPresent.ToString().ToLower())")
     $built = Join-Path $RepositoryRoot "windows\installer\bin\$InstallerPlatform\Release\$InstallerCulture\Plaitway.msi"
     $target = Join-Path $OutputDirectory ("Plaitway-{0}-{1}.msi" -f $Version, $InstallerPlatform)
     Copy-Item -LiteralPath $built -Destination $target -Force
@@ -263,9 +283,10 @@ Write-Step 'wintun.dll'
 
 $appDirectory = Join-Path $PayloadDirectory 'app'
 if ($SkipAppPublish) { Move-Item -LiteralPath (Join-Path $OutputDirectory 'kept-app\app') -Destination $appDirectory }
+elseif ($RustApp) { $rustStage = Join-Path $OutputDirectory 'rust-app'; Reset-Directory $rustStage; Publish-RustApp $appDirectory $rustStage }
 else { Publish-App $version $appDirectory }
 
-Write-Licenses $PayloadDirectory $appDirectory
+Write-Licenses $PayloadDirectory $appDirectory $(if ($RustApp) { $rustStage } else { $null })
 if ($script:SigningCertificate) {
     Write-Step 'sign the programs of Plaitway'
     Add-Signature -Path @(Get-OwnPayloadFiles) -Certificate $script:SigningCertificate @SigningOptions

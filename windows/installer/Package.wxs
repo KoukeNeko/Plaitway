@@ -192,9 +192,11 @@
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="$(ProductName)" WorkingDirectory="APPFOLDER" Advertise="no" />
         </File>
       </Component>
+      <?ifndef RustApp?>
       <Files Include="$(PayloadDir)\app\**">
         <Exclude Files="$(PayloadDir)\app\Plaitway.exe" />
       </Files>
+      <?endif?>
     </ComponentGroup>
   </Fragment>
 
