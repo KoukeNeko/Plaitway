@@ -105,3 +105,13 @@ Built and run on Windows 11 build 26300 at 125 % scale. The Windows 10 path was 
 1. Windows 10 (1809 or later) is supported: Mica on Windows 11, solid Fluent-style background on Windows 10.
 2. Renderer: pure D3D11, drawn on demand.
 3. Still open, default kept: the configuration editor and the password field are native child windows. This is also the cheapest option.
+
+### Progress after phase 0 (`windows/rust`)
+A Cargo workspace with `plaitway-ui` (window, D3D11 renderer, pages) and `plaitway-client` (gRPC over the named pipe).
+
+| Phase | State | Evidence |
+|---|---|---|
+| 1 Renderer and bay | Routing page on fake data: lines, hover dimming, selection, drag to reorder, draw-in animation (off under reduced motion), compact layout under 1000 px, keyboard Up/Down/Home/End | 9 tests on the model; screenshots checked by sending messages to the window |
+| 2 Client | generated from `proto/plaitway/v1/plaitway.proto` with a vendored `protoc`; a call, a failing call, a stream and a refused remote pipe, all over a real named pipe against an in-process server | 4 tests |
+| 3 Pages | navigation, profile tabs (Overview, Routes, Logs, Configuration, Settings), Diagnostics, Settings with switches, on fake data | 4 tests on navigation; screenshots |
+| Not done | the UI does not use the client yet (no `plaitwayd` here: Go is not installed); `plaitway-core` port of `AppCore`; hosted editor and password field, tray, file dialog, empty and setup pages, scrolling, text trimming, accessibility (UIA), high contrast, localisation, a real Windows 10 run | |
