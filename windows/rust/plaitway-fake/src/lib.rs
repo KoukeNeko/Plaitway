@@ -3,6 +3,7 @@
 //! are shadowed. Serving happens on a named pipe, so the client under test is the real one.
 
 use std::{
+    collections::VecDeque,
     io,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -47,11 +48,56 @@ struct P {
 struct Shared {
     profiles: Mutex<Vec<P>>,
     events: broadcast::Sender<ProfileEvent>,
+    logs: Mutex<VecDeque<LogLine>>,
+    log_tx: broadcast::Sender<LogLine>,
+    stale: Mutex<Vec<StaleRoute>>,
+    journal: Mutex<Vec<JournalEntry>>,
     /// How long a connection takes to come up.
     connect_delay: Duration,
 }
 
+const LOG_KEEP: usize = 500;
+
 impl Shared {
+    /// One log line; `profile` is empty for the daemon's own log.
+    fn log(&self, profile: &str, level: LogLevel, text: impl Into<String>) {
+        let line = LogLine { time: Some(now()), level: level as i32, profile_id: profile.into(), text: text.into() };
+        let mut logs = self.logs.lock().unwrap();
+        if logs.len() == LOG_KEEP {
+            logs.pop_front();
+        }
+        logs.push_back(line.clone());
+        let _ = self.log_tx.send(line);
+    }
+
+    fn journal(&self, owner: &str, key: &str, state: &str) {
+        self.journal.lock().unwrap().push(JournalEntry { time: Some(now()), owner: owner.into(), kind: "route".into(), key: key.into(), state: state.into() });
+    }
+
+    fn diagnostics(&self) -> Diagnostics {
+        let view = self.view();
+        let owned = view
+            .iter()
+            .flat_map(|p| p.status.iter().flat_map(move |s| s.routes.iter().filter(|r| r.state == RouteState::Installed as i32).map(move |r| OwnedRoute { prefix: r.prefix.clone(), owner: p.id.clone(), kind: RouteKind::Tunnel as i32, via: format!("plaitway-{}", p.id), state: r.state })))
+            .collect();
+        let journal = self.journal.lock().unwrap();
+        Diagnostics {
+            daemon: Some(DaemonInfo { version: "fake".into(), protocol_version: 1, privileged: true, engines: vec![] }),
+            network: Some(NetworkInfo {
+                default_gateway_v4: "192.168.1.1".into(),
+                default_interface_v4: "Ethernet".into(),
+                interfaces: vec!["Ethernet".into(), "Wi-Fi".into()],
+                last_change: Some(now()),
+                last_change_reason: "heartbeat".into(),
+                ..Default::default()
+            }),
+            owned_routes: owned,
+            stale_routes: self.stale.lock().unwrap().clone(),
+            resolver_entries: vec!["home.example.net -> 10.8.0.1".into()],
+            recent_journal: journal.iter().rev().take(20).cloned().collect(),
+        }
+    }
+
     /// Every profile as the daemon would report it, with route states decided by priority.
     fn view(&self) -> Vec<Profile> {
         let ps = self.profiles.lock().unwrap();
@@ -131,7 +177,15 @@ impl Fake {
                 since: s.connected.then(now),
             })
             .collect();
-        Fake { s: Arc::new(Shared { profiles: Mutex::new(profiles), events: broadcast::channel(256).0, connect_delay }) }
+        let fake = Fake { s: Arc::new(Shared { profiles: Mutex::new(profiles), events: broadcast::channel(256).0, logs: Mutex::new(VecDeque::new()), log_tx: broadcast::channel(256).0, stale: Mutex::new(vec![StaleRoute { key: "stale-1".into(), prefix: "10.99.0.0/16".into(), gateway: "10.8.0.1".into(), interface: "plaitway-old".into(), reason: "left by a crashed daemon".into(), owned: true }]), journal: Mutex::new(vec![]), connect_delay }) };
+        fake.s.log("", LogLevel::Info, "plaitwayd started");
+        for s in seeds.iter().filter(|s| s.connected) {
+            fake.s.log(s.id, LogLevel::Info, "tunnel up");
+            for r in s.routes {
+                fake.s.journal(s.id, r, "applied");
+            }
+        }
+        fake
     }
 }
 
@@ -152,7 +206,7 @@ impl DaemonService for Fake {
         Ok(Response::new(DaemonInfo { version: "fake".into(), protocol_version: 1, privileged: true, engines: vec![] }))
     }
     async fn get_diagnostics(&self, _: Request<GetDiagnosticsRequest>) -> Rsp<Diagnostics> {
-        no()
+        Ok(Response::new(self.s.diagnostics()))
     }
     async fn list_profiles(&self, _: Request<ListProfilesRequest>) -> Rsp<ListProfilesResponse> {
         Ok(Response::new(ListProfilesResponse { profiles: self.s.view() }))
@@ -183,6 +237,7 @@ impl DaemonService for Fake {
                 p.priority = ids.iter().position(|i| *i == p.id).unwrap() as i32;
             }
         }
+        self.s.log("", LogLevel::Info, format!("priority order is now {}", ids.join(", ")));
         self.s.publish();
         Ok(Response::new(ListProfilesResponse { profiles: self.s.view() }))
     }
@@ -199,16 +254,35 @@ impl DaemonService for Fake {
                 p.since = None;
             }
         }
+        if r.enabled {
+            self.s.log(&r.id, LogLevel::Info, "connecting");
+        } else {
+            self.s.log(&r.id, LogLevel::Info, "disconnected");
+            let routes = self.s.profiles.lock().unwrap().iter().find(|p| p.id == r.id).map(|p| p.routes.clone()).unwrap_or_default();
+            for route in routes {
+                self.s.journal(&r.id, &route, "removed");
+            }
+        }
         self.s.publish();
         if r.enabled {
             let (s, id) = (self.s.clone(), r.id.clone());
             tokio::spawn(async move {
                 tokio::time::sleep(s.connect_delay).await;
-                {
+                let routes = {
                     let mut ps = s.profiles.lock().unwrap();
-                    if let Some(p) = ps.iter_mut().find(|p| p.id == id && p.enabled && p.state == ProfileState::Connecting) {
-                        p.state = ProfileState::Connected;
-                        p.since = Some(now());
+                    match ps.iter_mut().find(|p| p.id == id && p.enabled && p.state == ProfileState::Connecting) {
+                        Some(p) => {
+                            p.state = ProfileState::Connected;
+                            p.since = Some(now());
+                            p.routes.clone()
+                        }
+                        None => vec![],
+                    }
+                };
+                if !routes.is_empty() {
+                    s.log(&id, LogLevel::Info, format!("tunnel up, {} routes", routes.len()));
+                    for r in &routes {
+                        s.journal(&id, r, "applied");
                     }
                 }
                 s.publish();
@@ -237,15 +311,44 @@ impl DaemonService for Fake {
         };
         Ok(Response::new(Box::pin(stream)))
     }
-    type WatchLogsStream = tokio_stream::Empty<Result<LogLine, Status>>;
-    async fn watch_logs(&self, _: Request<WatchLogsRequest>) -> Rsp<Self::WatchLogsStream> {
-        Ok(Response::new(tokio_stream::empty()))
+    type WatchLogsStream = Pin<Box<dyn tokio_stream::Stream<Item = Result<LogLine, Status>> + Send>>;
+    async fn watch_logs(&self, r: Request<WatchLogsRequest>) -> Rsp<Self::WatchLogsStream> {
+        let r = r.into_inner();
+        let keep = if r.tail_lines > 0 { r.tail_lines as usize } else { 200 };
+        let id = r.profile_id;
+        // Subscribe before copying the tail so no line falls between the two.
+        let mut rx = self.s.log_tx.subscribe();
+        let mut tail: Vec<LogLine> = self.s.logs.lock().unwrap().iter().filter(|l| l.profile_id == id).cloned().collect();
+        tail.drain(..tail.len().saturating_sub(keep));
+        let stream = async_stream::stream! {
+            for l in tail {
+                yield Ok(l);
+            }
+            loop {
+                match rx.recv().await {
+                    Ok(l) if l.profile_id == id => yield Ok(l),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break,
+                }
+            }
+        };
+        Ok(Response::new(Box::pin(stream)))
     }
     async fn resync(&self, _: Request<ResyncRequest>) -> Rsp<ResyncResponse> {
-        no()
+        self.s.log("", LogLevel::Info, "resync: routes and DNS rebuilt");
+        Ok(Response::new(ResyncResponse {}))
     }
-    async fn remove_stale_route(&self, _: Request<RemoveStaleRouteRequest>) -> Rsp<RemoveStaleRouteResponse> {
-        no()
+    async fn remove_stale_route(&self, r: Request<RemoveStaleRouteRequest>) -> Rsp<RemoveStaleRouteResponse> {
+        let key = r.into_inner().key;
+        let mut stale = self.s.stale.lock().unwrap();
+        let before = stale.len();
+        stale.retain(|s| s.key != key);
+        if stale.len() == before {
+            return Err(Status::not_found("no such stale route"));
+        }
+        drop(stale);
+        self.s.log("", LogLevel::Warn, format!("removed stale route {key}"));
+        Ok(Response::new(RemoveStaleRouteResponse {}))
     }
 }
 
@@ -290,3 +393,5 @@ pub async fn serve(pipe: &str, fake: Fake, ready: tokio::sync::oneshot::Sender<(
     };
     Server::builder().add_service(DaemonServiceServer::new(fake)).serve_with_incoming(incoming).await
 }
+
+

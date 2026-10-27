@@ -13,7 +13,7 @@ pub mod pb {
 }
 
 pub use pb::daemon_service_client::DaemonServiceClient;
-pub use tonic::transport::Channel;
+pub use tonic::{transport::Channel, Streaming};
 
 /// The pipe the daemon listens on unless told otherwise.
 pub const DEFAULT_PIPE: &str = r"\\.\pipe\plaitway";
@@ -66,5 +66,6 @@ mod tests {
         }
     }
 }
+
 
 
