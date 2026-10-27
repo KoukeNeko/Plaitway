@@ -357,7 +357,8 @@ fn main() -> Result<()> {
         let inst: HINSTANCE = GetModuleHandleW(None)?.into();
         let class = w!("PlaitwaySpike");
         RegisterClassExW(&WNDCLASSEXW { cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32, style: CS_HREDRAW | CS_VREDRAW, lpfnWndProc: Some(wndproc), hInstance: inst, hCursor: LoadCursorW(None, IDC_ARROW)?, lpszClassName: class, ..Default::default() });
-        let hwnd = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, class, w!("Plaitway"), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
+        let hwnd = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, class, w!("Plaitway"), WS_OVERLAPPEDWINDOW & !WS_SYSMENU, // no WS_SYSMENU: DWM then draws no caption buttons of its own beside ours
+CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
 
         let scale = GetDpiForWindow(hwnd) as f32 / 96.0;
         let _ = SetWindowPos(hwnd, None, 0, 0, (1280.0 * scale) as i32, (800.0 * scale) as i32, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
