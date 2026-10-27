@@ -75,6 +75,28 @@ impl Bay {
         Bay { on: [true; 3], order: [0, 1, 2], sel: 0, hover: Hover::None, compact: false, reduced_motion: false, btn_hover: None, drag: None, anim: Some(Instant::now()) }
     }
 
+    pub fn dest(&self, d: usize) -> (&'static str, &'static str) {
+        DESTS[d]
+    }
+
+    /// How profile `p` stands on route `d`, or None when it does not ask for it.
+    pub fn status(&self, p: usize, d: usize) -> Option<&'static str> {
+        if !WANTS[p][d] {
+            None
+        } else if !self.on[p] {
+            Some("Not connected")
+        } else if self.holder(d) == Some(p) {
+            Some("Holds")
+        } else {
+            Some("Waits")
+        }
+    }
+
+    pub fn toggle(&mut self, p: usize) {
+        self.on[p] = !self.on[p];
+        self.restart_anim();
+    }
+
     fn slot(&self, p: usize) -> usize {
         self.order.iter().position(|&q| q == p).unwrap()
     }

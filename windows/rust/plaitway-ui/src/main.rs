@@ -4,11 +4,13 @@
 
 mod bay;
 mod gfx;
+mod pages;
 
 use std::{cell::RefCell, ffi::c_void};
 
 use bay::{Bay, Pal};
 use gfx::Gfx;
+use pages::{Act, Fonts, Page, Ui};
 use windows::{
     core::*,
     Wdk::System::SystemServices::RtlGetVersion,
@@ -87,6 +89,8 @@ struct App {
     tracking: bool,
     client_tracking: bool,
     bay: Bay,
+    ui: Ui,
+    f_mono: usize,
     frames: u32,
     f_text: usize,
     f_bold: usize,
@@ -143,15 +147,30 @@ impl App {
 
         // Sidebar: Mica shows through; only the selected row and the profile dots are drawn.
         let (side, _, compact) = frame(w, s);
-        g.rect(8.0 * s, cap + 6.0 * s, (side - 18.0) * s, 40.0 * s, 6.0 * s, t.selected);
-        g.outline(8.0 * s, cap + 6.0 * s, (side - 18.0) * s, 40.0 * s, 6.0 * s, 1.0, line);
+        let ui = &mut self.ui;
+        ui.clear();
+        let rw = (side - 18.0) * s;
+        // One navigation row: highlight when current, lighter when hovered, and a click region.
+        let nav = |g: &mut Gfx, ui: &mut Ui, y: f32, h: f32, act: Act| {
+            let current = matches!(act, Act::Go(p) if p == ui.page);
+            if current || ui.is_hover(act) {
+                g.rect(8.0 * s, y, rw, h, 6.0 * s, if current { t.selected } else { t.hover });
+            }
+            if current {
+                g.outline(8.0 * s, y, rw, h, 6.0 * s, 1.0, line);
+            }
+            ui.region((8.0 * s, y, rw, h), act);
+        };
+        nav(g, ui, cap + 6.0 * s, 40.0 * s, Act::Go(Page::Routing));
+        g.text(self.f_icons, 14.0 * s, if compact { 8.0 * s + (rw - 14.0 * s) / 2.0 } else { 22.0 * s }, cap + 26.0 * s, "\u{E968}", ink);
         if !compact {
-            g.text(self.f_text, 14.0 * s, 44.0 * s, cap + 26.0 * s, "Routing", ink);
+            g.text(self.f_text, 14.0 * s, 52.0 * s, cap + 26.0 * s, "Routing", ink);
             g.text(self.f_bold, 12.0 * s, 22.0 * s, cap + 78.0 * s, "PROFILES", muted);
         }
         for (k, &i) in self.bay.order.iter().enumerate() {
             let (name, proto, light, dark) = bay::PROFILES[i];
             let cy = cap + (if compact { 92.0 + k as f32 * 36.0 } else { 118.0 + k as f32 * 56.0 }) * s;
+            nav(g, ui, cy - (if compact { 16.0 } else { 24.0 }) * s, (if compact { 32.0 } else { 48.0 }) * s, Act::Go(Page::Profile(i)));
             let (held, wanted) = self.bay.holds(i);
             let sub = if self.bay.on[i] { format!("{proto} · Holds {held} of {wanted}") } else { format!("{proto} · Not connected") };
             let c = rgba(if t.dark { dark } else { light }, 1.0);
@@ -167,6 +186,16 @@ impl App {
             }
         }
 
+        // Diagnostics and Settings sit at the bottom of the sidebar.
+        for (k, (label, glyph, page)) in [("Diagnostics", "\u{E9D9}", Page::Diagnostics), ("Settings", "\u{E713}", Page::Settings)].iter().enumerate() {
+            let y = h - (100.0 - k as f32 * 46.0) * s;
+            nav(g, ui, y, 40.0 * s, Act::Go(*page));
+            g.text(self.f_icons, 14.0 * s, if compact { 8.0 * s + (rw - 14.0 * s) / 2.0 } else { 22.0 * s }, y + 20.0 * s, glyph, ink);
+            if !compact {
+                g.text(self.f_text, 14.0 * s, 52.0 * s, y + 20.0 * s, label, ink);
+            }
+        }
+
         // Content surface: a translucent layer over Mica. Its right and bottom corners are pushed off screen.
         let (cx, cy0) = (side * s, cap);
         g.rect(cx, cy0, w - cx + 20.0 * s, h - cy0 + 20.0 * s, 10.0 * s, t.surface);
@@ -175,7 +204,12 @@ impl App {
         let pal = Pal { dark: t.dark, ink, muted, line, card: if t.dark { rgba(0xFFFFFF, 0.07) } else { rgba(0xFFFFFF, 0.9) } };
         let (ox, oy, cw) = content(w, s);
         self.bay.compact = compact;
-        self.bay.draw(g, (self.f_text, self.f_bold), &pal, s, ox, oy, cw);
+        if self.ui.page == Page::Routing {
+            self.bay.draw(g, (self.f_text, self.f_bold), &pal, s, ox, oy, cw);
+        } else {
+            let fonts = Fonts { text: self.f_text, bold: self.f_bold, mono: self.f_mono };
+            self.ui.draw(g, &fonts, &pal, &self.bay, s, ox, oy, cw);
+        }
 
         self.frames += 1;
         let clear = if self.mica { [0.0; 4] } else { self.theme.solid };
@@ -328,7 +362,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         a.client_tracking = true;
                     }
                     let (x, y, w) = local(a, mx, my, cw as f32);
-                    dirty |= a.bay.mouse_move(x, y, w);
+                    dirty |= a.ui.mouse_move(mx, my);
+                    if a.ui.page == Page::Routing {
+                        dirty |= a.bay.mouse_move(x, y, w);
+                    }
                 }
                 if a.hot != Hot::None {
                     a.hot = Hot::None;
@@ -354,7 +391,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let (cw, _) = client_size(hwnd);
             with_app(|a| {
                 let (x, y, w) = local(a, mx, my, cw as f32);
-                if a.bay.press(x, y, w) {
+                if let Some(act) = a.ui.click(mx, my) {
+                    if let Act::Connect(p) = act {
+                        a.bay.toggle(p);
+                    }
+                    redraw(hwnd, a);
+                } else if a.ui.page == Page::Routing && a.bay.press(x, y, w) {
                     if a.bay.dragging() {
                         SetCapture(hwnd);
                     }
@@ -374,7 +416,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_KEYDOWN => {
             with_app(|a| {
-                if a.bay.key(wparam.0 as u32) {
+                let vk = wparam.0 as u32;
+                if a.ui.key(vk) || (a.ui.page == Page::Routing && a.bay.key(vk)) {
                     redraw(hwnd, a);
                 }
             });
@@ -478,8 +521,9 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let mut gfx = Gfx::new(hwnd, w, h)?;
         let f_text = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_NORMAL)?;
         let f_bold = gfx.load_font(&["Segoe UI Variable Text", "Segoe UI"], DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
+        let f_mono = gfx.load_font(&["Cascadia Mono", "Consolas"], DWRITE_FONT_WEIGHT_NORMAL)?;
         let f_icons = gfx.load_font(&["Segoe Fluent Icons", "Segoe MDL2 Assets"], DWRITE_FONT_WEIGHT_NORMAL)?;
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), ui: Ui::new(), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 
@@ -496,4 +540,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
     }
     Ok(())
 }
+
+
+
 
