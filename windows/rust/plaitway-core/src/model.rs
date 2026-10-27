@@ -1,13 +1,70 @@
 use plaitway_client::pb::{self, profile_event::Event};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Kind {
+    #[default]
     OpenVpn,
     WireGuard,
 }
 
+/// What a profile may be asked for when it is connecting.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CredentialKind {
+    UserPassword,
+    KeyPassphrase,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TunnelMode {
+    /// As the profile itself says.
+    #[default]
+    Auto,
+    /// Send all traffic through the tunnel.
+    Full,
+    /// Only the routes the profile names.
+    Split,
+}
+
+/// The settings of a profile that the user may change.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Settings {
+    pub auto_connect: bool,
+    pub mode: TunnelMode,
+    pub exclude_private_ips: bool,
+    /// Kept so that a change of the settings above does not lose them: the daemon takes the whole set.
+    pub priority: i32,
+    pub on_demand: (bool, bool),
+}
+
+impl Settings {
+    pub fn to_pb(self) -> pb::ProfileSettings {
+        pb::ProfileSettings {
+            auto_connect: self.auto_connect,
+            tunnel_mode: match self.mode {
+                TunnelMode::Auto => pb::TunnelMode::Auto,
+                TunnelMode::Full => pb::TunnelMode::Full,
+                TunnelMode::Split => pb::TunnelMode::Split,
+            } as i32,
+            priority: self.priority,
+            exclude_private_ips: self.exclude_private_ips,
+            on_demand: Some(pb::OnDemandRules { ethernet: self.on_demand.0, wifi: self.on_demand.1 }),
+        }
+    }
+}
+
+/// Facts read from the profile text when it was imported.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Summary {
+    /// `host:port`.
+    pub endpoints: Vec<String>,
+    pub addresses: Vec<String>,
+    pub dns: Vec<String>,
+    pub requires_credentials: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum State {
+    #[default]
     Disconnected,
     Connecting,
     Connected,
@@ -36,7 +93,7 @@ pub struct Request {
     pub shadowed_by: Option<String>,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct Tunnel {
     pub id: String,
     pub name: String,
@@ -51,6 +108,10 @@ pub struct Tunnel {
     pub since: Option<i64>,
     /// Live only while connected.
     pub requests: Vec<Request>,
+    pub settings: Settings,
+    pub summary: Summary,
+    /// Set while the profile waits for a password or passphrase.
+    pub credential: Option<CredentialKind>,
 }
 
 impl Tunnel {
@@ -92,6 +153,24 @@ impl Tunnel {
             wanted: p.summary.as_ref().map_or(0, |s| s.routes.len()),
             since: p.status.as_ref().and_then(|s| s.connected_since.as_ref()).map(|t| t.seconds),
             requests,
+            settings: p.settings.as_ref().map_or_else(Settings::default, |s| Settings {
+                auto_connect: s.auto_connect,
+                mode: match pb::TunnelMode::try_from(s.tunnel_mode) {
+                    Ok(pb::TunnelMode::Full) => TunnelMode::Full,
+                    Ok(pb::TunnelMode::Split) => TunnelMode::Split,
+                    _ => TunnelMode::Auto,
+                },
+                exclude_private_ips: s.exclude_private_ips,
+                priority: s.priority,
+                on_demand: s.on_demand.as_ref().map_or((false, false), |o| (o.ethernet, o.wifi)),
+            }),
+            summary: p.summary.as_ref().map_or_else(Summary::default, |s| Summary {
+                endpoints: s.endpoints.iter().map(|e| format!("{}:{}", e.host, e.port)).collect(),
+                addresses: s.addresses.clone(),
+                dns: s.dns_servers.clone(),
+                requires_credentials: s.requires_credentials,
+            }),
+            credential: p.credential_request.as_ref().map(|c| if c.kind == pb::CredentialKind::KeyPassphrase as i32 { CredentialKind::KeyPassphrase } else { CredentialKind::UserPassword }),
         }
     }
 
@@ -273,6 +352,8 @@ mod tests {
         assert_eq!(m.tunnels.len(), 2);
     }
 }
+
+
 
 
 

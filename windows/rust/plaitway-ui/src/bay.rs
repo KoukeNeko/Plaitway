@@ -507,6 +507,7 @@ mod tests {
             wanted: asks.len(),
             since: None,
             requests: asks.iter().map(|(p, s)| Request { prefix: p.to_string(), standing: *s, shadowed_by: None }).collect(),
+            ..Default::default()
         }
     }
 
@@ -649,6 +650,7 @@ mod tests {
         assert!(b.animating());
     }
 }
+
 
 
 

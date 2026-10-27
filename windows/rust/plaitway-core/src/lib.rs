@@ -8,9 +8,10 @@ mod store;
 
 pub use diag::*;
 pub use model::*;
-pub use session::{Link, Session, View};
+pub use session::{ContentView, Link, Session, View};
 pub use store::{Language, Placement, Store, Ui as UiPrefs};
 pub use plaitway_client::DEFAULT_PIPE;
+
 
 
 
