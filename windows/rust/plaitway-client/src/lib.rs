@@ -4,7 +4,7 @@ use std::{io, time::Duration};
 
 use hyper_util::rt::TokioIo;
 use tokio::net::windows::named_pipe::ClientOptions;
-use tonic::transport::{Channel, Endpoint, Uri};
+use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 #[allow(clippy::all)]
@@ -13,6 +13,7 @@ pub mod pb {
 }
 
 pub use pb::daemon_service_client::DaemonServiceClient;
+pub use tonic::transport::Channel;
 
 /// The pipe the daemon listens on unless told otherwise.
 pub const DEFAULT_PIPE: &str = r"\\.\pipe\plaitway";
@@ -65,3 +66,5 @@ mod tests {
         }
     }
 }
+
+

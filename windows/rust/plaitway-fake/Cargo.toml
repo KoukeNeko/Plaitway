@@ -1,0 +1,13 @@
+[package]
+name = "plaitway-fake"
+version = "0.1.0"
+edition = "2021"
+description = "A stand-in for plaitwayd that follows the proto, for developing and testing the Windows UI"
+
+[dependencies]
+plaitway-client = { path = "../plaitway-client" }
+prost-types = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "io-util", "sync"] }
+tokio-stream = "0.1"
+async-stream = "0.3"
+tonic = "0.12"

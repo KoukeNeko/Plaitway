@@ -1,8 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["plaitway-ui", "plaitway-client"]
+members = ["plaitway-ui", "plaitway-client", "plaitway-fake", "plaitway-core"]
 
 [profile.release]
 opt-level = "s"
 lto = true
 strip = true
+

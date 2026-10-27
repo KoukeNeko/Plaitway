@@ -1,0 +1,13 @@
+[package]
+name = "plaitway-core"
+version = "0.1.0"
+edition = "2021"
+description = "What the Windows UI knows about the daemon: the model of profiles and routes, and the session that keeps it current"
+
+[dependencies]
+plaitway-client = { path = "../plaitway-client" }
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
+
+[dev-dependencies]
+plaitway-fake = { path = "../plaitway-fake" }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }

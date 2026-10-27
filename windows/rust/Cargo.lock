@@ -525,6 +525,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "plaitway-core"
+version = "0.1.0"
+dependencies = [
+ "plaitway-client",
+ "plaitway-fake",
+ "tokio",
+]
+
+[[package]]
+name = "plaitway-fake"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "plaitway-client",
+ "prost-types",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+]
+
+[[package]]
 name = "plaitway-ui"
 version = "0.1.0"
 dependencies = [
