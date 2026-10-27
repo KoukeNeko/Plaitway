@@ -33,10 +33,12 @@ cargo test --workspace
 
 ## What is not here
 
-- **The installer.** `packaging\windows\build-installer.ps1` publishes the WinUI app and its licence notices
+- **The installer, the last step.** `packaging\windows\build-installer.ps1` publishes the WinUI app and its licence notices
   (`packaging\notices -windows` reads the .NET runtime of that publish). The package itself takes
   `app\Plaitway.exe` and whatever else is in `app\`, so a Rust app that is one exe named `Plaitway.exe`
-  fits `Package.wxs` as it is. What is missing is a way to list the licences of the Rust crates for the
-  notices file and a build that has Go and the .NET SDK to try it on; neither is on the machine this was written on.
+  fits `Package.wxs` as it is. What is missing is a build that has Go and the .NET SDK to try it on, which is not on the machine
+  this was written on. scripts\stage-app.ps1 -Output <dir> makes the folder the package takes (pp\Plaitway.exe,
+  and the notices of the 93 crates in licenses\), and scripts\notices.ps1 writes the notices alone.
+  uild-installer.ps1 has no switch for it yet: it publishes the WinUI app and reads its .NET notices.
 - **Windows 10.** The solid-colour path is drawn when `PLAITWAY_SOLID=1`, on Windows 11. It has not run on Windows 10.
 - **More languages.** The shared catalogs have one translation, Traditional Chinese.

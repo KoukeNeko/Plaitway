@@ -168,3 +168,72 @@ async fn managing_profiles_against_the_real_daemon() {
 }
 
 
+
+/// What `wgcf generate` writes for Cloudflare WARP: two addresses, four resolvers, an MTU, a default route
+/// for both families and an endpoint by name. Made here with a fresh key, so no account is needed.
+fn warp_shaped() -> String {
+    let mut key = [0u8; 32];
+    for (i, b) in key.iter_mut().enumerate() {
+        *b = (i as u8).wrapping_mul(37).wrapping_add(11);
+    }
+    key[0] &= 248;
+    key[31] = (key[31] & 127) | 64;
+    // Base64 of 32 bytes without a library: 3 bytes make 4 characters.
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::new();
+    for c in key.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        s.push(T[(n >> 18) as usize & 63] as char);
+        s.push(T[(n >> 12) as usize & 63] as char);
+        s.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        s.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    format!(
+        "[Interface]\nPrivateKey = {s}\nAddress = 172.16.0.2/32\nAddress = 2606:4700:110:8a36:df92:102a:9602:fa8b/128\nDNS = 1.1.1.1\nDNS = 1.0.0.1\nDNS = 2606:4700:4700::1111\nDNS = 2606:4700:4700::1001\nMTU = 1280\n\n[Peer]\nPublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=\nAllowedIPs = 0.0.0.0/0\nAllowedIPs = ::/0\nEndpoint = engage.cloudflareclient.com:2408\n"
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_warp_shaped_wireguard_profile_is_understood() {
+    let Ok(pipe) = std::env::var("PLAITWAY_FAKE_PIPE") else {
+        eprintln!("skipped: PLAITWAY_FAKE_PIPE is not set");
+        return;
+    };
+    let mut c = connect(&pipe).await.expect("connect");
+    for p in c.list_profiles(pb::ListProfilesRequest {}).await.unwrap().into_inner().profiles {
+        let _ = c.set_profile_enabled(pb::SetProfileEnabledRequest { id: p.id.clone(), enabled: false }).await;
+        c.delete_profile(pb::DeleteProfileRequest { id: p.id }).await.unwrap();
+    }
+    let s = Session::start(&pipe, || {});
+    until(&s, "online", |v| v.link == Link::Online);
+    s.import("warp", "wgcf-profile.conf", warp_shaped().into_bytes());
+    let v = until(&s, "imported", |v| v.model.tunnels.iter().any(|t| t.name == "warp"));
+    let t = v.model.tunnels.iter().find(|t| t.name == "warp").unwrap().clone();
+    eprintln!("kind={:?} endpoints={:?} addresses={:?} dns={:?} wanted={} info={:?}", t.kind, t.summary.endpoints, t.summary.addresses, t.summary.dns, t.wanted, v.info);
+    assert_eq!(t.kind, plaitway_core::Kind::WireGuard);
+    assert_eq!(t.summary.endpoints, ["engage.cloudflareclient.com:2408"]);
+    assert_eq!(t.summary.addresses.len(), 2, "one per family");
+    assert_eq!(t.summary.dns.len(), 4);
+
+    s.set_enabled(&t.id, true);
+    let v = until(&s, "connected", |v| v.model.tunnels.iter().any(|t| t.name == "warp" && t.connected()));
+    let rows = v.model.routes();
+    let prefixes: Vec<&str> = rows.iter().map(|r| r.prefix.as_str()).collect();
+    eprintln!("routes: {prefixes:?}");
+    assert!(prefixes.contains(&"0.0.0.0/0"), "the IPv4 halves are one route: {prefixes:?}");
+    // The profile names ::/0 too, but this daemon installs no IPv6 route: the page says so with "holds 1 of 2".
+    let warp = v.model.tunnels.iter().find(|t| t.name == "warp").unwrap();
+    assert_eq!((warp.holds(), warp.wanted), ((1, 2), 2), "{:?}", warp.requests);
+    assert!(!prefixes.iter().any(|p| p.ends_with("/1")), "no half is left over: {prefixes:?}");
+
+    s.watch_diagnostics(true);
+    let d = until(&s, "owned routes", |v| v.diagnostics.as_ref().is_some_and(|d| !d.owned.is_empty())).diagnostics.unwrap();
+    eprintln!("owned: {:?}", d.owned.iter().map(|o| (o.prefix.as_str(), format!("{:?}", o.kind))).collect::<Vec<_>>());
+    assert!(d.owned.iter().any(|o| o.prefix == "0.0.0.0/0" && o.kind == plaitway_core::RouteKind::Default), "diagnostics show the default route as one: {:?}", d.owned);
+    assert!(!d.owned.iter().any(|o| o.prefix.ends_with("/1")));
+
+    s.set_enabled(&t.id, false);
+    s.delete(&t.id);
+    until(&s, "gone", |v| v.model.tunnels.is_empty());
+}
+
