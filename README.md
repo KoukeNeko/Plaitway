@@ -540,7 +540,7 @@ why the choices were made.
 | | OpenVPN | WireGuard |
 |---|---|---|
 | Tunnel device | A TAP-Windows6 adapter that the engine makes with `tapctl`, named `Plaitway-ovpn-` and eight hex digits | A wintun adapter named `Plaitway-` and eight hex digits |
-| Needs | `openvpn.exe` and `tapctl.exe` of an OpenVPN installation (tested with 2.7.1) that has the TAP-Windows6 driver, signed by OpenVPN Inc., in a folder that only administrators can change: `<folder of plaitwayd.exe>\openvpn\bin`, else `C:\Program Files\OpenVPN\bin`; `-openvpn` names another | `wintun.dll` signed by WireGuard LLC, next to `plaitwayd.exe` |
+| Needs | `openvpn.exe` and `tapctl.exe` of OpenVPN (tested with 2.7.1) and the TAP-Windows6 driver, signed by OpenVPN Inc., in a folder that only administrators can change: `<folder of plaitwayd.exe>\openvpn\bin`, which is the copy the MSI ships (the driver goes into the driver store), else `C:\Program Files\OpenVPN\bin`; `-openvpn` names another | `wintun.dll` signed by WireGuard LLC, next to `plaitwayd.exe` |
 | Routes | The Reconciler, through the tunnel's own gateway: the adapter answers only for it | The Reconciler, on-link |
 | DNS | NRPT rules written by the Reconciler | NRPT rules written by the Reconciler |
 

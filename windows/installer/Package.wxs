@@ -14,6 +14,8 @@
       HelperUndo       rollback   uninstall the service just registered               (first install)
       HelperInstall    deferred   install -start, or install -update -start           (all but removal)
 
+      TapDriverStage   deferred   pnputil /add-driver of the TAP-Windows6 driver        (all but removal)
+
       HelperUndoRemove rollback   register the service again if the files cannot go   (removal)
       HelperUninstall  deferred   uninstall [-purge]                                  (removal, not an upgrade)
       RemoveFiles
@@ -125,6 +127,16 @@
     <SetProperty Id="HelperUninstallForced" Action="SetHelperUninstallForcedData" Value="$(Quote)[#PlaitwaydExe]$(Quote) [HELPER_UNINSTALL_ARGS]"
                  Sequence="execute" Before="SetHelperUndoRemoveData" />
 
+    <!-- The TAP-Windows6 driver that OpenVPN runs on (openvpn\driver, the driver package of the official OpenVPN, signed by
+         Microsoft) goes into the driver store, which is all pnputil /add-driver does: the driver is loaded when tapctl
+         makes the first adapter. Return="ignore": a driver that Windows refuses leaves OpenVPN unavailable, and the daemon
+         says so (`the TAP-Windows6 driver is not installed`); it does not stop Plaitway from installing. Nothing removes
+         the driver again: it is the same driver as that of an OpenVPN the person installed, and the daemon removes its own
+         adapters. -->
+    <CustomAction Id="TapDriverStage" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="deferred" Impersonate="no" Return="ignore" />
+    <SetProperty Id="TapDriverStage" Action="SetTapDriverStageData" Value="$(Quote)[SystemFolder]pnputil.exe$(Quote) /add-driver $(Quote)[OPENVPNFOLDER]driver\OemVista.inf$(Quote)"
+                 Sequence="execute" Before="TapDriverStage" />
+
     <InstallExecuteSequence>
       <Custom Action="BlockDowngrade" After="FindRelatedProducts" Condition="WIX_DOWNGRADE_DETECTED" />
       <RemoveExistingProducts After="InstallExecute" />
@@ -134,6 +146,7 @@
       <Custom Action="HelperStop" Before="RemoveFiles" Condition="NOT REMOVE AND HELPER_SERVICE_IMAGEPATH AND HELPER_EXE_PRESENT" />
       <Custom Action="HelperUndo" After="InstallFiles" Condition="NOT REMOVE AND NOT HELPER_SERVICE_IMAGEPATH" />
       <Custom Action="HelperInstall" After="HelperUndo" Condition="NOT REMOVE" />
+      <Custom Action="TapDriverStage" After="HelperInstall" Condition="NOT REMOVE" />
 
       <Custom Action="HelperUndoRemove" Before="HelperUninstall" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND HELPER_EXE_PRESENT" />
       <Custom Action="HelperUninstall" Before="HelperUninstallForced" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND HELPER_EXE_PRESENT AND NOT PLAITWAY_FORCE_UNINSTALL" />
@@ -142,6 +155,7 @@
     <UI>
       <ProgressText Action="HelperStop" Message="!(loc.ProgressStopHelper)" />
       <ProgressText Action="HelperInstall" Message="!(loc.ProgressInstallHelper)" />
+      <ProgressText Action="TapDriverStage" Message="!(loc.ProgressStageTapDriver)" />
       <ProgressText Action="HelperUninstall" Message="!(loc.ProgressUninstallHelper)" />
       <ProgressText Action="HelperUninstallForced" Message="!(loc.ProgressUninstallHelper)" />
     </UI>
@@ -153,6 +167,7 @@
     <Feature Id="Plaitway" Title="!(loc.FeatureTitle)" Level="1" AllowAbsent="no" AllowAdvertise="no">
       <ComponentGroupRef Id="CoreFiles" />
       <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="OpenVpnFiles" />
       <ComponentGroupRef Id="LicenseFiles" />
     </Feature>
   </Package>
@@ -163,6 +178,7 @@
            check of its own location accepts. -->
       <Directory Id="INSTALLFOLDER" Name="$(ProductName)">
         <Directory Id="APPFOLDER" Name="app" />
+        <Directory Id="OPENVPNFOLDER" Name="openvpn" />
         <Directory Id="LICENSESFOLDER" Name="licenses" />
       </Directory>
     </StandardDirectory>
@@ -192,6 +208,15 @@
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="$(ProductName)" WorkingDirectory="APPFOLDER" Advertise="no" />
         </File>
       </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- OpenVPN, where the daemon looks first (<folder of plaitwayd.exe>\openvpn\bin\openvpn.exe): bin\, ssl\modules\, driver\
+       and its licence, as packaging\windows\fetch-openvpn.ps1 lays them out. The folder inherits the access list of Program
+       Files, which the daemon requires of openvpn.exe and of every folder above it. -->
+  <Fragment>
+    <ComponentGroup Id="OpenVpnFiles" Directory="OPENVPNFOLDER">
+      <Files Include="$(PayloadDir)\openvpn\**" />
     </ComponentGroup>
   </Fragment>
 

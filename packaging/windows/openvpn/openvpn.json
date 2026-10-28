@@ -1,0 +1,34 @@
+{
+  "version": "2.7.1",
+  "url": "https://swupdate.openvpn.org/community/releases/OpenVPN-2.7.1-I001-amd64.msi",
+  "msiSha256": "821415899fda40063b2740fa239c557435965c5c9df5a6260cc6f684f02e65b8",
+  "publishedAt": "https://openvpn.net/community-downloads/ lists no hash for the 2.7.1 installer; the hash is of the file downloaded from swupdate.openvpn.org on 2026-10-28, whose Authenticode signature is valid and issued to OpenVPN Inc.",
+  "signer": "OpenVPN Inc.",
+  "tapStream": "Binary.installer.dll.8D9A59BA_33C1_4CA0_96AF_E7F728DEC8D7",
+  "tapPublisher": "Microsoft Windows Hardware Compatibility Publisher",
+  "components": [
+    { "name": "OpenVPN (openvpn.exe, tapctl.exe)", "version": "2.7.1", "license": "GPL-2.0 with OpenSSL linking exception", "source": "https://build.openvpn.net/downloads/releases/openvpn-2.7.1.tar.gz", "gpl": true },
+    { "name": "TAP-Windows6 driver (tap0901.sys)", "version": "9.27.0", "license": "GPL-2.0", "source": "https://github.com/OpenVPN/tap-windows6/archive/refs/tags/9.27.0.tar.gz", "gpl": true },
+    { "name": "LZO (linked into openvpn.exe)", "version": "2.10", "license": "GPL-2.0", "source": "https://www.oberhumer.com/opensource/lzo/download/lzo-2.10.tar.gz", "gpl": true },
+    { "name": "pkcs11-helper (libpkcs11-helper-1.dll)", "version": "1.31", "license": "GPL-2.0 or BSD-3-Clause", "source": "https://github.com/OpenSC/pkcs11-helper/releases", "gpl": false },
+    { "name": "OpenSSL (libcrypto, libssl, legacy.dll)", "version": "3.6.1", "license": "Apache-2.0", "source": "https://github.com/openssl/openssl/releases/tag/openssl-3.6.1", "gpl": false },
+    { "name": "LZ4 (linked into openvpn.exe)", "version": "as built into OpenVPN 2.7.1", "license": "BSD-2-Clause", "source": "https://github.com/lz4/lz4", "gpl": false },
+    { "name": "Microsoft Visual C++ runtime (vcruntime140.dll)", "version": "as shipped by OpenVPN 2.7.1", "license": "Microsoft redistributable", "source": "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist", "gpl": false }
+  ],
+  "bin": {
+    "openvpn.exe": "57dbcdc2d3205f889df6ebd62dc4d510a089238f65a201ad5658161156ae61f2",
+    "tapctl.exe": "55dd119b1b67902ac1603ebbbeb83fefeca34d31708cf330c8ca376bd25f6919",
+    "libcrypto-3-x64.dll": "960af2c6b7042e3d91c29318ea1c46290e93f881b22f749838a143edfc74cedb",
+    "libssl-3-x64.dll": "b9aaa20b1df8d2f1d2edd1cf0770b8f82a6691d035a74247577583e98decbf67",
+    "libpkcs11-helper-1.dll": "f91647ace24a64004d3348623f923626b71ae73b44c33ab326b355aa03347954",
+    "vcruntime140.dll": "c51c64dfb7c445ecf0001f69c27e13299ddcfba0780efa72b866a7487b7491c7"
+  },
+  "ssl": {
+    "legacy.dll": "00e8dd91517a9afef749c61824168b79204cc14fdc36d45f71dc0630edfeb023"
+  },
+  "driver": {
+    "OemVista.inf": { "resource": "10/DRIVER-WHQL.INF/1033", "sha256": "1327ab3a8c50691f04bea8e2ca356c5b604092a719e219464f8cc4b42e192de9" },
+    "tap0901.sys": { "resource": "10/DRIVER-WHQL.SYS/1033", "sha256": "581dcaace05d5c1ac9512457ff50565aca5d904d2c209bd3fc369ca4d4a0d2b1" },
+    "tap0901.cat": { "resource": "10/DRIVER-WHQL.CAT/1033", "sha256": "ee062e5ef2743ceab10c64830e4cefe52e35cc1ece85947ac4e61ddd1c0b05f7" }
+  }
+}

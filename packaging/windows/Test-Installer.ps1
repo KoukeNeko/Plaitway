@@ -42,8 +42,13 @@ $SetupLanguageId = '1033'
 # Relative to the product folder (the one that holds plaitwayd.exe), where the app finds the daemon one folder above its own.
 $RequiredFiles = @(
     'plaitwayd.exe', 'plaitway.exe', 'wintun.dll', 'app\Plaitway.exe',
+    'openvpn\bin\openvpn.exe', 'openvpn\bin\tapctl.exe', 'openvpn\bin\libcrypto-3-x64.dll', 'openvpn\bin\libssl-3-x64.dll',
+    'openvpn\bin\libpkcs11-helper-1.dll', 'openvpn\bin\vcruntime140.dll', 'openvpn\ssl\modules\legacy.dll', 'openvpn\license.txt',
+    'openvpn\driver\OemVista.inf', 'openvpn\driver\tap0901.sys', 'openvpn\driver\tap0901.cat',
     'licenses\LICENSE.txt', 'licenses\THIRD_PARTY_NOTICES.md', 'licenses\THIRD_PARTY_NOTICES_RUST.md')
 $WintunSigner = 'WireGuard LLC'
+$OpenVpnSigner = 'OpenVPN Inc.'
+$TapDriverPublisher = 'Microsoft Windows Hardware Compatibility Publisher'
 $HelperActionOrder = @(
     # Each pair is (earlier, later) in InstallExecuteSequence.
     @('HelperRestore', 'HelperStop'),
@@ -107,6 +112,13 @@ function Test-Database($Handle) {
     $badCommandLines = @($targets | Where-Object { $_[0] -like 'SetHelper*Data' -and ($_[1] -notmatch '^"' -or $_[1] -match '&quot;') })
     Assert-That ($commandLines.Count -eq 7 -and $badCommandLines.Count -eq 0) 'the seven command lines of the Helper actions begin with a quote and hold no entity'
 
+    # The driver goes into the driver store by pnputil, as SYSTEM, and nothing removes it again (it is shared with an OpenVPN of the person's).
+    $stage = @($targets | Where-Object { $_[0] -eq 'SetTapDriverStageData' })
+    Assert-That ($stage.Count -eq 1 -and $stage[0][1] -match '^"\[SystemFolder\]pnputil\.exe" /add-driver "\[OPENVPNFOLDER\]driver\\OemVista\.inf"$') 'the driver is added with pnputil /add-driver from openvpn\driver\OemVista.inf'
+    $stageAction = @($customActions | Where-Object { $_[0] -eq 'TapDriverStage' })
+    Assert-That ($stageAction.Count -eq 1 -and ([int] $stageAction[0][1] -band 1024) -ne 0) 'the driver is added by a deferred action (it runs as SYSTEM)'
+    Assert-That ($sequence.ContainsKey('TapDriverStage') -and $sequence.ContainsKey('InstallFiles') -and $sequence['InstallFiles'] -lt $sequence['TapDriverStage']) 'the driver is added after the files are in'
+
     $shortcuts = Invoke-MsiQuery $Handle 'SELECT `Name` FROM `Shortcut`'
     Assert-That (@($shortcuts).Count -eq 1) 'one shortcut: the Start menu entry'
 }
@@ -118,6 +130,18 @@ function Test-UnpackedFolder([string] $Folder) {
     $product = $daemon.DirectoryName
     foreach ($relative in $RequiredFiles) {
         Assert-That (Test-Path -LiteralPath (Join-Path $product $relative) -PathType Leaf) "the package holds $relative"
+    }
+    foreach ($name in 'openvpn.exe', 'tapctl.exe') {
+        $path = Join-Path $product "openvpn\bin\$name"
+        if (Test-Path -LiteralPath $path) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $path
+            Assert-That ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -like "*$OpenVpnSigner*") "$name is signed by $OpenVpnSigner"
+        }
+    }
+    $driver = Join-Path $product 'openvpn\driver\tap0901.sys'
+    if (Test-Path -LiteralPath $driver) {
+        $signature = Get-AuthenticodeSignature -LiteralPath $driver
+        Assert-That ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -like "*$TapDriverPublisher*") "tap0901.sys is signed by $TapDriverPublisher"
     }
     $wintun = Join-Path $product 'wintun.dll'
     if (Test-Path -LiteralPath $wintun) {

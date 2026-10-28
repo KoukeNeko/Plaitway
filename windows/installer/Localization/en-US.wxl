@@ -10,4 +10,5 @@
   <String Id="ProgressStopHelper" Value="Stopping the Plaitway Helper service" />
   <String Id="ProgressInstallHelper" Value="Registering the Plaitway Helper service" />
   <String Id="ProgressUninstallHelper" Value="Removing the Plaitway Helper service" />
+  <String Id="ProgressStageTapDriver" Value="Adding the TAP-Windows6 driver of OpenVPN to the driver store" />
 </WixLocalization>

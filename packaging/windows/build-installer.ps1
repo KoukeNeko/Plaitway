@@ -4,7 +4,8 @@ Builds the Plaitway MSI: stages the payload, then builds the package.
 
 .DESCRIPTION
 1. Builds plaitwayd.exe and plaitway.exe with the version of the VERSION file.
-2. Fetches the checked wintun.dll (fetch-wintun.ps1: pinned hashes and signature).
+2. Fetches the checked wintun.dll (fetch-wintun.ps1: pinned hashes and signature) and the official OpenVPN with its
+   TAP-Windows6 driver (fetch-openvpn.ps1: the same).
 3. Builds the app (windows\rust, one self-contained program) with cargo and stages it with the notices of its crates.
 4. Writes the notices and the licence of the package.
 5. Signs the programs of Plaitway and the packages when -CertificateThumbprint is given.
@@ -67,7 +68,7 @@ $MaxMsiMajor = 255
 $MaxMsiMinor = 255
 $MaxMsiBuild = 65535
 $ProductCodeNamespace = 'plaitway-msi-product-code'
-$PayloadExecutables = @('plaitwayd.exe', 'plaitway.exe', 'wintun.dll', 'app\Plaitway.exe')
+$PayloadExecutables = @('plaitwayd.exe', 'plaitway.exe', 'wintun.dll', 'app\Plaitway.exe', 'openvpn.exe', 'tapctl.exe', 'tap0901.sys')
 # What Plaitway itself builds and therefore signs, relative to the payload; the files of others keep their signatures.
 $OwnPayloadPatterns = @('plaitwayd.exe', 'plaitway.exe', 'app\Plaitway.exe')
 $SigningOptions = @{}
@@ -170,13 +171,13 @@ function Write-Licenses([string] $Destination, [string] $RustStage) {
     $licenseText = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'LICENSE') -Raw
     [IO.File]::WriteAllText((Join-Path $licenses 'LICENSE.txt'), $licenseText, (New-Object System.Text.UTF8Encoding $false))
     [IO.File]::WriteAllText((Join-Path $Destination 'License.rtf'), (ConvertTo-Rtf $licenseText), [Text.Encoding]::ASCII)
-    Invoke-Native 'go' @('run', './packaging/notices', '-windows', '-goarch', $GoMachine, '-o', (Join-Path $licenses 'THIRD_PARTY_NOTICES.md'))
+    Invoke-Native 'go' @('run', './packaging/notices', '-windows', '-goarch', $GoMachine, '-openvpn', (Join-Path $Destination 'openvpn'), '-o', (Join-Path $licenses 'THIRD_PARTY_NOTICES.md'))
     Copy-Item -LiteralPath (Join-Path $RustStage 'licenses\THIRD_PARTY_NOTICES_RUST.md') -Destination $licenses
 }
 
 function Get-FileHashLines([string] $Directory, [string[]] $Include) {
     $files = Get-ChildItem -LiteralPath $Directory -Recurse -File -Include $Include |
-        Where-Object { $_.FullName -notmatch '\\(obj|bin)\\' } | Sort-Object { $_.FullName.ToLowerInvariant() }
+        Where-Object { $_.FullName.Substring($Directory.Length).TrimStart('\') -notmatch '^(obj|bin)\\' } | Sort-Object { $_.FullName.ToLowerInvariant() }
     foreach ($file in $files) {
         $relative = $file.FullName.Substring($Directory.Length).TrimStart('\').ToLowerInvariant()
         '{0} {1}' -f $relative, (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
@@ -258,6 +259,9 @@ Build-GoProgram './cmd/plaitway' (Join-Path $PayloadDirectory 'plaitway.exe') $v
 
 Write-Step 'wintun.dll'
 & (Join-Path $PSScriptRoot 'fetch-wintun.ps1') -OutputDirectory $PayloadDirectory -Architecture $WindowsArchitecture
+
+Write-Step 'OpenVPN and its TAP-Windows6 driver'
+& (Join-Path $PSScriptRoot 'fetch-openvpn.ps1') -OutputDirectory (Join-Path $PayloadDirectory 'openvpn')
 
 $appDirectory = Join-Path $PayloadDirectory 'app'
 # Where stage-app.ps1 lays out the app and the notices of its crates; -SkipAppPublish reuses the earlier run's.

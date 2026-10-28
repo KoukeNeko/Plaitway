@@ -13,7 +13,7 @@ macOS engine. The findings are from OpenVPN 2.7.1 on Windows 11 (build 26300);
 | `openvpn.exe` | An absolute path, signed by OpenVPN Inc. (Authenticode, embedded) |
 | `tapctl.exe` | In the same folder, signed the same way. Makes and removes adapters |
 | The libraries `openvpn.exe` loads | In the same folder (`libcrypto`, `libssl`, `vcruntime140`, `libpkcs11-helper`) |
-| The TAP-Windows6 driver | `%SystemRoot%\System32\drivers\tap0901.sys` |
+| The TAP-Windows6 driver | `%SystemRoot%\System32\drivers\tap0901.sys` once an adapter has used it, or staged in the driver store (`DriverStore\FileRepository\*\tap0901.sys`), which is where the installer of Plaitway puts it with `pnputil /add-driver` |
 
 The folder, every folder above it and the files must be owned by SYSTEM,
 Administrators or TrustedInstaller, and must not let any other account write,
@@ -23,6 +23,17 @@ folder, a share or a removable drive does not.
 
 `ovpn.Config.Binary` must be that absolute path. A bare `openvpn.exe` is refused:
 it would be looked up in folders anyone may write.
+
+## What the installer of Plaitway ships
+
+`openvpn\` below the installation folder holds the official OpenVPN 2.7.1 (`bin\` with `openvpn.exe`, `tapctl.exe` and their
+libraries, `ssl\modules\legacy.dll`, `license.txt`) and the TAP-Windows6 driver package (`driver\OemVista.inf`,
+`tap0901.sys`, `tap0901.cat`; the catalog and the driver are signed by Microsoft). `fetch-openvpn.ps1` lays them out from
+the official installer, pinned in `openvpn.json` (the SHA-256 of the installer, of every file and of the driver, and the
+signers); the installer is unpacked with `msiexec /a` and never run. The MSI stages the driver with `pnputil /add-driver`
+(a deferred action, as SYSTEM; if Windows refuses it the install goes on and the daemon reports the missing driver) and
+does not remove it again, because it is the same driver as that of an OpenVPN the person installed. The notices carry the
+GPLv2 written offer for OpenVPN, the driver and LZO. x64 only: the driver package has no arm64 section.
 
 ## Where the daemon looks
 

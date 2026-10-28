@@ -34,22 +34,34 @@ func TestWintunComponentCarriesTheRepositoryNotice(t *testing.T) {
 	}
 }
 
-func TestRenderWindowsPointsAtTheCrateNoticesAndHasNoSourceOffer(t *testing.T) {
+func TestRenderWindowsShipsOpenVPNWithASourceOfferAndPointsAtTheCrateNotices(t *testing.T) {
 	mk := func(name string) component {
 		return component{name: name, version: "1", license: "MIT", source: "src", docs: []document{{"MIT", mitText}}}
 	}
-	out := renderWindows(mk("Wintun"), []component{mk("goMod")})
+	vpn := openvpn{
+		version: "2.7.1",
+		components: []openvpnComponent{
+			{Name: "OpenVPN", Version: "2.7.1", License: "GPL-2.0", Source: "https://example.org/openvpn.tar.gz", GPL: true},
+			{Name: "OpenSSL", Version: "3.6.1", License: "Apache-2.0", Source: "https://example.org/openssl", GPL: false},
+		},
+		license: document{"OpenVPN licenses", "THE LICENSE TEXT OF OPENVPN"},
+	}
+	out := renderWindows(mk("Wintun"), []component{mk("goMod")}, vpn, "https://example.org/contact")
 	flat := strings.Join(strings.Fields(out), " ")
-	for _, want := range []string{"THIRD_PARTY_NOTICES_RUST.md", "ships no OpenVPN", "## Trademarks", "Windows is a trademark", "goMod"} {
+	for _, want := range []string{"THIRD_PARTY_NOTICES_RUST.md", "## Trademarks", "Windows is a trademark", "goMod",
+		"## Source offer", "Written offer, GPLv2 section 3(b)", "https://example.org/contact",
+		"- OpenVPN 2.7.1: https://example.org/openvpn.tar.gz", "THE LICENSE TEXT OF OPENVPN", "| OpenSSL | 3.6.1 | Apache-2.0 |"} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("the Windows notices lack %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, ".NET") || strings.Contains(out, "NuGet") || strings.Contains(out, "Source offer") {
-		t.Errorf("the Windows notices mention .NET, NuGet or a source offer:\n%s", out)
+	if strings.Contains(flat, "- OpenSSL 3.6.1:") {
+		t.Errorf("the source offer lists OpenSSL, which is not GPL:\n%s", out)
+	}
+	if strings.Contains(out, ".NET") || strings.Contains(out, "NuGet") || strings.Contains(flat, "ships no OpenVPN") {
+		t.Errorf("the Windows notices mention .NET, NuGet or an OpenVPN that is not shipped:\n%s", out)
 	}
 }
-
 // macosRenderDigest is the SHA-256 of render's output for the fixed components
 // below, taken before the Windows document was added. The macOS document must
 // not change because of it.

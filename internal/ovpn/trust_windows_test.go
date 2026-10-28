@@ -199,3 +199,38 @@ func TestCheckAdapterToolingNamesWhatIsMissing(t *testing.T) {
 		t.Errorf("checkAdapterTooling(without tapctl) = %v", err)
 	}
 }
+
+// The driver is found in the drivers folder (an adapter has used it) and in the driver store (the installer of Plaitway
+// staged it), and nowhere else.
+func TestTapDriverInstalledLooksInTheDriversFolderAndTheDriverStore(t *testing.T) {
+	put := func(system string, parts ...string) {
+		t.Helper()
+		path := filepath.Join(append([]string{system}, parts...)...)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name string
+		file []string
+		want bool
+	}{
+		{"nothing", nil, false},
+		{"another driver in the store", []string{"DriverStore", "FileRepository", "other.inf_amd64_1", "other.sys"}, false},
+		{"the drivers folder", []string{"drivers", tapDriverFile}, true},
+		{"the driver store", []string{"DriverStore", "FileRepository", "oemvista.inf_amd64_1", tapDriverFile}, true},
+	}
+	for _, c := range cases {
+		system := t.TempDir()
+		if c.file != nil {
+			put(system, c.file...)
+		}
+		got, err := tapDriverInstalled(system)
+		if err != nil || got != c.want {
+			t.Errorf("%s: installed = %v, %v; want %v", c.name, got, err, c.want)
+		}
+	}
+}

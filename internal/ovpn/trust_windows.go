@@ -157,10 +157,10 @@ func checkAdapterTooling(binary string) error {
 		return fmt.Errorf("find the system directory: %w", err)
 	}
 	driver := filepath.Join(system, "drivers", tapDriverFile)
-	if _, err := os.Stat(driver); errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("the TAP-Windows6 driver is not installed (%s is missing); install OpenVPN with its TAP-Windows6 driver", driver)
-	} else if err != nil {
+	if installed, err := tapDriverInstalled(system); err != nil {
 		return fmt.Errorf("look for the TAP-Windows6 driver: %w", err)
+	} else if !installed {
+		return fmt.Errorf("the TAP-Windows6 driver is not installed (%s is missing); install OpenVPN with its TAP-Windows6 driver", driver)
 	}
 	release, err := lockTrusted(tapctlPath(binary), "")
 	if err != nil {
@@ -168,6 +168,19 @@ func checkAdapterTooling(binary string) error {
 	}
 	release()
 	return nil
+}
+
+// tapDriverInstalled reports whether the TAP-Windows6 driver is on the machine: its file in the drivers folder, which is
+// there once an adapter has used the driver, or in the driver store, which is where the installer of Plaitway puts it
+// (pnputil /add-driver) before there is an adapter. tapctl makes the adapter from the store.
+func tapDriverInstalled(system string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(system, "drivers", tapDriverFile)); err == nil {
+		return true, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	staged, err := filepath.Glob(filepath.Join(system, "DriverStore", "FileRepository", "*", tapDriverFile))
+	return len(staged) > 0, err
 }
 
 // trustBinary is the check before a start. The caller keeps the lock until the

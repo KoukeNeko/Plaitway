@@ -23,10 +23,12 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- ICE03: the language lists in the version resources of Microsoft's libraries hold identifiers that ICE03 does not know; the
          language only matters to the installer's choice between two files of one version.
+         ICE60: a library of OpenVPN (vcruntime140.dll) has a version but no language, and the check wants a language for every versioned
+         file that is not a font; the language only matters to the choice between two files of one version.
          ICE43, ICE57: the shortcut in the Start menu of all users belongs to a component whose key is the app's file, which is right for a
          per-machine product; the checks assume a per-user shortcut.
          ICE61: a build of the same version with other files replaces the installed one (AllowSameVersionUpgrades), for tests and respins. -->
-    <SuppressIces>ICE03;ICE43;ICE57;ICE61</SuppressIces>
+    <SuppressIces>ICE03;ICE43;ICE57;ICE60;ICE61</SuppressIces>
     <UpgradeCode>BDA29F25-493D-4DF8-8B16-5A612BC4E954</UpgradeCode>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
     <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildProjectDirectory)\payload</PayloadDir>

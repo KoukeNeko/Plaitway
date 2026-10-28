@@ -51,7 +51,7 @@ the packages are built, and the packages after, all with SHA-256 and a timestamp
 
 ## What the package does
 
-Files in `C:\Program Files\Plaitway`: `plaitwayd.exe`, `plaitway.exe`, `wintun.dll`, `app\` and `licenses\`; a Start menu
+Files in `C:\Program Files\Plaitway`: `plaitwayd.exe`, `plaitway.exe`, `wintun.dll`, `app\`, `openvpn\` (the official OpenVPN with its TAP-Windows6 driver, see [openvpn/README.md](openvpn/README.md)) and `licenses\`; a Start menu
 shortcut for all users. The folder cannot be changed: `plaitwayd install` refuses an executable that a standard user
 could replace.
 
