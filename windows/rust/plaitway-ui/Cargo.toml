@@ -10,6 +10,9 @@ accesskit_windows = "0.35.2"
 plaitway-core = { path = "../plaitway-core" }
 plaitway-helper = { path = "../plaitway-helper" }
 
+[build-dependencies]
+embed-resource = "3"
+
 [dependencies.windows]
 version = "0.62"
 features = [

@@ -114,7 +114,7 @@ function Test-Database($Handle) {
 
     # The driver goes into the driver store by pnputil, as SYSTEM, and nothing removes it again (it is shared with an OpenVPN of the person's).
     $stage = @($targets | Where-Object { $_[0] -eq 'SetTapDriverStageData' })
-    Assert-That ($stage.Count -eq 1 -and $stage[0][1] -match '^"\[SystemFolder\]pnputil\.exe" /add-driver "\[OPENVPNFOLDER\]driver\\OemVista\.inf"$') 'the driver is added with pnputil /add-driver from openvpn\driver\OemVista.inf'
+    Assert-That ($stage.Count -eq 1 -and $stage[0][1] -match '^"\[System64Folder\]pnputil\.exe" /add-driver "\[OPENVPNFOLDER\]driver\\OemVista\.inf"$') 'the driver is added with pnputil /add-driver from openvpn\driver\OemVista.inf'
     $stageAction = @($customActions | Where-Object { $_[0] -eq 'TapDriverStage' })
     Assert-That ($stageAction.Count -eq 1 -and ([int] $stageAction[0][1] -band 1024) -ne 0) 'the driver is added by a deferred action (it runs as SYSTEM)'
     Assert-That ($sequence.ContainsKey('TapDriverStage') -and $sequence.ContainsKey('InstallFiles') -and $sequence['InstallFiles'] -lt $sequence['TapDriverStage']) 'the driver is added after the files are in'

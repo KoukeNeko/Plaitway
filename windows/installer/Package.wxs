@@ -127,14 +127,15 @@
     <SetProperty Id="HelperUninstallForced" Action="SetHelperUninstallForcedData" Value="$(Quote)[#PlaitwaydExe]$(Quote) [HELPER_UNINSTALL_ARGS]"
                  Sequence="execute" Before="SetHelperUndoRemoveData" />
 
-    <!-- The TAP-Windows6 driver that OpenVPN runs on (openvpn\driver, the driver package of the official OpenVPN, signed by
+    <!-- System64Folder, not SystemFolder: in a 64-bit package SystemFolder is SysWOW64, which has no pnputil.exe, and the 32-bit one
+         could not add a driver to a 64-bit system anyway. The TAP-Windows6 driver that OpenVPN runs on (openvpn\driver, the driver package of the official OpenVPN, signed by
          Microsoft) goes into the driver store, which is all pnputil /add-driver does: the driver is loaded when tapctl
          makes the first adapter. Return="ignore": a driver that Windows refuses leaves OpenVPN unavailable, and the daemon
          says so (`the TAP-Windows6 driver is not installed`); it does not stop Plaitway from installing. Nothing removes
          the driver again: it is the same driver as that of an OpenVPN the person installed, and the daemon removes its own
          adapters. -->
     <CustomAction Id="TapDriverStage" BinaryRef="$(BinaryAction)" DllEntry="WixQuietExec64" Execute="deferred" Impersonate="no" Return="ignore" />
-    <SetProperty Id="TapDriverStage" Action="SetTapDriverStageData" Value="$(Quote)[SystemFolder]pnputil.exe$(Quote) /add-driver $(Quote)[OPENVPNFOLDER]driver\OemVista.inf$(Quote)"
+    <SetProperty Id="TapDriverStage" Action="SetTapDriverStageData" Value="$(Quote)[System64Folder]pnputil.exe$(Quote) /add-driver $(Quote)[OPENVPNFOLDER]driver\OemVista.inf$(Quote)"
                  Sequence="execute" Before="TapDriverStage" />
 
     <InstallExecuteSequence>
