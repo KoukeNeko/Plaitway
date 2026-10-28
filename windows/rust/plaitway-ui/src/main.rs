@@ -270,7 +270,8 @@ impl App {
             g.text(self.f_bold, 12.0 * s, 22.0 * s, cap + 78.0 * s, "PROFILES", muted);
         }
         // Import a profile: a plus beside the heading, or under the routing button in the narrow rail.
-        let (px, py) = if compact { ((side - 18.0) / 2.0 + 8.0 - 7.0, cap / s + 38.0) } else { (side - 38.0, cap / s + 66.0) };
+        // In the narrow rail the box (24 high, from 5 above this point) sits between the Routing button (ends 78 below the top) and the first profile (starts 108).
+        let (px, py) = if compact { ((side - 18.0) / 2.0 + 8.0 - 7.0, cap / s + 53.0) } else { (side - 38.0, cap / s + 66.0) };
         if ui.is_hover(&Act::Import) {
             g.rect((px - 5.0) * s, (py - 5.0) * s, 24.0 * s, 24.0 * s, 6.0 * s, t.hover);
         }

@@ -62,6 +62,7 @@ func TestRenderWindowsShipsOpenVPNWithASourceOfferAndPointsAtTheCrateNotices(t *
 		t.Errorf("the Windows notices mention .NET, NuGet or an OpenVPN that is not shipped:\n%s", out)
 	}
 }
+
 // macosRenderDigest is the SHA-256 of render's output for the fixed components
 // below, taken before the Windows document was added. The macOS document must
 // not change because of it.
