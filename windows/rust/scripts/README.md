@@ -7,6 +7,7 @@ Windows desktop session.
 | Script | What it checks | Daemon it uses |
 |---|---|---|
 | `shell-test.ps1` | one running copy, hide to the tray and come back, window placement, `--hidden`, start with Windows | `fake-daemon.exe` (made here) |
+| `sidebar-drag-test.ps1` | dragging a profile of the sidebar to another place changes the priority order; a click without moving opens the profile | `fake-daemon.exe` |
 | `uia-test.ps1` | the window through UI Automation, as a screen reader sees it: names, roles, pressing a button | `fake-daemon.exe` |
 | `lang-test.ps1` | choosing a language and the Chinese text and fonts | `fake-daemon.exe` |
 | `manage-test.ps1` | import, credentials, editing the text, settings, rename, delete | a real `plaitwayd -fake` on `\\.\pipe\plaitway-real` |

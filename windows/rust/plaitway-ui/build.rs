@@ -13,6 +13,8 @@ fn main() {
     let version = version.trim();
     let parts: Vec<u32> = version.split('.').map(|p| p.parse().expect("VERSION is major.minor.patch")).collect();
     assert_eq!(parts.len(), 3, "VERSION is major.minor.patch");
+    // What the Settings page says of the version: the same VERSION file, not a number written in the source.
+    println!("cargo:rustc-env=PLAITWAY_VERSION={version}");
     let numbers = format!("{},{},{},0", parts[0], parts[1], parts[2]);
 
     let rc = format!(

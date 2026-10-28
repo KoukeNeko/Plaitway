@@ -122,6 +122,16 @@ fn build_number() -> u32 {
     v.dwBuildNumber
 }
 
+/// A press on a profile of the sidebar: a click until the pointer has moved, then a drag that reorders the profiles by priority.
+struct SidePress {
+    id: String,
+    /// The index of the profile in the model, and the order the sidebar previews while it is dragged (indexes into the model).
+    from: usize,
+    y0: f32,
+    dragging: bool,
+    order: Vec<usize>,
+}
+
 struct App {
     gfx: Gfx,
     theme: Theme,
@@ -131,6 +141,10 @@ struct App {
     tracking: bool,
     client_tracking: bool,
     bay: Bay,
+    /// The profile of the sidebar being pressed or dragged, and where the rows of the sidebar are (the middle of the first, the
+    /// distance between two), in pixels, as the last frame drew them.
+    side: Option<SidePress>,
+    side_rows: (f32, f32),
     session: Session,
     view: View,
     ui: Ui,
@@ -262,8 +276,20 @@ impl App {
         }
         g.text(self.f_icons, 12.0 * s, px * s, (py + 7.0) * s, "\u{E710}", ink);
         ui.region(((px - 5.0) * s, (py - 5.0) * s, 24.0 * s, 24.0 * s), Act::Import);
-        for (k, tun) in model.tunnels.iter().enumerate() {
-            let cy = cap + (if compact { 92.0 + k as f32 * 36.0 } else { 118.0 + k as f32 * 56.0 }) * s;
+        // The profiles in priority order; while one is dragged, in the order it would have when let go.
+        let n = model.tunnels.len();
+        let (first, pitch) = if compact { (92.0, 36.0) } else { (118.0, 56.0) };
+        self.side_rows = (cap + first * s, pitch * s);
+        let (shown, lifted): (Vec<usize>, Option<usize>) = match &self.side {
+            Some(p) if p.dragging && p.order.len() == n => (p.order.clone(), Some(p.from)),
+            _ => ((0..n).collect(), None),
+        };
+        for (slot, &k) in shown.iter().enumerate() {
+            let tun = &model.tunnels[k];
+            let cy = cap + (first + slot as f32 * pitch) * s;
+            if lifted == Some(k) {
+                g.rect(8.0 * s, cy - (if compact { 16.0 } else { 24.0 }) * s, rw, (if compact { 32.0 } else { 48.0 }) * s, 6.0 * s, t.selected);
+            }
             nav(g, ui, cy - (if compact { 16.0 } else { 24.0 }) * s, (if compact { 32.0 } else { 48.0 }) * s, Act::Go(Page::Profile(tun.id.clone())));
             let (held, wanted) = tun.holds();
             let kind = bay::kind_name(tun);
@@ -803,6 +829,26 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     }
                     let (x, y, w) = local(a, mx, my, cw as f32);
                     dirty |= a.ui.mouse_move(mx, my);
+                    // A button let go while the window did not have the pointer ends the drag of the sidebar.
+                    if a.side.is_some() && wparam.0 & 1 == 0 {
+                        a.side = None;
+                        dirty = true;
+                    }
+                    let (first, pitch, scale) = (a.side_rows.0, a.side_rows.1, a.scale);
+                    if let Some(p) = a.side.as_mut() {
+                        if !p.dragging && (my - p.y0).abs() > 6.0 * scale {
+                            p.dragging = true;
+                        }
+                        if p.dragging {
+                            // The dragged profile takes the row that the pointer is over.
+                            let count = p.order.len();
+                            let slot = (((my - first) / pitch).round().max(0.0) as usize).min(count.saturating_sub(1));
+                            let mut order: Vec<usize> = (0..count).filter(|&i| i != p.from).collect();
+                            order.insert(slot, p.from);
+                            p.order = order;
+                            dirty = true;
+                        }
+                    }
                     if a.ui.page == Page::Routing {
                         dirty |= a.bay.mouse_move(&a.view.model, x, y, w);
                     }
@@ -833,7 +879,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let (x, y, w) = local(a, mx, my, cw as f32);
                 // A click outside a box takes the keyboard back from it.
                 let _ = SetFocus(Some(hwnd));
-                if let Some(act) = a.ui.click(mx, my) {
+                // A profile of the sidebar is opened when the button is let go, unless it was dragged to another place.
+                let pressed = match a.ui.at(mx, my) {
+                    Some(Act::Go(Page::Profile(id))) => a.view.model.tunnels.iter().position(|t| t.id == id).map(|from| (id, from)),
+                    _ => None,
+                };
+                if let Some((id, from)) = pressed {
+                    let count = a.view.model.tunnels.len();
+                    a.side = Some(SidePress { id, from, y0: my, dragging: false, order: (0..count).collect() });
+                    SetCapture(hwnd);
+                } else if let Some(act) = a.ui.click(mx, my) {
                     do_act(hwnd, a, act);
                 } else if a.ui.page == Page::Routing {
                     let out = a.bay.press(&a.view.model, x, y, w);
@@ -847,7 +902,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_LBUTTONUP => {
             with_app(|a| {
-                if a.bay.dragging() {
+                if let Some(p) = a.side.take() {
+                    let _ = ReleaseCapture();
+                    if !p.dragging {
+                        let act = Act::Go(Page::Profile(p.id));
+                        a.ui.apply(&act);
+                        do_act(hwnd, a, act);
+                    } else if p.order.len() == a.view.model.tunnels.len() && p.order.iter().enumerate().any(|(slot, &i)| slot != i) {
+                        let ids = p.order.iter().map(|&i| a.view.model.tunnels[i].id.clone()).collect();
+                        a.session.reorder(ids);
+                    }
+                    redraw(hwnd, a);
+                } else if a.bay.dragging() {
                     let _ = ReleaseCapture();
                     let out = a.bay.release(&a.view.model);
                     run(hwnd, a, out);
@@ -1189,7 +1255,7 @@ CW_USEDEFAULT, CW_USEDEFAULT, 1280, 800, None, None, Some(inst), None)?;
         let view = session.view();
         let store = Store::new(Store::default_dir());
         let prefs = store.ui();
-        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), session, view, ui: Ui::new(), watching: (None, false, None), canvas, helper: helper_status(), helper_busy: false, helper_error: None, helper_done: Default::default(), access: Some(access), access_targets: Default::default(), access_queue, hosted: Hosted::new(hwnd), loaded: None, dirty: false, programmatic: false, focus_pending: None, store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
+        let mut app = App { gfx, theme: theme(false), mica, scale, hot: Hot::None, tracking: false, client_tracking: false, bay: Bay::new(), side: None, side_rows: (0.0, 1.0), session, view, ui: Ui::new(), watching: (None, false, None), canvas, helper: helper_status(), helper_busy: false, helper_error: None, helper_done: Default::default(), access: Some(access), access_targets: Default::default(), access_queue, hosted: Hosted::new(hwnd), loaded: None, dirty: false, programmatic: false, focus_pending: None, store, prefs, quitting: false, scroll: 0.0, max_scroll: 0.0, scroll_key: (Page::Routing, 0), f_mono, frames: 0, f_text, f_bold, f_icons };
         app.apply_theme(hwnd);
         APP.with(|a| *a.borrow_mut() = Some(app));
 

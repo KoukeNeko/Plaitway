@@ -123,7 +123,7 @@ impl Ui {
         self.hits.push((r, act));
     }
 
-    fn at(&self, x: f32, y: f32) -> Option<Act> {
+    pub fn at(&self, x: f32, y: f32) -> Option<Act> {
         self.hits.iter().rev().find(|(r, _)| x >= r.0 && x < r.0 + r.2 && y >= r.1 && y < r.1 + r.3).map(|(_, a)| a.clone())
     }
 
@@ -654,7 +654,7 @@ impl Ui {
         }
     }
     fn settings(&mut self, g: &mut Gfx, f: &Fonts, pal: &Pal, s: f32, ox: f32, oy: f32, w: f32) {
-        self.header(g, f, pal, s, ox, oy, "Settings", "Plaitway 0.6.1");
+        self.header(g, f, pal, s, ox, oy, "Settings", concat!("Plaitway ", env!("PLAITWAY_VERSION")));
         let y = oy + 84.0;
         let shown = match self.language {
             None => tr("System default").into_owned(),
