@@ -52,8 +52,9 @@ type adapterTool interface {
 }
 
 // tapctl is OpenVPN's own tool for it. It makes a TAP-Windows6 adapter named
-// as asked (the default hardware id of "tapctl create" is that driver's) and
-// refuses a name that is taken. It needs administrator rights, which the
+// as asked and refuses a name that is taken. The hardware id is given: OpenVPN 2.7
+// makes an ovpn-dco adapter without one, which "openvpn --disable-dco" then refuses
+// (found on a machine that had both drivers). It needs administrator rights, which the
 // daemon has.
 type tapctl struct {
 	path string
@@ -61,7 +62,12 @@ type tapctl struct {
 }
 
 func (t tapctl) create(ctx context.Context, name string) error {
-	return t.run(ctx, "create", "--name", name)
+	return t.run(ctx, tapctlCreateArgs(name)...)
+}
+
+// tapctlCreateArgs is the command line of "tapctl create": the TAP-Windows6 hardware id is always given.
+func tapctlCreateArgs(name string) []string {
+	return []string{"create", "--name", name, "--hwid", tapHardwareID}
 }
 
 func (t tapctl) remove(ctx context.Context, name string) error {

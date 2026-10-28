@@ -406,3 +406,11 @@ func TestTapctlIsNotRunWhenItIsNotTrusted(t *testing.T) {
 		t.Error("the program ran although it is in a folder a user can write")
 	}
 }
+
+// OpenVPN 2.7 makes an ovpn-dco adapter when "tapctl create" is not told the hardware id, and then refuses to run on it.
+func TestTapctlCreateNamesTheTapWindows6HardwareID(t *testing.T) {
+	got := strings.Join(tapctlCreateArgs("Plaitway-ovpn-1"), " ")
+	if want := `create --name Plaitway-ovpn-1 --hwid root\tap0901`; got != want {
+		t.Errorf("tapctl create: %q, want %q", got, want)
+	}
+}

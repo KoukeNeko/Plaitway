@@ -29,6 +29,8 @@ const (
 	// windowsDriverName is the driver the engine runs tunnels on, as OpenVPN
 	// calls it (--show-adapters).
 	windowsDriverName = "tap-windows6"
+	// tapHardwareID is the hardware id of the TAP-Windows6 driver (OemVista.inf, [tap0901.NTamd64]).
+	tapHardwareID = `root\tap0901`
 )
 
 // The daemon runs openvpn as LocalSystem, so a file that a standard user can
