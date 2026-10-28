@@ -12,8 +12,8 @@
 // With -platform linux it lists the Go modules linked into the Linux build and
 // nothing else: the Linux package bundles no OpenVPN and has no Swift code.
 // With -windows it writes the notices of the Windows installer instead, from
-// the Go modules, the NuGet packages of the app and the .NET runtime of its
-// publish folder (windows.go).
+// the Go modules and Wintun, with a pointer to the Rust app's own crate
+// notices (windows.go).
 package main
 
 import (

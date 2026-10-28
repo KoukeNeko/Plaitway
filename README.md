@@ -359,7 +359,7 @@ plaitway/
 │   │                             installation. No AppKit or SwiftUI
 │   └── Sources/PlaitwayMenuBar   The app: menu bar item, window, settings
 ├── linux/                  The Linux app: GTK 4 and libadwaita, Python (PyGObject)
-├── windows/                C# solution: the WinUI 3 app, the client library, their tests
+├── windows/                The Rust app (Direct3D 11), the MSI project
 ├── cmd/plaitwayd           The helper (root LaunchDaemon, systemd service on Linux, Windows service)
 ├── cmd/plaitway            The command line client
 ├── internal/
@@ -530,8 +530,8 @@ Files on a machine: profiles and the route journal in
 ## Windows
 
 `plaitwayd` runs on Windows with the real OpenVPN and WireGuard engines, as the service `PlaitwayHelper` or in a
-console, and `plaitway` is the same command line as on macOS. The app is native: C#, .NET 10, WinUI 3, unpackaged,
-in `windows/` ([windows/README.md](windows/README.md)). `packaging/windows/build-installer.ps1` builds the MSI
+console, and `plaitway` is the same command line as on macOS. The app is native: Rust, drawn with Direct3D 11 (Mica on
+Windows 11, a solid colour on Windows 10), in `windows/` ([windows/README.md](windows/README.md)). `packaging/windows/build-installer.ps1` builds the MSI
 ([packaging/windows/README.md](packaging/windows/README.md)); the release attaches it, unsigned.
 [Docs/windows-status.md](Docs/windows-status.md) lists what is verified, what waits for a machine or a decision and what is
 not done; [Docs/windows-architecture.md](Docs/windows-architecture.md) says what is where, who is trusted with what and
@@ -549,15 +549,15 @@ shown with the profile.
 
 ### Build and run
 
-Go 1.27.1 builds the daemon and the command line client. .NET SDK 10 (`windows/global.json` pins 10.0.401) builds the
-app; no Visual Studio workload is needed. The app targets Windows 10 1809 or later, x64; development and tests are on
-Windows 11, and Windows 10 and arm64 are not tested.
+Go 1.27.1 builds the daemon and the command line client, and a Rust toolchain builds the app; no Visual Studio workload
+is needed. The .NET SDK 10 (`windows/global.json` pins 10.0.401) is only for the WiX project of the MSI. The app targets
+Windows 10 1809 or later, x64; development and tests are on Windows 11, and Windows 10 and arm64 are not tested.
 
 ```powershell
 go build -o bin\plaitwayd.exe .\cmd\plaitwayd
 go build -o bin\plaitway.exe .\cmd\plaitway
 powershell -File packaging\windows\fetch-wintun.ps1 -OutputDirectory bin       # wintun.dll, checked by hash and signature
-dotnet build windows\Plaitway.sln -c Release
+cargo build --release --manifest-path windows\rust\Cargo.toml
 ```
 
 Without elevation the daemon runs on the in-memory backend, which is a complete stand-in for UI work:
@@ -651,9 +651,9 @@ fixed paths, with a watcher that reads the socket tables without pausing, and fa
 opens another address (`-PerTest <package>` names the test). The WireGuard engine's tests go through `newBind`, never
 through wireguard-go's default bind.
 
-The C# tests run from the `windows` directory, because `global.json` selects the runner for it:
-`dotnet test --project Tests\Plaitway.Client.Tests -c Release`, and the same for `Plaitway.AppCore.Tests`. Both start
-`plaitwayd -fake` on pipes of their own. The UI tests open the app window on the screen of whoever runs them.
+The Rust tests run from `windows\rust` with `cargo test`; those that need a daemon start `plaitwayd -fake` or the
+fake daemon of the workspace on pipes of their own. The scripts in `windows\rust\scripts` drive the real window
+(they open it on the screen of whoever runs them); see [windows/rust/README.md](windows/rust/README.md).
 
 The tests that change the routing table, DNS, adapters or the service carry the `rootintegration` tag and need an
 elevated shell. They use scratch resources only, and `packaging\windows\dev\Run-ElevatedTests.ps1` runs them in groups

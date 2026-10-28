@@ -33,8 +33,8 @@ cargo test --workspace
 
 ## What is not here
 
-- **The installer is built, not installed.** `packaging\windows\build-installer.ps1 -RustApp` makes the MSI around
-  `app\Plaitway.exe` with the notices of its crates, and `Test-Installer.ps1 -RustApp` checks it (administrative unpack only).
+- **The installer is built, not installed.** `packaging\windows\build-installer.ps1` makes the MSI around
+  `app\Plaitway.exe` with the notices of its crates, and `Test-Installer.ps1` checks it (administrative unpack only).
   Installing it and upgrading over a WinUI install have not been tried.
 - **Windows 10.** The solid-colour path is drawn when `PLAITWAY_SOLID=1`, on Windows 11. It has not run on Windows 10.
 - **Real DPI changes.** 100% and 200% were checked; changing the display scale while running, and moving the window between
@@ -43,4 +43,4 @@ cargo test --workspace
 - **More languages.** The shared catalogs have one translation, Traditional Chinese.
 - **A profile from wgcf.** A WARP-shaped WireGuard profile written by hand was checked against the real daemon; a profile
   made by `wgcf register` and `wgcf generate` was not.
-- **The WinUI app is still in the repository.** Whether to delete it is not decided.
+- **The WinUI app is gone.** It was deleted from the repository (it stays in the history before the commit that removed it).

@@ -27,10 +27,7 @@ Where the package is unpacked. Default: a new folder below %TEMP%; it is removed
 param(
     [string[]] $Package,
 
-    [string] $ScratchDirectory,
-
-    # The package carries the Rust app: no compiled XAML, and the notices of its crates.
-    [switch] $RustApp
+    [string] $ScratchDirectory
 )
 
 Set-StrictMode -Version Latest
@@ -45,10 +42,7 @@ $SetupLanguageId = '1033'
 # Relative to the product folder (the one that holds plaitwayd.exe), where the app finds the daemon one folder above its own.
 $RequiredFiles = @(
     'plaitwayd.exe', 'plaitway.exe', 'wintun.dll', 'app\Plaitway.exe',
-    # The app's compiled XAML and strings: a publish without them dies at the first resource lookup.
-    'app\Plaitway.pri',
-    'licenses\LICENSE.txt', 'licenses\THIRD_PARTY_NOTICES.md')
-if ($RustApp) { $RequiredFiles = @($RequiredFiles | Where-Object { $_ -ne 'app\Plaitway.pri' }) + 'licenses\THIRD_PARTY_NOTICES_RUST.md' }
+    'licenses\LICENSE.txt', 'licenses\THIRD_PARTY_NOTICES.md', 'licenses\THIRD_PARTY_NOTICES_RUST.md')
 $WintunSigner = 'WireGuard LLC'
 $HelperActionOrder = @(
     # Each pair is (earlier, later) in InstallExecuteSequence.

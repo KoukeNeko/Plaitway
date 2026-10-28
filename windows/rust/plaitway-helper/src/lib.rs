@@ -3,7 +3,7 @@
 //! commands of `plaitwayd.exe` that change it. Each command is elevated, so each starts with the consent
 //! prompt of Windows, which the user answers. Nothing here runs without being asked.
 //!
-//! The rules are those of `windows/Sources/Plaitway.AppCore/Helper` (the WinUI app), word for word where
+//! The rules are those of the WinUI app's `Plaitway.AppCore/Helper` (removed from the repository), word for word where
 //! it matters: a program is run elevated only when only administrators can change the folder it is in,
 //! or when it carries a valid signature of Plaitway.
 

@@ -11,9 +11,9 @@ where a fact is not known, the page says so. What is verified and what is not is
 ```mermaid
 flowchart LR
     subgraph session["User session, not elevated"]
-        app["Plaitway.App<br/>WinUI 3, tray icon"]
-        core["Plaitway.AppCore<br/>models, helper setup"]
-        client["Plaitway.Client<br/>gRPC client, pipe check"]
+        app["plaitway-ui<br/>Direct3D 11, tray icon"]
+        core["plaitway-core, plaitway-helper<br/>models, helper setup"]
+        client["plaitway-client<br/>gRPC client, pipe check"]
         cli["plaitway.exe<br/>cmd/plaitway"]
         app --> core --> client
     end
@@ -69,7 +69,7 @@ flowchart LR
 | Adapter configuration | `internal/winiface` | Address, MTU, interface metric and the wait for the link of an adapter an engine made. No routes, no DNS |
 | Files and trust | `internal/fsperm`, `internal/authenticode`, `internal/peercred`, `internal/transport` | Access lists, signatures, caller identity, the pipe |
 | Test safety | `internal/winiface/rootguard`, `scripts/windows` | Guard processes for the elevated tests; the watcher that finds a test listening beyond loopback |
-| App | `windows/Sources/Plaitway.App`, `Plaitway.AppCore`, `Plaitway.Client` | See [windows/docs/ui-architecture.md](../windows/docs/ui-architecture.md) |
+| App | `windows/rust` (`plaitway-ui`, `plaitway-core`, `plaitway-helper`, `plaitway-client`) | See [windows/rust/README.md](../windows/rust/README.md) |
 | Installer | `windows/installer` | WiX project. See the status page for how far it is |
 
 On a machine: the profiles, the Reconciler's journal (`journal`), the run directory (`run`) and the log
@@ -153,7 +153,7 @@ another process of the same user can serve the pipe, because an unelevated devel
 **How the app checks the helper before the elevation prompt.** The app never starts the helper silently: it runs
 `plaitwayd.exe install -start`, `start`, `install -update -start` and `uninstall` with the `runas` verb, so that Windows
 shows the consent prompt, and a declined prompt is a decision, not an error. The file it hands to the prompt is
-judged first by `HelperTrustPolicy` (`windows/Sources/Plaitway.AppCore/Helper/HelperTrust.cs`): trusted when every
+judged first by the trust rules of `windows/rust/plaitway-helper`: trusted when every
 folder of its path is changeable by administrators only on a local fixed disk, or when its Authenticode signature is
 valid and issued to `Plaitway`; otherwise the app shows why and does not launch it. Until the installer and the release
 are signed, only the folder rule can be met. After the prompt, `plaitwayd.exe install` applies its own folder rule
@@ -248,7 +248,6 @@ and the licenses. The reasons are those of a service that has to be installed, u
 -update -start`) and removed (`uninstall`, which keeps `%ProgramData%\Plaitway` because the profiles hold keys) by an
 administrator, which is what an MSI does and an unpackaged app does not (windows/docs/ui-toolkit.md).
 
-**The app is WinUI 3, unpackaged.** Evidence and the comparison with WPF are in windows/docs/ui-toolkit.md: it builds
-with `dotnet build`, passed the checks on the machine it was decided on, and gives the Windows 11 look and a list that
-reorders by dragging without custom code. Unpackaged means no MSIX identity, no startup task from a manifest and no
-MSIX update; the Windows App Runtime has to be installed, or the self-contained publish carries it.
+**The app is Rust, drawn with Direct3D 11, unpackaged.** It replaced a WinUI 3 app (design/ui-plan.md says why): one
+2.3 MB program with no runtime to install, Mica on Windows 11 and a solid colour on Windows 10. Unpackaged means no MSIX
+identity, no startup task from a manifest and no MSIX update.

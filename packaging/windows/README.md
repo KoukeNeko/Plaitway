@@ -24,8 +24,9 @@ powershell -File packaging\windows\Test-Installer.ps1
 ```
 
 The version is the `VERSION` file. The script builds `plaitwayd.exe` and `plaitway.exe` with it, fetches `wintun.dll`,
-publishes the app self-contained (`-p:PlaitwaySelfContained=true`, so the machine needs no Windows App Runtime and no
-.NET), writes the licence and `THIRD_PARTY_NOTICES.md` (`go run ./packaging/notices -windows`), and builds the package.
+builds the app with cargo (`windows\rust\scripts\stage-app.ps1`: one program, `app\Plaitway.exe`, that needs no runtime),
+writes the licence, `THIRD_PARTY_NOTICES.md` (`go run ./packaging/notices -windows`) and the notices of the app's
+crates, and builds the package.
 Everything goes below `build\windows`, which git ignores: `payload\` is what the package holds, the finished package is
 beside it. `-SkipAppPublish` reuses the app of the last
 run, for trying out a change of `Package.wxs`.
@@ -43,9 +44,9 @@ machine store, with its private key):
 powershell -File packaging\windows\build-installer.ps1 -CertificateThumbprint <thumbprint>
 ```
 
-The programs of Plaitway (`plaitwayd.exe`, `plaitway.exe`, `Plaitway.exe`, the app's own assemblies) are signed before
+The programs of Plaitway (`plaitwayd.exe`, `plaitway.exe`, `Plaitway.exe`) are signed before
 the packages are built, and the packages after, all with SHA-256 and a timestamp (`-TimestampServer`, default DigiCert).
-`wintun.dll` and the libraries of others keep their signatures. A signature that is not `Valid` stops the build;
+`wintun.dll` keeps its own signature. A signature that is not `Valid` stops the build;
 `-AllowUntrustedRoot` accepts a self-signed certificate, to try the script out.
 
 ## What the package does

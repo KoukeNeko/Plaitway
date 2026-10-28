@@ -9,7 +9,6 @@
       ProductCode         derived from the upgrade code, the version, the platform and the payload
                           by the build script, so that a build of the same version with other files is an upgrade
       UpgradeCode         the identity of the product across versions; it never changes
-      RustApp             true when the app is the Rust one: app\ holds Plaitway.exe alone
       PayloadDir          the staged files: plaitwayd.exe, plaitway.exe, wintun.dll, app\, licenses\
       LicenseFile         the licence of Plaitway as RTF, for the setup dialog
       Cultures            the language of the setup dialog and of its messages, English; the app's own language
@@ -31,11 +30,9 @@
     <UpgradeCode>BDA29F25-493D-4DF8-8B16-5A612BC4E954</UpgradeCode>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
     <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildProjectDirectory)\payload</PayloadDir>
-    <IconFile Condition="'$(IconFile)' == ''">$(MSBuildProjectDirectory)\..\Sources\Plaitway.App\Assets\Plaitway.ico</IconFile>
+    <IconFile Condition="'$(IconFile)' == ''">$(MSBuildProjectDirectory)\Plaitway.ico</IconFile>
     <LicenseFile Condition="'$(LicenseFile)' == ''">$(PayloadDir)\License.rtf</LicenseFile>
     <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);ProductCode=$(ProductCode);UpgradeCode=$(UpgradeCode);PayloadDir=$(PayloadDir);IconFile=$(IconFile);LicenseFile=$(LicenseFile)</DefineConstants>
-    <!-- RustApp=true: the app is the one program app\Plaitway.exe, with no other files to harvest. -->
-    <DefineConstants Condition="'$(RustApp)' == 'true'">$(DefineConstants);RustApp=true</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
