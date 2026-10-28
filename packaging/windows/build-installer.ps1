@@ -9,7 +9,8 @@ Builds the Plaitway MSI: stages the payload, then builds the package.
 3. Builds the app (windows\rust, one self-contained program) with cargo and stages it with the notices of its crates.
 4. Writes the notices and the licence of the package.
 5. Signs the programs of Plaitway and the packages when -CertificateThumbprint is given.
-6. Builds windows\installer. The ProductCode is derived from the upgrade code, the
+6. Makes the same files as a portable zip, Plaitway-<version>-x64.zip (packaging\windows\portable-README.txt is its README).
+7. Builds windows\installer. The ProductCode is derived from the upgrade code, the
    version, the platform and the files of the payload, so a build with other files is
    an upgrade of the earlier one and the same files give the same code.
 
@@ -237,6 +238,47 @@ function Assert-Package($Package, [string] $Version) {
     finally { Close-MsiDatabase $handle }
 }
 
+# The same files as the package installs, as a zip for a person who wants no installer: Plaitway-<version>-x64.zip, one folder
+# that holds what the installed folder holds, so that the app finds the daemon above it and the daemon finds openvpn\ beside it.
+function New-PortableZip([string] $Version) {
+    Write-Step 'portable zip'
+    $name = "Plaitway-$Version-$InstallerPlatform"
+    $stage = Join-Path $OutputDirectory "zip-stage\$name"
+    Reset-Directory (Join-Path $OutputDirectory 'zip-stage')
+    [void] (New-Item -ItemType Directory -Path $stage)
+    foreach ($item in Get-ChildItem -LiteralPath $PayloadDirectory -Force) {
+        # License.rtf is for the setup dialog of the MSI.
+        if ($item.Name -ne 'License.rtf') { Copy-Item -LiteralPath $item.FullName -Destination $stage -Recurse }
+    }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'portable-README.txt') -Destination (Join-Path $stage 'README.txt')
+    $target = Join-Path $OutputDirectory "$name.zip"
+    if (Test-Path -LiteralPath $target) { [IO.File]::Delete($target) }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    # The entries are written one by one with "/" in their names: CreateFromDirectory writes "\" on some .NET versions, which
+    # is not what the zip format says.
+    $root = Split-Path $stage -Parent
+    $zipStream = [IO.File]::Create($target)
+    $writer = New-Object IO.Compression.ZipArchive($zipStream, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($file in Get-ChildItem -LiteralPath $stage -Recurse -File) {
+            $entryName = $file.FullName.Substring($root.Length).TrimStart('\').Replace('\', '/')
+            [void] [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($writer, $file.FullName, $entryName, [IO.Compression.CompressionLevel]::Optimal)
+        }
+    }
+    finally { $writer.Dispose(); $zipStream.Dispose() }
+    $archive = [IO.Compression.ZipFile]::OpenRead($target)
+    try {
+        $entries = @($archive.Entries | ForEach-Object { $_.FullName })
+        foreach ($required in @($PayloadExecutables + 'README.txt' | ForEach-Object { Split-Path $_ -Leaf })) {
+            if (-not ($entries | Where-Object { $_ -like "*/$required" -or $_ -eq $required })) { throw "$target holds no $required." }
+        }
+        if ($entries | Where-Object { $_ -match '\\' }) { throw "$target has entries with a backslash." }
+    }
+    finally { $archive.Dispose() }
+    Reset-Directory (Join-Path $OutputDirectory 'zip-stage')
+    return $target
+}
+
 $version = Get-ReleaseVersion
 $script:SigningCertificate = $null
 if ($CertificateThumbprint) {
@@ -278,6 +320,8 @@ $fingerprint = Get-PayloadFingerprint $PayloadDirectory
 
 $package = Build-Package $version $fingerprint
 Assert-Package $package $version
+$zip = New-PortableZip $version
 
 Write-Step 'done'
 Write-Host ("{0}  {1}" -f $package.ProductCode, $package.Path)
+Write-Host ("portable  {0}" -f $zip)

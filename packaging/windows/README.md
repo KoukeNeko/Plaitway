@@ -31,6 +31,8 @@ Everything goes below `build\windows`, which git ignores: `payload\` is what the
 beside it. `-SkipAppPublish` reuses the app of the last
 run, for trying out a change of `Package.wxs`.
 
+The same run makes `Plaitway-<version>-x64.zip`: the payload as one folder, with `portable-README.txt` as its `README.txt`, for a person who wants no installer. The folder has to be put where only administrators can write, because the daemon refuses to register itself or to run OpenVPN from a folder that a standard user could change; the README says so.
+
 The ProductCode is derived from the upgrade code, the version and the hash of every payload file: the same
 files give the same code, other files give another one, and the package replaces the installed one as an upgrade
 (`AllowSameVersionUpgrades`). The upgrade code never changes.

@@ -180,8 +180,9 @@ jobs:
           path: build/linux/plaitway_*.deb
           if-no-files-found: error
 
-  # The MSI, built and checked as packaging/windows/README.md describes. The Go tests
-  # run first, as in the macOS job; the app's tests and the elevated tests are not part of a release.
+  # The MSI, built and checked as packaging/windows/README.md describes. The Go tests and the tests of the Rust app
+  # run first, as in the macOS job; the elevated tests and the scripts that open the window are not part of a release.
+  # build-installer.ps1 builds the app with cargo (stage-app.ps1) and fetches OpenVPN and wintun, checked by hash and signature.
   windows:
     runs-on: windows-latest
     timeout-minutes: 45
@@ -203,6 +204,9 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - run: go test -count=1 ./...
+      - name: Test the Rust app
+        working-directory: windows/rust
+        run: cargo test --workspace --locked
       - name: Build the packages
         run: powershell -NoProfile -File packaging\windows\build-installer.ps1
       - name: Check the packages
@@ -210,7 +214,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: windows
-          path: build/windows/Plaitway-${{ env.VERSION }}-x64.msi
+          path: |
+            build/windows/Plaitway-${{ env.VERSION }}-x64.msi
+            build/windows/Plaitway-${{ env.VERSION }}-x64.zip
           if-no-files-found: error
 
   publish:

@@ -68,6 +68,27 @@ jobs:
         if: runner.os == 'macOS'
         run: make test-packaging
 
+  # The Windows app (windows/rust): built in release, as the MSI has it, and tested with cargo. The tests need no daemon
+  # and no window; the scripts in windows/rust/scripts open the real window and are run by hand. The build needs the
+  # Windows SDK (rc.exe, for the version resource), which the image has.
+  windows-app:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: windows/rust
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            windows/rust/target
+          key: cargo-windows-${{ hashFiles('windows/rust/Cargo.lock') }}
+          restore-keys: cargo-windows-
+      - run: cargo build --release --locked
+      - run: cargo test --workspace --locked
+
   # The Swift tests start the helper binary named by PLAITWAY_DAEMON on its in-memory backend.
   swift:
     runs-on: xcode-27
