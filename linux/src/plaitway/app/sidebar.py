@@ -1,5 +1,5 @@
 """The sidebar: the Routing page, the profiles under it in priority order (drag to change it),
-and Diagnostics, Settings and About below them whatever their number."""
+and Diagnostics, Settings, Tools and About below them whatever their number."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from ..client.types import Profile, ProfileState  # noqa: E402
 from ..core import routing  # noqa: E402
-from ..core.app_model import ABOUT, DIAGNOSTICS, ROUTING, SETTINGS, AppModel, Selection, SelectionKind  # noqa: E402
+from ..core.app_model import ABOUT, DIAGNOSTICS, ROUTING, SETTINGS, TOOLS, AppModel, Selection, SelectionKind  # noqa: E402
 from .widgets import HueDot, follow, label, name_widget  # noqa: E402
 
 
@@ -101,9 +101,11 @@ class Sidebar(Gtk.Box):
         self._footer.add_css_class("navigation-sidebar")
         self._diagnostics = FooterRow(DIAGNOSTICS, "system-search-symbolic", self._strings.diagnostics)
         self._settings = FooterRow(SETTINGS, "emblem-system-symbolic", self._strings.settings)
+        self._tools = FooterRow(TOOLS, "applications-engineering-symbolic", self._strings.tools)
         self._about = FooterRow(ABOUT, "help-about-symbolic", self._strings.about)
         self._footer.append(self._diagnostics)
         self._footer.append(self._settings)
+        self._footer.append(self._tools)
         self._footer.append(self._about)
         self._footer.connect("row-selected", self._footer_selected)
         self._footer.connect("row-activated", lambda *_: self._on_activated())
@@ -163,6 +165,8 @@ class Sidebar(Gtk.Box):
                 self._footer.select_row(self._diagnostics)
             elif selection.kind is SelectionKind.SETTINGS:
                 self._footer.select_row(self._settings)
+            elif selection.kind is SelectionKind.TOOLS:
+                self._footer.select_row(self._tools)
             elif selection.kind is SelectionKind.ABOUT:
                 self._footer.select_row(self._about)
         finally:

@@ -13,7 +13,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 from plaitway.app import style  # noqa: E402
 from plaitway.app.widgets import ACCESSIBLE_NAME  # noqa: E402
 from plaitway.client.types import ProfileState  # noqa: E402
-from plaitway.core.app_model import ABOUT, DIAGNOSTICS, ROUTING, SETTINGS, DiagnosticsPage, ProfileSection, Selection  # noqa: E402
+from plaitway.core.app_model import ABOUT, DIAGNOSTICS, ROUTING, SETTINGS, TOOLS, DiagnosticsPage, ProfileSection, Selection  # noqa: E402
 from plaitway.core import routing  # noqa: E402
 from plaitway.core.app_state import WindowGeometry  # noqa: E402
 from plaitway.core.ports import HelperRegistration  # noqa: E402
@@ -175,6 +175,8 @@ class WindowTests(SmokeTestCase):
         self.pump(app, 0.8)
         app.model.select(SETTINGS)
         self.pump(app)
+        app.model.select(TOOLS)
+        self.pump(app)
         app.model.select(ABOUT)
         self.pump(app)
         self.assertEqual(MESSAGES, [])
@@ -212,6 +214,8 @@ class WindowTests(SmokeTestCase):
         self.pump(app, 0.8)
         app.model.select(SETTINGS)
         self.pump(app)
+        app.model.select(TOOLS)
+        self.pump(app)
         app.model.select(ABOUT)
         self.pump(app)
         # A profile that asks for credentials, and one in the narrow layout.
@@ -237,7 +241,7 @@ class WindowTests(SmokeTestCase):
             app.model.show_diagnostics_page(page)
             self.pump(app, 0.4)
             self.assertLessEqual(window.measure(Gtk.Orientation.HORIZONTAL, -1)[0], 360, page)
-        for page in (ROUTING, SETTINGS, ABOUT):
+        for page in (ROUTING, SETTINGS, TOOLS, ABOUT):
             app.model.select(page)
             self.pump(app, 0.3)
             self.assertLessEqual(window.measure(Gtk.Orientation.HORIZONTAL, -1)[0], 360, page)
@@ -269,6 +273,19 @@ class WindowTests(SmokeTestCase):
             self.assertEqual(row.dot._on, profile.desired_enabled, "a ring while the profile is off, a dot while it is on")
         self.assertTrue(rows[0].caption.get_text().startswith("OpenVPN · Holds "), rows[0].caption.get_text())
         self.assertEqual(rows[2].caption.get_text(), "OpenVPN · Failed")
+
+    def test_the_menu_bar_is_shown_when_the_setting_says_so_and_has_the_three_menus(self):
+        app = self.make_app()
+        window = self.open_window(app)
+        self.pump(app, 0.3)
+        self.assertFalse(window._menu_bar.get_visible())
+        app.model.set_show_menu_bar(True)
+        self.pump(app, 0.3)
+        self.assertTrue(window._menu_bar.get_visible())
+        model = window._menu_bar.get_menu_model()
+        self.assertEqual([model.get_item_attribute_value(i, "label", None).get_string() for i in range(model.get_n_items())],
+                         ["File", "View", "Help"])
+        self.assertEqual(MESSAGES, [])
 
     def test_the_routing_page_names_every_route_and_tunnel(self):
         app = self.make_app()

@@ -151,6 +151,76 @@
         }
       }
     },
+    "Disable" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停用"
+          }
+        }
+      }
+    },
+    "Disabled" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已停用"
+          }
+        }
+      }
+    },
+    "Enable" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "啟用"
+          }
+        }
+      }
+    },
+    "Enabled" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已啟用"
+          }
+        }
+      }
+    },
+    "Extension failed" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "擴充功能失敗"
+          }
+        }
+      }
+    },
+    "Extensions add features to the GNOME top bar and desktop. They are loaded when you log in." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "擴充功能為 GNOME 頂端列與桌面增加功能，登入時載入。"
+          }
+        }
+      }
+    },
+    "GNOME Shell Extensions" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GNOME Shell 擴充功能"
+          }
+        }
+      }
+    },
     "Help" : {
       "localizations" : {
         "zh-Hant" : {
@@ -191,6 +261,16 @@
         }
       }
     },
+    "Install" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝"
+          }
+        }
+      }
+    },
     "Install the plaitway package." : {
       "localizations" : {
         "zh-Hant" : {
@@ -207,6 +287,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "授權"
+          }
+        }
+      }
+    },
+    "Log out and back in to load it." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登出再登入後載入。"
           }
         }
       }
@@ -341,6 +431,16 @@
         }
       }
     },
+    "Requires GNOME Shell" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要 GNOME Shell"
+          }
+        }
+      }
+    },
     "Restart" : {
       "localizations" : {
         "zh-Hant" : {
@@ -411,6 +511,16 @@
         }
       }
     },
+    "Show Menu Bar" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示選單列"
+          }
+        }
+      }
+    },
     "Show Tray Icon" : {
       "localizations" : {
         "zh-Hant" : {
@@ -457,6 +567,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已停止"
+          }
+        }
+      }
+    },
+    "The number of connected profiles in the top bar, and a switch for each profile in its menu." : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在頂端列顯示已連線的設定檔數量，選單中每個設定檔都有開關。"
+          }
+        }
+      }
+    },
+    "Tools" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具"
+          }
+        }
+      }
+    },
+    "Top Bar Item" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頂端列項目"
           }
         }
       }

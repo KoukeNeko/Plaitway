@@ -36,6 +36,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--scheme", action="append", choices=["light", "dark"], help="default: both")
     parser.add_argument("--size", action="append", choices=list(SIZES), help="default: both")
     parser.add_argument("--blur", action="store_true", help="with the sidebar blur setting on")
+    parser.add_argument("--menu-bar", action="store_true", help="with the menu bar of the window shown")
     parser.add_argument("--page", action="append", help="only the shots whose name contains this")
     return parser.parse_args()
 
@@ -130,6 +131,7 @@ def run(arguments: argparse.Namespace, daemon) -> None:
         def shoot(self):
             model = self.model
             model.app_state.set_blur_sidebar(arguments.blur)
+            model.app_state.set_show_menu_bar(arguments.menu_bar)
             for size in sizes:
                 width, height = SIZES[size]
                 window = MainWindow(self, model, WindowGeometry(width, height))

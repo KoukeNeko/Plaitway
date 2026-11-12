@@ -724,5 +724,31 @@ class ContributorsTests(unittest.TestCase):
         self.assertEqual(contributors.baked(path), [])
 
 
+class GnomeExtensionTests(unittest.TestCase):
+    def status(self, **fields):
+        from plaitway.core.gnome_extension import ExtensionStatus
+
+        defaults = dict(shell=True, installed=True, user_installed=False, enabled=False, loaded=None)
+        return ExtensionStatus.of(**{**defaults, **fields})
+
+    def test_where_the_extension_stands(self):
+        from plaitway.core.gnome_extension import ExtensionState
+
+        self.assertIs(self.status(shell=False).state, ExtensionState.UNAVAILABLE)
+        self.assertIs(self.status(installed=False).state, ExtensionState.NOT_INSTALLED)
+        self.assertIs(self.status().state, ExtensionState.DISABLED)
+        self.assertIs(self.status(enabled=True, loaded=True).state, ExtensionState.ENABLED)
+
+    def test_the_person_is_told_to_log_in_again_only_for_an_enabled_extension_the_shell_has_not_loaded(self):
+        self.assertTrue(self.status(enabled=True, loaded=False).needs_login)
+        self.assertFalse(self.status(enabled=True, loaded=True).needs_login)
+        self.assertFalse(self.status(enabled=True, loaded=None).needs_login, "a Shell that cannot be asked says nothing")
+        self.assertFalse(self.status(enabled=False, loaded=False).needs_login)
+
+    def test_only_a_copy_in_the_users_folder_can_be_removed(self):
+        self.assertTrue(self.status(user_installed=True).user_installed)
+        self.assertFalse(self.status().user_installed)
+
+
 if __name__ == "__main__":
     unittest.main()

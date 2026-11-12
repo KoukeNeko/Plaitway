@@ -59,15 +59,21 @@ _TABLES: dict[str, dict[str, str]] = {
         'delete_profile_message': 'The profile and its saved credentials are removed.',
         'delete_profile_title': 'Delete “{0}”?',
         'diagnostics': 'Diagnostics',
+        'disable': 'Disable',
+        'disabled': 'Disabled',
         'disconnect': 'Disconnect',
         'disconnect_all': 'Disconnect All',
         'disconnect_all_and_quit': 'Disconnect All and Quit',
         'disconnected': 'Disconnected',
         'disconnecting': 'Disconnecting',
         'dns': 'DNS',
+        'enable': 'Enable',
+        'enabled': 'Enabled',
         'errors_only': 'Errors only',
         'ethernet': 'Ethernet',
         'exclude_private_ips': 'Exclude private IPs',
+        'extension_failed': 'Extension failed',
+        'extensions_description': 'Extensions add features to the GNOME top bar and desktop. They are loaded when you log in.',
         'failed': 'Failed',
         'file': 'File',
         'file_holds_no_key': 'File for {0} holds no certificate or key: {1}',
@@ -75,6 +81,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'file_outside_folder': "File for {0} is outside the profile's folder: {1}",
         'file_too_large': 'File too large: {0}',
         'full_tunnel': 'Full tunnel',
+        'gnome_shell_extensions': 'GNOME Shell Extensions',
         'help': 'Help',
         'helper': 'Helper',
         'helper_failed': 'Helper failed',
@@ -92,6 +99,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'import_label': 'Import',
         'import_profile': 'Import Profile…',
         'info_and_above': 'Info and above',
+        'install': 'Install',
         'install_the_package': 'Install the plaitway package.',
         'installed': 'Installed',
         'installed_by_plaitway': 'Installed by Plaitway',
@@ -106,6 +114,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'license': 'License',
         'limited': 'Limited',
         'line_number': 'Line {0}',
+        'log_out_to_load': 'Log out and back in to load it.',
         'logs': 'Logs',
         'main_menu': 'Main Menu',
         'move_down': 'Move Down',
@@ -160,6 +169,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'remove_saved_credentials': 'Remove Saved Credentials',
         'reorder_failed': 'Reorder failed',
         'repository': 'Repository',
+        'requires_gnome_shell': 'Requires GNOME Shell',
         'resolver_entries': 'Resolver entries',
         'restart': 'Restart',
         'restart_helper': 'Restart Helper',
@@ -189,6 +199,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'shadowed': 'Shadowed',
         'shadowed_by': 'Shadowed by {0}',
         'show': 'Show',
+        'show_menu_bar': 'Show Menu Bar',
         'show_secrets': 'Show Secrets',
         'show_tray_icon': 'Show Tray Icon',
         'split_tunnel': 'Split tunnel',
@@ -198,9 +209,13 @@ _TABLES: dict[str, dict[str, str]] = {
         'start_helper_without_systemd': 'Start plaitwayd, for example with rc-service plaitwayd start.',
         'status': 'Status',
         'stopped': 'Stopped',
+        'tools': 'Tools',
+        'top_bar_item': 'Top Bar Item',
+        'top_bar_item_description': 'The number of connected profiles in the top bar, and a switch for each profile in its menu.',
         'tunnel': 'Tunnel',
         'tunnel_mode': 'Tunnel mode',
         'unavailable': 'Unavailable',
+        'uninstall': 'Uninstall',
         'unknown': 'Unknown',
         'unsaved_changes_message': "Changes to a profile's text are not saved.",
         'uptime': 'Uptime',
@@ -260,15 +275,21 @@ _TABLES: dict[str, dict[str, str]] = {
         'delete_profile_message': '設定檔及其已儲存的登入資訊將被移除。',
         'delete_profile_title': '刪除「{0}」？',
         'diagnostics': '診斷',
+        'disable': '停用',
+        'disabled': '已停用',
         'disconnect': '中斷連線',
         'disconnect_all': '全部中斷連線',
         'disconnect_all_and_quit': '全部中斷連線並結束',
         'disconnected': '未連線',
         'disconnecting': '中斷連線中',
         'dns': 'DNS',
+        'enable': '啟用',
+        'enabled': '已啟用',
         'errors_only': '僅錯誤',
         'ethernet': '乙太網路',
         'exclude_private_ips': '排除私有 IP',
+        'extension_failed': '擴充功能失敗',
+        'extensions_description': '擴充功能為 GNOME 頂端列與桌面增加功能，登入時載入。',
         'failed': '失敗',
         'file': '檔案',
         'file_holds_no_key': '{0} 所指的檔案不含憑證或金鑰：{1}',
@@ -276,6 +297,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'file_outside_folder': '{0} 所指的檔案不在設定檔所在的資料夾內：{1}',
         'file_too_large': '檔案過大：{0}',
         'full_tunnel': '完整通道',
+        'gnome_shell_extensions': 'GNOME Shell 擴充功能',
         'help': '說明',
         'helper': '輔助程式',
         'helper_failed': '輔助程式失敗',
@@ -293,6 +315,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'import_label': '匯入',
         'import_profile': '匯入設定檔…',
         'info_and_above': '資訊以上',
+        'install': '安裝',
         'install_the_package': '請安裝 plaitway 套件。',
         'installed': '已安裝',
         'installed_by_plaitway': '由 Plaitway 安裝',
@@ -307,6 +330,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'license': '授權',
         'limited': '受限',
         'line_number': '第 {0} 行',
+        'log_out_to_load': '登出再登入後載入。',
         'logs': '記錄',
         'main_menu': '主選單',
         'move_down': '下移',
@@ -361,6 +385,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'remove_saved_credentials': '移除已儲存的登入資訊',
         'reorder_failed': '重新排序失敗',
         'repository': '儲存庫',
+        'requires_gnome_shell': '需要 GNOME Shell',
         'resolver_entries': '解析器項目',
         'restart': '重新啟動',
         'restart_helper': '重新啟動輔助程式',
@@ -390,6 +415,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'shadowed': '被遮蔽',
         'shadowed_by': '被 {0} 遮蔽',
         'show': '顯示',
+        'show_menu_bar': '顯示選單列',
         'show_secrets': '顯示機密',
         'show_tray_icon': '顯示系統匣圖示',
         'split_tunnel': '分割通道',
@@ -399,9 +425,13 @@ _TABLES: dict[str, dict[str, str]] = {
         'start_helper_without_systemd': '請啟動 plaitwayd，例如用 rc-service plaitwayd start。',
         'status': '狀態',
         'stopped': '已停止',
+        'tools': '工具',
+        'top_bar_item': '頂端列項目',
+        'top_bar_item_description': '在頂端列顯示已連線的設定檔數量，選單中每個設定檔都有開關。',
         'tunnel': '通道',
         'tunnel_mode': '通道模式',
         'unavailable': '無法使用',
+        'uninstall': '解除安裝',
         'unknown': '未知',
         'unsaved_changes_message': '設定檔內容的變更尚未儲存。',
         'uptime': '連線時間',
@@ -662,6 +692,16 @@ class Strings:
     def diagnostics(self) -> str:
         return self._table['diagnostics']
 
+    # Linux: Disable
+    @property
+    def disable(self) -> str:
+        return self._table['disable']
+
+    # Linux: Disabled
+    @property
+    def disabled(self) -> str:
+        return self._table['disabled']
+
     # macOS: Disconnect
     @property
     def disconnect(self) -> str:
@@ -692,6 +732,16 @@ class Strings:
     def dns(self) -> str:
         return self._table['dns']
 
+    # Linux: Enable
+    @property
+    def enable(self) -> str:
+        return self._table['enable']
+
+    # Linux: Enabled
+    @property
+    def enabled(self) -> str:
+        return self._table['enabled']
+
     # macOS: Errors only
     @property
     def errors_only(self) -> str:
@@ -706,6 +756,16 @@ class Strings:
     @property
     def exclude_private_ips(self) -> str:
         return self._table['exclude_private_ips']
+
+    # Linux: Extension failed
+    @property
+    def extension_failed(self) -> str:
+        return self._table['extension_failed']
+
+    # Linux: Extensions add features to the GNOME top bar and desktop. They are loaded when you log in.
+    @property
+    def extensions_description(self) -> str:
+        return self._table['extensions_description']
 
     # macOS: Failed
     @property
@@ -737,6 +797,11 @@ class Strings:
     @property
     def full_tunnel(self) -> str:
         return self._table['full_tunnel']
+
+    # Linux: GNOME Shell Extensions
+    @property
+    def gnome_shell_extensions(self) -> str:
+        return self._table['gnome_shell_extensions']
 
     # Linux: Help
     @property
@@ -821,6 +886,11 @@ class Strings:
     def info_and_above(self) -> str:
         return self._table['info_and_above']
 
+    # Linux: Install
+    @property
+    def install(self) -> str:
+        return self._table['install']
+
     # Linux: Install the plaitway package.
     @property
     def install_the_package(self) -> str:
@@ -889,6 +959,11 @@ class Strings:
     # macOS: Line %lld
     def line_number(self, line: int) -> str:
         return self._table['line_number'].format(line)
+
+    # Linux: Log out and back in to load it.
+    @property
+    def log_out_to_load(self) -> str:
+        return self._table['log_out_to_load']
 
     # macOS: Logs
     @property
@@ -1151,6 +1226,11 @@ class Strings:
     def repository(self) -> str:
         return self._table['repository']
 
+    # Linux: Requires GNOME Shell
+    @property
+    def requires_gnome_shell(self) -> str:
+        return self._table['requires_gnome_shell']
+
     # macOS: Resolver entries
     @property
     def resolver_entries(self) -> str:
@@ -1290,6 +1370,11 @@ class Strings:
     def show(self) -> str:
         return self._table['show']
 
+    # Linux: Show Menu Bar
+    @property
+    def show_menu_bar(self) -> str:
+        return self._table['show_menu_bar']
+
     # macOS: Show Secrets
     @property
     def show_secrets(self) -> str:
@@ -1335,6 +1420,21 @@ class Strings:
     def stopped(self) -> str:
         return self._table['stopped']
 
+    # Linux: Tools
+    @property
+    def tools(self) -> str:
+        return self._table['tools']
+
+    # Linux: Top Bar Item
+    @property
+    def top_bar_item(self) -> str:
+        return self._table['top_bar_item']
+
+    # Linux: The number of connected profiles in the top bar, and a switch for each profile in its menu.
+    @property
+    def top_bar_item_description(self) -> str:
+        return self._table['top_bar_item_description']
+
     # macOS: Tunnel
     @property
     def tunnel(self) -> str:
@@ -1349,6 +1449,11 @@ class Strings:
     @property
     def unavailable(self) -> str:
         return self._table['unavailable']
+
+    # macOS: Uninstall
+    @property
+    def uninstall(self) -> str:
+        return self._table['uninstall']
 
     # macOS: Unknown
     @property

@@ -10,6 +10,7 @@ from plaitway.core.app_model import (
     DIAGNOSTICS,
     ROUTING,
     SETTINGS,
+    TOOLS,
     DiagnosticsPage,
     ProfileSection,
     Selection,
@@ -186,7 +187,7 @@ class ManagementTests(AppTestCase):
         app.model.select(Selection.profile(a))
         app.model.reconcile_selection()
         self.assertEqual(app.model.selection, Selection.profile(a))
-        for page in (ROUTING, DIAGNOSTICS, SETTINGS, ABOUT):
+        for page in (ROUTING, DIAGNOSTICS, SETTINGS, TOOLS, ABOUT):
             app.model.select(page)
             app.model.reconcile_selection()
             self.assertEqual(app.model.selection, page)

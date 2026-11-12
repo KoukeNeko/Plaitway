@@ -16,6 +16,7 @@ from ..core.app_model import (  # noqa: E402
     DIAGNOSTICS,
     ROUTING,
     SETTINGS,
+    TOOLS,
     AppModel,
     DiagnosticsPage,
     ProfileSection,
@@ -24,12 +25,13 @@ from ..core.app_model import (  # noqa: E402
 from ..core.app_state import WindowGeometry  # noqa: E402
 from ..core.setup import SetupState  # noqa: E402
 from .paths import APP_NAME  # noqa: E402
-from .appmenu import AppMenu  # noqa: E402
+from .appmenu import AppMenu, menu_model  # noqa: E402
 from .pages.about import AboutPage  # noqa: E402
 from .pages.app_settings import AppSettingsPage  # noqa: E402
 from .pages.diagnostics import build_diagnostics_pages  # noqa: E402
 from .pages.profile_page import build_profile_pages  # noqa: E402
 from .pages.routing import RoutingPage  # noqa: E402
+from .pages.tools import ToolsPage  # noqa: E402
 from .pages.setup import SetupPage, empty_profiles_page  # noqa: E402
 from .sidebar import Sidebar  # noqa: E402
 from .widgets import PageSwitcher, follow, icon_button, name_widget  # noqa: E402
@@ -146,13 +148,20 @@ class MainWindow(Adw.ApplicationWindow):
         self._diagnostics = build_diagnostics_pages(self._model)
         self._content.add_named(self._diagnostics, "diagnostics")
         self._content.add_named(AppSettingsPage(self._model), "settings")
+        self._content.add_named(ToolsPage(self._model), "tools")
         self._content.add_named(AboutPage(self._model), "about")
 
         self._switcher_bar = Adw.ViewSwitcherBar()
         self._actions = _ProfileActionBar(self._model)
 
+        # In the content pane: a bar above the whole window needs a container around the split view,
+        # and a global style sheet that makes sidebars translucent paints that container.
+        self._menu_bar = Gtk.PopoverMenuBar.new_from_model(menu_model(self._strings))
+        self._menu_bar.add_css_class("window-menu-bar")
+
         view = Adw.ToolbarView()
         view.add_top_bar(header)
+        view.add_top_bar(self._menu_bar)
         view.add_top_bar(self._banner)
         view.set_content(self._content)
         view.add_bottom_bar(self._switcher_bar)
@@ -189,6 +198,7 @@ class MainWindow(Adw.ApplicationWindow):
         add("profile-delete", lambda id_: model.request_deletion(id_.get_string()), GLib.VariantType("s"))
         add("show-page", lambda index: self.show_page(index.get_int32()), GLib.VariantType("i"))
         self._find = add("find", lambda _: model.request_search())
+        add("routing", lambda _: self.show_routing())
         add("diagnostics", lambda _: self.show_diagnostics())
         self._resync = add("resync", lambda _: model.resync())
         self._move_up = add("move-up", lambda _: self._move_selected(-1))
@@ -245,6 +255,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._model.select(DIAGNOSTICS)
         self._split.set_show_content(True)
 
+    def show_tools(self) -> None:
+        self._model.select(TOOLS)
+        self._split.set_show_content(True)
+
     def show_about(self) -> None:
         self._model.select(ABOUT)
         self._split.set_show_content(True)
@@ -277,6 +291,7 @@ class MainWindow(Adw.ApplicationWindow):
         if showing_setup:
             return
 
+        self._menu_bar.set_visible(model.show_menu_bar)
         if model.blur_sidebar:
             self.add_css_class("blur-sidebar")
         else:
@@ -300,6 +315,10 @@ class MainWindow(Adw.ApplicationWindow):
             self._content.set_visible_child_name("settings")
             self._use_stack(None)
             title, subtitle = self._strings.settings, ""
+        elif selection.kind is SelectionKind.TOOLS:
+            self._content.set_visible_child_name("tools")
+            self._use_stack(None)
+            title, subtitle = self._strings.tools, ""
         elif selection.kind is SelectionKind.ABOUT:
             self._content.set_visible_child_name("about")
             self._use_stack(None)

@@ -38,7 +38,6 @@
     "The helper manages routes and DNS with administrator rights. macOS asks for approval once.",
     "Toggle Sidebar",
     "Undo",
-    "Uninstall",
     "Uninstall Helper…",
     "Uninstall helper?",
     "Window",
@@ -150,6 +149,10 @@
         "name"
       ]
     },
+    "Extensions add features to the GNOME top bar and desktop. They are loaded when you log in.": {
+      "name": "extensions_description",
+      "params": []
+    },
     "File for %@ holds no certificate or key: %@": {
       "name": "file_holds_no_key",
       "params": [
@@ -209,6 +212,10 @@
       "params": [
         "line"
       ]
+    },
+    "Log out and back in to load it.": {
+      "name": "log_out_to_load",
+      "params": []
     },
     "Not a text file: %@": {
       "name": "not_a_text_file",
@@ -276,6 +283,10 @@
         "prefix"
       ]
     },
+    "Requires GNOME Shell": {
+      "name": "requires_gnome_shell",
+      "params": []
+    },
     "Restart helper?": {
       "name": "restart_helper_title",
       "params": []
@@ -302,6 +313,10 @@
     },
     "Start plaitwayd, then set PLAITWAY_DEV=1 and PLAITWAY_SOCKET.": {
       "name": "start_development_daemon",
+      "params": []
+    },
+    "The number of connected profiles in the top bar, and a switch for each profile in its menu.": {
+      "name": "top_bar_item_description",
       "params": []
     },
     "The profile and its saved credentials are removed.": {

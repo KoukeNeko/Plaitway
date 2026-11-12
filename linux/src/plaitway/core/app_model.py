@@ -62,6 +62,7 @@ class SelectionKind(enum.Enum):
     PROFILE = "profile"
     DIAGNOSTICS = "diagnostics"
     SETTINGS = "settings"
+    TOOLS = "tools"
     ABOUT = "about"
 
 
@@ -80,6 +81,7 @@ class Selection:
 ROUTING = Selection(SelectionKind.ROUTING)
 DIAGNOSTICS = Selection(SelectionKind.DIAGNOSTICS)
 SETTINGS = Selection(SelectionKind.SETTINGS)
+TOOLS = Selection(SelectionKind.TOOLS)
 ABOUT = Selection(SelectionKind.ABOUT)
 
 
@@ -123,6 +125,7 @@ class AlertTitle(enum.Enum):
     RESYNC_FAILED = "resync failed"
     REMOVE_FAILED = "remove failed"
     CREDENTIALS_NOT_SAVED = "credentials not saved"
+    EXTENSION_FAILED = "extension failed"
 
     def label(self, strings: Strings) -> str:
         match self:
@@ -146,6 +149,8 @@ class AlertTitle(enum.Enum):
                 return strings.remove_failed
             case AlertTitle.CREDENTIALS_NOT_SAVED:
                 return strings.credentials_not_saved
+            case AlertTitle.EXTENSION_FAILED:
+                return strings.extension_failed
 
 
 class AppModel:
@@ -362,6 +367,15 @@ class AppModel:
         self.app_state.set_show_tray_icon(shown)
 
     @property
+    def show_menu_bar(self) -> bool:
+        """The menus (File, View, Help) are a bar in the window, for a desktop that has no global menu."""
+        return self.app_state.show_menu_bar
+
+    def set_show_menu_bar(self, shown: bool) -> None:
+        self.app_state.set_show_menu_bar(shown)
+        self.changed.notify()
+
+    @property
     def blur_sidebar(self) -> bool:
         """The sidebar is translucent, for a compositor that blurs what is behind it."""
         return self.app_state.blur_sidebar
@@ -467,6 +481,10 @@ class AppModel:
     def set_launch_at_login(self, enabled: bool) -> None:
         self._run(lambda: self.platform.login_item.set_enabled(enabled), AlertTitle.LOGIN_ITEM_FAILED,
                   done=lambda _: self.changed.notify())
+
+    def change_extension(self, change: Callable[[], object], done: Callable[[], None]) -> None:
+        """Installs, removes, enables or disables the GNOME Shell extension; `done` is called on the UI thread, whatever came of it."""
+        self._run(change, AlertTitle.EXTENSION_FAILED, done=lambda _: done())
 
     # MARK: Profiles
 

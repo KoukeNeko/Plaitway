@@ -1,0 +1,7 @@
+{
+  "uuid": "plaitway@koukeneko.github.io",
+  "name": "Plaitway",
+  "description": "A top bar item for Plaitway: how many profiles are connected, and a menu to connect and disconnect them.",
+  "shell-version": ["48", "49", "50", "51"],
+  "url": "https://github.com/KoukeNeko/Plaitway"
+}

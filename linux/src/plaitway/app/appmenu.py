@@ -17,12 +17,41 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib, Gtk  # noqa: E402
 
 from ..core.app_model import AppModel  # noqa: E402
+from ..l10n.strings import Strings  # noqa: E402
 from .tray.dbusmenu import DBusMenu, MenuEntry  # noqa: E402
 
 log = logging.getLogger(__name__)
 
 REGISTRAR = "com.canonical.AppMenu.Registrar"
 REGISTRAR_PATH = "/com/canonical/AppMenu/Registrar"
+
+
+def menu_spec(strings: Strings) -> list[tuple[str, list[tuple[str, str | None]]]]:
+    """The menus of the window, shared by its menu bar and by the global menu: each title and its entries as
+    (label, the name of the action that it does), None for a divider."""
+    s = strings
+    return [
+        (s.file, [(s.import_profile, "app.import"), (s.disconnect_all, "app.disconnect-all"), ("", None), (s.quit_plaitway, "app.quit")]),
+        (s.view, [(s.routing, "win.routing"), (s.diagnostics, "win.diagnostics"), (s.open_settings, "app.settings")]),
+        (s.help, [(s.about_plaitway, "app.about")]),
+    ]
+
+
+def menu_model(strings: Strings) -> Gio.Menu:
+    """`menu_spec` as the model of a menu bar in the window."""
+    bar = Gio.Menu()
+    for title, items in menu_spec(strings):
+        menu = Gio.Menu()
+        section = Gio.Menu()
+        for label, action in items:
+            if action is None:
+                menu.append_section(None, section)
+                section = Gio.Menu()
+            else:
+                section.append(label, action)
+        menu.append_section(None, section)
+        bar.append_submenu(title, menu)
+    return bar
 
 
 def window_id(window: Gtk.Window) -> int | None:
@@ -99,26 +128,22 @@ class AppMenu:
     def _update(self) -> None:
         if self._menu is None:
             return
-        s = self._model.strings
-        model = self._model
-
-        def action(name: str):
-            return lambda: self._application.activate_action(name, None)
-
-        file = (
-            MenuEntry(s.import_profile, model.setup.is_usable, on_activate=action("import")),
-            MenuEntry(s.disconnect_all, bool(model.switched_on_profiles), on_activate=action("disconnect-all")),
-            MenuEntry.divider(),
-            MenuEntry(s.quit_plaitway, on_activate=action("quit")),
-        )
-        view = (
-            MenuEntry(s.routing, on_activate=lambda: self._window.show_routing()),
-            MenuEntry(s.diagnostics, on_activate=lambda: self._window.show_diagnostics()),
-            MenuEntry(s.open_settings, on_activate=lambda: self._window.show_settings()),
-        )
-        help_ = (MenuEntry(s.about_plaitway, on_activate=action("about")),)
         self._menu.set_entries([
-            MenuEntry(s.file, children=file),
-            MenuEntry(s.view, children=view),
-            MenuEntry(s.help, children=help_),
+            MenuEntry(
+                title,
+                children=tuple(
+                    MenuEntry.divider() if action is None else MenuEntry(label, self._enabled(action), on_activate=self._activator(action))
+                    for label, action in items
+                ),
+            )
+            for title, items in menu_spec(self._model.strings)
         ])
+
+    def _enabled(self, name: str) -> bool:
+        scope, _, action = name.partition(".")
+        action_map = self._window if scope == "win" else self._application
+        found = action_map.lookup_action(action)
+        return found is None or found.get_enabled()
+
+    def _activator(self, name: str):
+        return lambda: self._window.activate_action(name, None)

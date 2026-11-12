@@ -86,6 +86,16 @@ class AppState:
             self._write()
 
     @property
+    def show_menu_bar(self) -> bool:
+        with self._lock:
+            return self._data.get("show_menu_bar") is True
+
+    def set_show_menu_bar(self, shown: bool) -> None:
+        with self._lock:
+            self._data["show_menu_bar"] = shown
+            self._write()
+
+    @property
     def blur_sidebar(self) -> bool:
         with self._lock:
             return self._data.get("blur_sidebar") is True

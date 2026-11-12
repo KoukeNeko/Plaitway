@@ -31,6 +31,9 @@ class AppSettingsPage(Adw.PreferencesPage):
         self._tray.connect("notify::active", self._tray_changed)
         general.add(self._launch)
         general.add(self._tray)
+        self._menu_bar = Adw.SwitchRow(title=s.show_menu_bar)
+        self._menu_bar.connect("notify::active", self._menu_bar_changed)
+        general.add(self._menu_bar)
         self._blur = Adw.SwitchRow(title=s.blur_sidebar)
         self._blur.connect("notify::active", self._blur_changed)
         general.add(self._blur)
@@ -54,6 +57,7 @@ class AppSettingsPage(Adw.PreferencesPage):
         try:
             self._launch.set_active(model.launches_at_login)
             self._tray.set_active(model.show_tray_icon)
+            self._menu_bar.set_active(model.show_menu_bar)
             self._blur.set_active(model.blur_sidebar)
         finally:
             self._updating = False
@@ -111,3 +115,7 @@ class AppSettingsPage(Adw.PreferencesPage):
     def _blur_changed(self, row: Adw.SwitchRow, _) -> None:
         if not self._updating:
             self._model.set_blur_sidebar(row.get_active())
+
+    def _menu_bar_changed(self, row: Adw.SwitchRow, _) -> None:
+        if not self._updating:
+            self._model.set_show_menu_bar(row.get_active())
