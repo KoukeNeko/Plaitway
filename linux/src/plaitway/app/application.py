@@ -17,6 +17,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from ..core.app_model import AppModel  # noqa: E402
 from ..version import __version__  # noqa: E402
 from . import bootstrap, paths, style  # noqa: E402
+from .appmenu import menu_model  # noqa: E402
 from .tray.controller import TrayCommands, TrayController  # noqa: E402
 from .window import MainWindow  # noqa: E402
 
@@ -83,6 +84,9 @@ class PlaitwayApplication(Adw.Application):
         Gtk.Window.set_default_icon_name(paths.APP_ID)
         self._services = bootstrap.build(self._dialog_parent)
         self._add_actions()
+        # Gtk.Application exports the menu bar on the session bus and tells the desktop which window it
+        # belongs to, under Wayland too. A window of libadwaita does not draw it: a global menu does.
+        self.set_menubar(menu_model(self.model.strings))
         for action, accelerators in ACCELERATORS.items():
             self.set_accels_for_action(action, accelerators)
         for number in (signal.SIGINT, signal.SIGTERM):
