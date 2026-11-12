@@ -47,15 +47,79 @@
     "Zoom"
   ],
   "accessors": {
+    "%@ failed": {
+      "name": "chip_failed",
+      "params": [
+        "name"
+      ]
+    },
+    "%@ holds": {
+      "name": "chip_holds",
+      "params": [
+        "name"
+      ]
+    },
+    "%@ is blocked": {
+      "name": "chip_blocked",
+      "params": [
+        "name"
+      ]
+    },
+    "%@ is pending": {
+      "name": "chip_pending",
+      "params": [
+        "name"
+      ]
+    },
+    "%@ waits": {
+      "name": "chip_waits",
+      "params": [
+        "name"
+      ]
+    },
     "%@/s": {
       "name": "rate_per_second",
       "params": [
         "amount"
       ]
     },
+    "%@: %@ holds it": {
+      "name": "route_held_by",
+      "params": [
+        "route",
+        "tunnel"
+      ]
+    },
+    "%@: %@ holds it, %@ waits behind": {
+      "name": "route_held_with_waiting",
+      "params": [
+        "route",
+        "tunnel",
+        "waiting"
+      ]
+    },
+    "%@: no tunnel holds it": {
+      "name": "route_not_held",
+      "params": [
+        "route"
+      ]
+    },
+    "%lld of %lld routes are held by a tunnel": {
+      "name": "routes_held",
+      "params": [
+        "held",
+        "total"
+      ]
+    },
     "A higher priority wins overlapping routes and DNS domains.": {
       "name": "priority_hint",
       "params": []
+    },
+    "Asked by %@": {
+      "name": "asked_by",
+      "params": [
+        "names"
+      ]
     },
     "Cannot read %@: %@": {
       "name": "cannot_read",
@@ -127,6 +191,13 @@
         "location"
       ]
     },
+    "Holds %lld of %lld routes": {
+      "name": "holds_routes",
+      "params": [
+        "held",
+        "total"
+      ]
+    },
     "Import": {
       "name": "import_label",
       "params": []
@@ -150,6 +221,44 @@
     "Only the console user and administrators can use the helper.": {
       "name": "console_user_only",
       "params": []
+    },
+    "Priority %lld · Connecting": {
+      "name": "priority_connecting",
+      "params": [
+        "rank"
+      ]
+    },
+    "Priority %lld · Disconnecting": {
+      "name": "priority_disconnecting",
+      "params": [
+        "rank"
+      ]
+    },
+    "Priority %lld · Failed": {
+      "name": "priority_failed",
+      "params": [
+        "rank"
+      ]
+    },
+    "Priority %lld · Holds %lld of %lld routes": {
+      "name": "priority_holds",
+      "params": [
+        "rank",
+        "held",
+        "total"
+      ]
+    },
+    "Priority %lld · Needs credentials": {
+      "name": "priority_needs_credentials",
+      "params": [
+        "rank"
+      ]
+    },
+    "Priority %lld · Not connected": {
+      "name": "priority_not_connected",
+      "params": [
+        "rank"
+      ]
     },
     "Private address ranges stay outside the tunnel.": {
       "name": "private_ranges_hint",

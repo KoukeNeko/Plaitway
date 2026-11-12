@@ -1,6 +1,116 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ failed" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 失敗"
+          }
+        }
+      }
+    },
+    "%@ holds" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 持有"
+          }
+        }
+      }
+    },
+    "%@ is blocked" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 受阻"
+          }
+        }
+      }
+    },
+    "%@ is pending" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 處理中"
+          }
+        }
+      }
+    },
+    "%@ waits" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 等待"
+          }
+        }
+      }
+    },
+    "%@: %@ holds it" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：由 %2$@ 持有"
+          }
+        }
+      }
+    },
+    "%@: %@ holds it, %@ waits behind" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：由 %2$@ 持有，%3$@ 在後面等待"
+          }
+        }
+      }
+    },
+    "%@: no tunnel holds it" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@：沒有通道持有它"
+          }
+        }
+      }
+    },
+    "%lld of %lld routes are held by a tunnel" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$lld 條路由中有 %1$lld 條由通道持有"
+          }
+        }
+      }
+    },
+    "All internet traffic" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有網際網路流量"
+          }
+        }
+      }
+    },
+    "Asked by %@" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 %@ 要求"
+          }
+        }
+      }
+    },
     "Credentials not saved" : {
       "localizations" : {
         "zh-Hant" : {
@@ -31,6 +141,16 @@
         }
       }
     },
+    "Holds %lld of %lld routes" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "持有 %1$lld/%2$lld 條路由"
+          }
+        }
+      }
+    },
     "Install the plaitway package." : {
       "localizations" : {
         "zh-Hant" : {
@@ -51,6 +171,36 @@
         }
       }
     },
+    "No route is asked for yet" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還沒有路由被要求"
+          }
+        }
+      }
+    },
+    "Off" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關"
+          }
+        }
+      }
+    },
+    "On" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開"
+          }
+        }
+      }
+    },
     "Only the console user and administrators can use the helper." : {
       "localizations" : {
         "zh-Hant" : {
@@ -67,6 +217,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "權限不足"
+          }
+        }
+      }
+    },
+    "Priority %lld · Connecting" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "優先順序 %lld · 連線中"
+          }
+        }
+      }
+    },
+    "Priority %lld · Disconnecting" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "優先順序 %lld · 中斷連線中"
+          }
+        }
+      }
+    },
+    "Priority %lld · Failed" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "優先順序 %lld · 失敗"
+          }
+        }
+      }
+    },
+    "Priority %lld · Holds %lld of %lld routes" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "優先順序 %1$lld · 持有 %2$lld/%3$lld 條路由"
+          }
+        }
+      }
+    },
+    "Priority %lld · Needs credentials" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "優先順序 %lld · 需要登入資訊"
+          }
+        }
+      }
+    },
+    "Priority %lld · Not connected" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "優先順序 %lld · 未連線"
           }
         }
       }
@@ -97,6 +307,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新啟動輔助程式？"
+          }
+        }
+      }
+    },
+    "Routing" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "路由"
           }
         }
       }

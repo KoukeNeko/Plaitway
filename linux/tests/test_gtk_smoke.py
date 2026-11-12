@@ -13,7 +13,8 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 from plaitway.app import style  # noqa: E402
 from plaitway.app.widgets import ACCESSIBLE_NAME  # noqa: E402
 from plaitway.client.types import ProfileState  # noqa: E402
-from plaitway.core.app_model import DIAGNOSTICS, SETTINGS, DiagnosticsPage, ProfileSection, Selection  # noqa: E402
+from plaitway.core.app_model import DIAGNOSTICS, ROUTING, SETTINGS, DiagnosticsPage, ProfileSection, Selection  # noqa: E402
+from plaitway.core import routing  # noqa: E402
 from plaitway.core.app_state import WindowGeometry  # noqa: E402
 from plaitway.core.ports import HelperRegistration  # noqa: E402
 from plaitway.core.profile_store import Connection  # noqa: E402
@@ -170,6 +171,8 @@ class WindowTests(SmokeTestCase):
             app.model.select(DIAGNOSTICS)
             app.model.show_diagnostics_page(page)
             self.pump(app, 0.5)
+        app.model.select(ROUTING)
+        self.pump(app, 0.8)
         app.model.select(SETTINGS)
         self.pump(app)
         self.assertEqual(MESSAGES, [])
@@ -201,6 +204,8 @@ class WindowTests(SmokeTestCase):
             for section in ProfileSection:
                 app.model.show_section(section)
                 self.pump(app, 0.2)
+        app.model.select(ROUTING)
+        self.pump(app, 0.8)
         app.model.select(DIAGNOSTICS)
         self.pump(app, 0.8)
         app.model.select(SETTINGS)
@@ -228,40 +233,50 @@ class WindowTests(SmokeTestCase):
             app.model.show_diagnostics_page(page)
             self.pump(app, 0.4)
             self.assertLessEqual(window.measure(Gtk.Orientation.HORIZONTAL, -1)[0], 360, page)
-        app.model.select(SETTINGS)
-        self.pump(app, 0.3)
-        self.assertLessEqual(window.measure(Gtk.Orientation.HORIZONTAL, -1)[0], 360)
+        for page in (ROUTING, SETTINGS):
+            app.model.select(page)
+            self.pump(app, 0.3)
+            self.assertLessEqual(window.measure(Gtk.Orientation.HORIZONTAL, -1)[0], 360, page)
         self.assertEqual(MESSAGES, [])
 
-    def test_the_sidebar_lists_the_profiles_in_priority_order_with_their_state(self):
-        app = self.make_app()
-        window = self.open_window(app)
-        office, home, broken = self.three_profiles(app)
-        self.pump(app, 0.5)
-        rows = []
+    def sidebar_rows(self, window):
         row = window._sidebar._profiles.get_first_child()
         while row is not None:
-            rows.append(getattr(row, ACCESSIBLE_NAME))
+            yield row
             row = row.get_next_sibling()
-        self.assertEqual(rows, ["office, OpenVPN · Connected", "home, WireGuard · Connected", "broken, OpenVPN · Failed"])
 
-    def test_the_state_is_shown_by_a_glyph_and_a_word_not_by_colour_alone(self):
+    def test_the_sidebar_lists_the_profiles_in_priority_order_with_what_they_hold(self):
         app = self.make_app()
         window = self.open_window(app)
-        office, home, broken = self.three_profiles(app)
+        self.three_profiles(app)
         self.pump(app, 0.5)
-        glyphs = []
-        row = window._sidebar._profiles.get_first_child()
-        while row is not None:
-            glyphs.append((row.glyph.get_icon_name(), row.caption.get_text()))
-            row = row.get_next_sibling()
-        self.assertEqual(len({glyph for glyph, _ in glyphs}), 2)
-        self.assertEqual(
-            glyphs,
-            [("plaitway-state-connected-symbolic", "OpenVPN · Connected"),
-             ("plaitway-state-connected-symbolic", "WireGuard · Connected"),
-             ("plaitway-state-attention-symbolic", "OpenVPN · Failed")],
-        )
+        presenter = app.model.presenter
+        expected = [f"{p.name}, {routing.caption(p, presenter)}" for p in app.store.profiles]
+        self.assertEqual([getattr(row, ACCESSIBLE_NAME) for row in self.sidebar_rows(window)], expected)
+        self.assertEqual([p.name for p in app.store.profiles], ["office", "home", "broken"])
+
+    def test_the_state_is_shown_by_a_dot_and_a_word_not_by_colour_alone(self):
+        app = self.make_app()
+        window = self.open_window(app)
+        self.three_profiles(app)
+        self.pump(app, 0.5)
+        rows = list(self.sidebar_rows(window))
+        for row, profile in zip(rows, app.store.profiles):
+            self.assertEqual(row.dot._on, profile.desired_enabled, "a ring while the profile is off, a dot while it is on")
+        self.assertTrue(rows[0].caption.get_text().startswith("OpenVPN · Holds "), rows[0].caption.get_text())
+        self.assertEqual(rows[2].caption.get_text(), "OpenVPN · Failed")
+
+    def test_the_routing_page_names_every_route_and_tunnel(self):
+        app = self.make_app()
+        window = self.open_window(app)
+        self.three_profiles(app)
+        app.model.select(ROUTING)
+        self.pump(app, 0.8)
+        page = next(widget for widget in descendants(window) if widget.__gtype__.name == "PlaitwayBay")
+        self.assertEqual(len(page._tunnel_cards), 3)
+        self.assertTrue(page._route_cards)
+        self.assertEqual(self.unnamed(window), [])
+        self.assertEqual(MESSAGES, [])
 
     def test_every_icon_the_app_names_exists_in_the_icon_theme(self):
         from plaitway.core import presentation
@@ -330,7 +345,8 @@ class ActionTests(SmokeTestCase):
         app = self.make_app()
         window = self.open_window(app)
         profile_id = self.import_fixture(app, "office.ovpn")
-        app.wait_until(lambda: app.model.selection == Selection.profile(profile_id), "the selection")
+        app.wait_until(lambda: app.store.profile(profile_id) is not None, "the profile")
+        app.model.select(Selection.profile(profile_id))
         self.pump(app, 0.3)
 
         self.assertTrue(window.activate_action("win.toggle-connection", None))  # Ctrl+K
@@ -382,7 +398,8 @@ class SetupTests(SmokeTestCase):
         app = self.make_app()
         window = self.open_window(app)
         profile_id = self.import_fixture(app, "office.ovpn")
-        app.wait_until(lambda: app.model.selection == Selection.profile(profile_id), "the selection")
+        app.wait_until(lambda: app.store.profile(profile_id) is not None, "the profile")
+        app.model.select(Selection.profile(profile_id))
         self.pump(app, 0.4)
         window._actions._toggle.emit("clicked")
         self.wait_for_state(app, profile_id, ProfileState.CONNECTED)

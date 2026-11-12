@@ -110,7 +110,7 @@ def run(arguments: argparse.Namespace, daemon) -> None:
     from plaitway.app.application import PlaitwayApplication
     from plaitway.app.window import MainWindow
     from plaitway.client.errors import DaemonFailure, FailureKind
-    from plaitway.core.app_model import DIAGNOSTICS, SETTINGS, DiagnosticsPage, ProfileSection, Selection
+    from plaitway.core.app_model import DIAGNOSTICS, ROUTING, SETTINGS, DiagnosticsPage, ProfileSection, Selection
     from plaitway.core.app_state import WindowGeometry
     from plaitway.core.fakes import FakeHelperService
     from plaitway.core.ports import HelperRegistration
@@ -205,6 +205,9 @@ def run(arguments: argparse.Namespace, daemon) -> None:
                 yield 0.5
 
             if size == "narrow":
+                model.select(ROUTING)
+                window._split.set_show_content(True)
+                yield from shot("routing")
                 model.select(Selection.profile(office))
                 window._split.set_show_content(False)
                 yield from shot("sidebar")
@@ -215,6 +218,9 @@ def run(arguments: argparse.Namespace, daemon) -> None:
                 model.show_section(ProfileSection.OVERVIEW)
                 return
 
+            model.select(ROUTING)
+            yield 1.0
+            yield from shot("routing")
             model.select(Selection.profile(office))
             for section in ProfileSection:
                 model.show_section(section)

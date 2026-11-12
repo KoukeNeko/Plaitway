@@ -13,9 +13,11 @@ _TABLES: dict[str, dict[str, str]] = {
         'addresses': 'Addresses',
         'administrator_required': 'Administrator required',
         'all_domains': 'All domains',
+        'all_internet_traffic': 'All internet traffic',
         'all_levels': 'All levels',
         'app_version': 'App version',
         'applies_at_next_connection': 'Applies at next connection',
+        'asked_by': 'Asked by {0}',
         'attention': 'Attention',
         'auto': 'Auto',
         'auto_connect': 'Auto-connect',
@@ -24,6 +26,11 @@ _TABLES: dict[str, dict[str, str]] = {
         'bypass': 'Bypass',
         'cancel': 'Cancel',
         'cannot_read': 'Cannot read {0}: {1}',
+        'chip_blocked': '{0} is blocked',
+        'chip_failed': '{0} failed',
+        'chip_holds': '{0} holds',
+        'chip_pending': '{0} is pending',
+        'chip_waits': '{0} waits',
         'close': 'Close',
         'configuration': 'Configuration',
         'connect': 'Connect',
@@ -75,6 +82,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'helper_unavailable': 'Helper unavailable',
         'helper_version': 'Helper version',
         'hide_secrets': 'Hide Secrets',
+        'holds_routes': 'Holds {0} of {1} routes',
         'import_failed': 'Import failed',
         'import_label': 'Import',
         'import_profile': 'Import Profile…',
@@ -100,11 +108,14 @@ _TABLES: dict[str, dict[str, str]] = {
         'network': 'Network',
         'no_log_lines': 'No Log Lines',
         'no_profiles': 'No Profiles',
+        'no_route_is_asked_for_yet': 'No route is asked for yet',
         'no_routes': 'No Routes',
         'none': 'None',
         'not_a_text_file': 'Not a text file: {0}',
         'not_connected': 'Not connected',
         'not_installed': 'Not installed',
+        'off': 'Off',
+        'on': 'On',
         'on_demand': 'On demand',
         'on_demand_footer': 'Connects on the checked networks and disconnects on any other.',
         'open_plaitway': 'Open Plaitway',
@@ -115,7 +126,13 @@ _TABLES: dict[str, dict[str, str]] = {
         'pending': 'Pending',
         'permission_denied': 'Permission denied',
         'priority': 'Priority',
+        'priority_connecting': 'Priority {0} · Connecting',
+        'priority_disconnecting': 'Priority {0} · Disconnecting',
+        'priority_failed': 'Priority {0} · Failed',
         'priority_hint': 'A higher priority wins overlapping routes and DNS domains.',
+        'priority_holds': 'Priority {0} · Holds {1} of {2} routes',
+        'priority_needs_credentials': 'Priority {0} · Needs credentials',
+        'priority_not_connected': 'Priority {0} · Not connected',
         'private_ranges_hint': 'Private address ranges stay outside the tunnel.',
         'privileges': 'Privileges',
         'problem': 'Problem',
@@ -144,9 +161,14 @@ _TABLES: dict[str, dict[str, str]] = {
         'resync_failed': 'Resync failed',
         'retry': 'Retry',
         'revert': 'Revert',
+        'route_held_by': '{0}: {1} holds it',
+        'route_held_with_waiting': '{0}: {1} holds it, {2} waits behind',
+        'route_not_held': '{0}: no tunnel holds it',
         'routes': 'Routes',
         'routes_and_dns': 'Routes and DNS',
+        'routes_held': '{0} of {1} routes are held by a tunnel',
         'routes_not_in_effect': 'Routes not in effect',
+        'routing': 'Routing',
         'running': 'Running',
         'running_not_answering': 'Running, not answering.',
         'save': 'Save',
@@ -184,9 +206,11 @@ _TABLES: dict[str, dict[str, str]] = {
         'addresses': '位址',
         'administrator_required': '需要管理員權限',
         'all_domains': '所有網域',
+        'all_internet_traffic': '所有網際網路流量',
         'all_levels': '所有層級',
         'app_version': 'App 版本',
         'applies_at_next_connection': '下次連線時生效',
+        'asked_by': '由 {0} 要求',
         'attention': '需要注意',
         'auto': '自動',
         'auto_connect': '自動連線',
@@ -195,6 +219,11 @@ _TABLES: dict[str, dict[str, str]] = {
         'bypass': '旁路',
         'cancel': '取消',
         'cannot_read': '無法讀取 {0}：{1}',
+        'chip_blocked': '{0} 受阻',
+        'chip_failed': '{0} 失敗',
+        'chip_holds': '{0} 持有',
+        'chip_pending': '{0} 處理中',
+        'chip_waits': '{0} 等待',
         'close': '關閉',
         'configuration': '組態',
         'connect': '連線',
@@ -246,6 +275,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'helper_unavailable': '輔助程式無法使用',
         'helper_version': '輔助程式版本',
         'hide_secrets': '隱藏機密',
+        'holds_routes': '持有 {0}/{1} 條路由',
         'import_failed': '匯入失敗',
         'import_label': '匯入',
         'import_profile': '匯入設定檔…',
@@ -271,11 +301,14 @@ _TABLES: dict[str, dict[str, str]] = {
         'network': '網路',
         'no_log_lines': '沒有記錄',
         'no_profiles': '沒有設定檔',
+        'no_route_is_asked_for_yet': '還沒有路由被要求',
         'no_routes': '沒有路由',
         'none': '無',
         'not_a_text_file': '不是文字檔：{0}',
         'not_connected': '未連線',
         'not_installed': '未安裝',
+        'off': '關',
+        'on': '開',
         'on_demand': '隨選連線',
         'on_demand_footer': '在勾選的網路上連線，在其他網路上中斷連線。',
         'open_plaitway': '打開 Plaitway',
@@ -286,7 +319,13 @@ _TABLES: dict[str, dict[str, str]] = {
         'pending': '等待中',
         'permission_denied': '權限不足',
         'priority': '優先順序',
+        'priority_connecting': '優先順序 {0} · 連線中',
+        'priority_disconnecting': '優先順序 {0} · 中斷連線中',
+        'priority_failed': '優先順序 {0} · 失敗',
         'priority_hint': '優先順序較高者取得重疊的路由與 DNS 網域。',
+        'priority_holds': '優先順序 {0} · 持有 {1}/{2} 條路由',
+        'priority_needs_credentials': '優先順序 {0} · 需要登入資訊',
+        'priority_not_connected': '優先順序 {0} · 未連線',
         'private_ranges_hint': '私有位址範圍不經過通道。',
         'privileges': '權限',
         'problem': '發生問題',
@@ -315,9 +354,14 @@ _TABLES: dict[str, dict[str, str]] = {
         'resync_failed': '重新同步失敗',
         'retry': '重試',
         'revert': '還原',
+        'route_held_by': '{0}：由 {1} 持有',
+        'route_held_with_waiting': '{0}：由 {1} 持有，{2} 在後面等待',
+        'route_not_held': '{0}：沒有通道持有它',
         'routes': '路由',
         'routes_and_dns': '路由與 DNS',
+        'routes_held': '{1} 條路由中有 {0} 條由通道持有',
         'routes_not_in_effect': '未生效的路由',
+        'routing': '路由',
         'running': '執行中',
         'running_not_answering': '執行中，但沒有回應。',
         'save': '儲存',
@@ -382,6 +426,11 @@ class Strings:
     def all_domains(self) -> str:
         return self._table['all_domains']
 
+    # Linux: All internet traffic
+    @property
+    def all_internet_traffic(self) -> str:
+        return self._table['all_internet_traffic']
+
     # macOS: All levels
     @property
     def all_levels(self) -> str:
@@ -396,6 +445,10 @@ class Strings:
     @property
     def applies_at_next_connection(self) -> str:
         return self._table['applies_at_next_connection']
+
+    # Linux: Asked by %@
+    def asked_by(self, names: str) -> str:
+        return self._table['asked_by'].format(names)
 
     # macOS: Attention
     @property
@@ -435,6 +488,26 @@ class Strings:
     # macOS: Cannot read %@: %@
     def cannot_read(self, path: str, reason: str) -> str:
         return self._table['cannot_read'].format(path, reason)
+
+    # Linux: %@ is blocked
+    def chip_blocked(self, name: str) -> str:
+        return self._table['chip_blocked'].format(name)
+
+    # Linux: %@ failed
+    def chip_failed(self, name: str) -> str:
+        return self._table['chip_failed'].format(name)
+
+    # Linux: %@ holds
+    def chip_holds(self, name: str) -> str:
+        return self._table['chip_holds'].format(name)
+
+    # Linux: %@ is pending
+    def chip_pending(self, name: str) -> str:
+        return self._table['chip_pending'].format(name)
+
+    # Linux: %@ waits
+    def chip_waits(self, name: str) -> str:
+        return self._table['chip_waits'].format(name)
 
     # macOS: Close
     @property
@@ -683,6 +756,10 @@ class Strings:
     def hide_secrets(self) -> str:
         return self._table['hide_secrets']
 
+    # Linux: Holds %lld of %lld routes
+    def holds_routes(self, held: int, total: int) -> str:
+        return self._table['holds_routes'].format(held, total)
+
     # macOS: Import failed
     @property
     def import_failed(self) -> str:
@@ -807,6 +884,11 @@ class Strings:
     def no_profiles(self) -> str:
         return self._table['no_profiles']
 
+    # Linux: No route is asked for yet
+    @property
+    def no_route_is_asked_for_yet(self) -> str:
+        return self._table['no_route_is_asked_for_yet']
+
     # macOS: No Routes
     @property
     def no_routes(self) -> str:
@@ -830,6 +912,16 @@ class Strings:
     @property
     def not_installed(self) -> str:
         return self._table['not_installed']
+
+    # Linux: Off
+    @property
+    def off(self) -> str:
+        return self._table['off']
+
+    # Linux: On
+    @property
+    def on(self) -> str:
+        return self._table['on']
 
     # macOS: On demand
     @property
@@ -881,10 +973,34 @@ class Strings:
     def priority(self) -> str:
         return self._table['priority']
 
+    # Linux: Priority %lld · Connecting
+    def priority_connecting(self, rank: int) -> str:
+        return self._table['priority_connecting'].format(rank)
+
+    # Linux: Priority %lld · Disconnecting
+    def priority_disconnecting(self, rank: int) -> str:
+        return self._table['priority_disconnecting'].format(rank)
+
+    # Linux: Priority %lld · Failed
+    def priority_failed(self, rank: int) -> str:
+        return self._table['priority_failed'].format(rank)
+
     # macOS: A higher priority wins overlapping routes and DNS domains.
     @property
     def priority_hint(self) -> str:
         return self._table['priority_hint']
+
+    # Linux: Priority %lld · Holds %lld of %lld routes
+    def priority_holds(self, rank: int, held: int, total: int) -> str:
+        return self._table['priority_holds'].format(rank, held, total)
+
+    # Linux: Priority %lld · Needs credentials
+    def priority_needs_credentials(self, rank: int) -> str:
+        return self._table['priority_needs_credentials'].format(rank)
+
+    # Linux: Priority %lld · Not connected
+    def priority_not_connected(self, rank: int) -> str:
+        return self._table['priority_not_connected'].format(rank)
 
     # macOS: Private address ranges stay outside the tunnel.
     @property
@@ -1024,6 +1140,18 @@ class Strings:
     def revert(self) -> str:
         return self._table['revert']
 
+    # Linux: %@: %@ holds it
+    def route_held_by(self, route: str, tunnel: str) -> str:
+        return self._table['route_held_by'].format(route, tunnel)
+
+    # Linux: %@: %@ holds it, %@ waits behind
+    def route_held_with_waiting(self, route: str, tunnel: str, waiting: str) -> str:
+        return self._table['route_held_with_waiting'].format(route, tunnel, waiting)
+
+    # Linux: %@: no tunnel holds it
+    def route_not_held(self, route: str) -> str:
+        return self._table['route_not_held'].format(route)
+
     # macOS: Routes
     @property
     def routes(self) -> str:
@@ -1034,10 +1162,19 @@ class Strings:
     def routes_and_dns(self) -> str:
         return self._table['routes_and_dns']
 
+    # Linux: %lld of %lld routes are held by a tunnel
+    def routes_held(self, held: int, total: int) -> str:
+        return self._table['routes_held'].format(held, total)
+
     # macOS: Routes not in effect
     @property
     def routes_not_in_effect(self) -> str:
         return self._table['routes_not_in_effect']
+
+    # Linux: Routing
+    @property
+    def routing(self) -> str:
+        return self._table['routing']
 
     # Linux: Running
     @property

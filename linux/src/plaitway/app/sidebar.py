@@ -1,5 +1,5 @@
-"""The sidebar: the profiles on top, in priority order (drag to change it), and
-Diagnostics and Settings below them whatever their number."""
+"""The sidebar: the Routing page, the profiles under it in priority order (drag to change it),
+and Diagnostics and Settings below them whatever their number."""
 
 from __future__ import annotations
 
@@ -13,21 +13,22 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from ..client.types import Profile, ProfileState  # noqa: E402
-from ..core.app_model import DIAGNOSTICS, SETTINGS, AppModel, Selection, SelectionKind  # noqa: E402
-from .widgets import StateGlyph, follow, label, name_widget  # noqa: E402
+from ..core import routing  # noqa: E402
+from ..core.app_model import DIAGNOSTICS, ROUTING, SETTINGS, AppModel, Selection, SelectionKind  # noqa: E402
+from .widgets import HueDot, follow, label, name_widget  # noqa: E402
 
 
 class ProfileRow(Gtk.ListBoxRow):
-    """A profile in the sidebar: its shield in the colour of its state, its name, and
-    under it what it is and how it stands."""
+    """A profile in the sidebar: a dot in its colour, filled while it is switched on, its name,
+    and under it what it is and how it stands."""
 
     def __init__(self, profile_id: str) -> None:
         super().__init__()
         self.profile_id = profile_id
         box = Gtk.Box(spacing=10, margin_top=6, margin_bottom=6, margin_start=4, margin_end=4)
-        self.glyph = StateGlyph(22)
-        self.glyph.set_size_request(30, -1)
-        box.append(self.glyph)
+        self.dot = HueDot(12)
+        self.dot.set_size_request(30, -1)
+        box.append(self.dot)
         words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, valign=Gtk.Align.CENTER, hexpand=True)
         self.name = label(ellipsize=Pango.EllipsizeMode.MIDDLE)
         self.caption = label(css=["caption", "dimmed"], ellipsize=Pango.EllipsizeMode.END)
@@ -36,8 +37,8 @@ class ProfileRow(Gtk.ListBoxRow):
         box.append(words)
         self.set_child(box)
 
-    def show(self, profile: Profile, subtitle: str) -> None:
-        self.glyph.show_profile_state(profile.state)
+    def show(self, profile: Profile, hue: int, subtitle: str) -> None:
+        self.dot.show_hue(hue, profile.desired_enabled)
         self.name.set_text(profile.name)
         self.caption.set_text(subtitle)
         name_widget(self, f"{profile.name}, {subtitle}")
@@ -67,6 +68,18 @@ class Sidebar(Gtk.Box):
         self._rows: dict[str, ProfileRow] = {}
         self._syncing = False
         self._drop_row: ProfileRow | None = None
+
+        self._routing_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        self._routing_list.add_css_class("navigation-sidebar")
+        self._routing = FooterRow(ROUTING, "network-workgroup-symbolic", self._strings.routing)
+        self._routing_list.append(self._routing)
+        self._routing_list.connect("row-selected", self._footer_selected)
+        self._routing_list.connect("row-activated", lambda *_: self._on_activated())
+        self.append(self._routing_list)
+        heading = label(self._strings.profiles, css=["caption-heading", "dimmed"])
+        heading.set_margin_start(18)
+        heading.set_margin_top(8)
+        self.append(heading)
 
         self._profiles = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self._profiles.add_css_class("navigation-sidebar")
@@ -105,7 +118,9 @@ class Sidebar(Gtk.Box):
             self._rebuild(ids)
         presenter = self._model.presenter
         for profile in profiles:
-            self._rows[profile.id].show(profile, presenter.profile_subtitle(profile))
+            self._rows[profile.id].show(
+                profile, routing.hue_index(self._model.store.profiles, profile.id), routing.caption(profile, presenter)
+            )
         self._select(self._model.selection)
 
     def _current_rows(self) -> list[ProfileRow]:
@@ -133,18 +148,19 @@ class Sidebar(Gtk.Box):
     def _select(self, selection: Selection | None) -> None:
         self._syncing = True
         try:
-            if selection is not None and selection.kind is SelectionKind.PROFILE and selection.profile_id in self._rows:
+            self._routing_list.unselect_all()
+            self._profiles.unselect_all()
+            self._footer.unselect_all()
+            if selection is None:
+                pass
+            elif selection.kind is SelectionKind.PROFILE and selection.profile_id in self._rows:
                 self._profiles.select_row(self._rows[selection.profile_id])
-                self._footer.unselect_all()
-            elif selection is not None and selection.kind is SelectionKind.DIAGNOSTICS:
-                self._profiles.unselect_all()
+            elif selection.kind is SelectionKind.ROUTING:
+                self._routing_list.select_row(self._routing)
+            elif selection.kind is SelectionKind.DIAGNOSTICS:
                 self._footer.select_row(self._diagnostics)
-            elif selection is not None and selection.kind is SelectionKind.SETTINGS:
-                self._profiles.unselect_all()
+            elif selection.kind is SelectionKind.SETTINGS:
                 self._footer.select_row(self._settings)
-            else:
-                self._profiles.unselect_all()
-                self._footer.unselect_all()
         finally:
             self._syncing = False
 

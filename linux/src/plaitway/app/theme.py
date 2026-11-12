@@ -29,6 +29,18 @@ class Palette:
         return self._colours[index]
 
 
+# One colour per profile, as in the Windows app: colour means "which tunnel", never "good or bad".
+HUES = tuple(
+    Palette(light, dark, light, dark)
+    for light, dark in (
+        ("#0a9b94", "#3ad0c6"),
+        ("#d9680f", "#ff9a4d"),
+        ("#c0306b", "#ff6b9d"),
+        ("#2f6fd0", "#6fa3ff"),
+        ("#3e9b3e", "#7bd67b"),
+        ("#7f4fd0", "#b48cff"),
+    )
+)
 WARNING = Palette("#9c6e03", "#f8e45c", "#6b4a00", "#ffff80")
 ERROR = Palette("#c01c28", "#ff7b63", "#8a0f19", "#ffb3a3")
 

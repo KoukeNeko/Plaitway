@@ -58,6 +58,7 @@ SELECT_DEADLINE = 2.0
 
 
 class SelectionKind(enum.Enum):
+    ROUTING = "routing"
     PROFILE = "profile"
     DIAGNOSTICS = "diagnostics"
     SETTINGS = "settings"
@@ -75,6 +76,7 @@ class Selection:
         return Selection(SelectionKind.PROFILE, profile_id)
 
 
+ROUTING = Selection(SelectionKind.ROUTING)
 DIAGNOSTICS = Selection(SelectionKind.DIAGNOSTICS)
 SETTINGS = Selection(SelectionKind.SETTINGS)
 
@@ -673,7 +675,7 @@ class AppModel:
 
     def reconcile_selection(self) -> None:
         """Keeps something selected while there is something to select: after a
-        deletion the first profile, and the first profile at launch."""
+        deletion the first profile, and the Routing page at launch."""
         profiles = self.store.profiles
         existing = set(profiles.ids)
         with self._lock:
@@ -683,11 +685,17 @@ class AppModel:
                 self._pending_selection = None
                 return
             selection = self._selection
+            if selection == ROUTING and not profiles:
+                self._selection = None
+                return
             if selection is not None and selection.kind is not SelectionKind.PROFILE:
                 return
             if selection is not None and selection.profile_id in existing:
                 return
-            self._selection = Selection.profile(profiles[0].id) if profiles else None
+            if not profiles:
+                self._selection = None
+            else:
+                self._selection = ROUTING if selection is None else Selection.profile(profiles[0].id)
 
     def _select_when_shown(self, profile_id: str) -> None:
         """Selects a profile once the store shows it; the daemon's event may arrive after the reply."""

@@ -25,6 +25,7 @@ from .paths import APP_NAME  # noqa: E402
 from .pages.app_settings import AppSettingsPage  # noqa: E402
 from .pages.diagnostics import build_diagnostics_pages  # noqa: E402
 from .pages.profile_page import build_profile_pages  # noqa: E402
+from .pages.routing import RoutingPage  # noqa: E402
 from .pages.setup import SetupPage, empty_profiles_page  # noqa: E402
 from .sidebar import Sidebar  # noqa: E402
 from .widgets import PageSwitcher, follow, icon_button, name_widget  # noqa: E402
@@ -132,6 +133,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Only the page that is shown counts for the width: another page may need more than a narrow window has.
         self._content = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.CROSSFADE, hhomogeneous=False)
         self._content.add_named(empty_profiles_page(self._model), "empty")
+        self._content.add_named(RoutingPage(self._model), "routing")
         self._diagnostics = build_diagnostics_pages(self._model)
         self._content.add_named(self._diagnostics, "diagnostics")
         self._content.add_named(AppSettingsPage(self._model), "settings")
@@ -264,6 +266,10 @@ class MainWindow(Adw.ApplicationWindow):
             self._content.set_visible_child_name("empty")
             self._use_stack(None)
             title, subtitle = APP_NAME, ""
+        elif selection.kind is SelectionKind.ROUTING:
+            self._content.set_visible_child_name("routing")
+            self._use_stack(None)
+            title, subtitle = self._strings.routing, ""
         elif selection.kind is SelectionKind.DIAGNOSTICS:
             self._content.set_visible_child_name("diagnostics")
             self._use_stack(self._diagnostics)

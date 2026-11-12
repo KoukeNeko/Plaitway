@@ -16,7 +16,7 @@ from ..core import presentation  # noqa: E402
 from ..core.observable import Notifier  # noqa: E402
 from ..core.presentation import Tone  # noqa: E402
 from ..core.traffic_history import Sample  # noqa: E402
-from . import style  # noqa: E402
+from . import style, theme  # noqa: E402
 
 
 ACCESSIBLE_NAME = "plaitway_accessible_name"
@@ -108,6 +108,45 @@ class StateGlyph(Gtk.Image):
     def show_route_state(self, state: int) -> None:
         self.set_from_icon_name(presentation.route_glyph(state))
         style.set_tone(self, presentation.route_tone(state))
+
+
+class HueDot(Gtk.Widget):
+    """A profile's colour: a filled dot while the profile is switched on, a ring while it is off."""
+
+    __gtype_name__ = "PlaitwayHueDot"
+
+    def __init__(self, size: int = 12) -> None:
+        super().__init__(
+            valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER, accessible_role=Gtk.AccessibleRole.PRESENTATION
+        )
+        self._size = size
+        self._hue = 0
+        self._on = False
+
+    def show_hue(self, hue: int, on: bool) -> None:
+        if (hue, on) != (self._hue, self._on):
+            self._hue, self._on = hue, on
+            self.queue_draw()
+
+    def do_measure(self, orientation, for_size):
+        return self._size, self._size, -1, -1
+
+    def do_css_changed(self, change) -> None:
+        # The light and dark style changes the colour.
+        self.queue_draw()
+
+    def do_snapshot(self, snapshot) -> None:
+        size = min(self.get_width(), self.get_height())
+        circle = Gsk.RoundedRect()
+        circle.init_from_rect(Graphene.Rect().init(0, 0, size, size), size / 2)
+        if self._on:
+            snapshot.push_rounded_clip(circle)
+            snapshot.append_color(theme.HUES[self._hue].current(), circle.bounds)
+            snapshot.pop()
+        else:
+            ring = self.get_color()
+            ring.alpha *= 0.6
+            snapshot.append_border(circle, [2, 2, 2, 2], [ring] * 4)
 
 
 class StatusLabel(Gtk.Box):

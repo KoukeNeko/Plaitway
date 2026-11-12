@@ -35,7 +35,7 @@ with the real daemon on a private socket and no display.
 - `AppModel` holds the rest of what the window shows: the selection, the page of a
   profile and of Diagnostics, the helper's registration, and the commands. `DaemonSetup`
   (`core.setup`) says what the window is while the helper is not ready.
-- `ProfileEditor`, `LogTail`, `DiagnosticsModel`, `TrafficHistory` each own one page's
+- `core.routing` regroups the profiles' routes by prefix for the Routing page. `ProfileEditor`, `LogTail`, `DiagnosticsModel`, `TrafficHistory` each own one page's
   state. `presentation`, `formatting`, `tray_model`, `aggregate` turn states into words,
   glyph names, tones and rows.
 - Ports (`core.ports`): `UiScheduler`, `Clipboard`, `FilePicker`, `HelperService`,
@@ -69,11 +69,11 @@ UI thread  ◄── UiScheduler.post               GLib.idle_add in the app, a 
 |---|---|
 | `application` | One instance per user (the application id), actions and accelerators, the tray, quitting. Closing the window hides it while a tray shows the app, and quits otherwise. |
 | `window` | `AdwNavigationSplitView` (collapses below 640 sp through a breakpoint), the helper setup page, the content stack of pages, the page switcher (toggle group in the header, `AdwViewSwitcherBar` below when narrow), the banner for the helper, the action bar, drag and drop of files, the window actions. |
-| `sidebar` | The profile list (context menu, Delete key, drag to reorder) and the footer rows. |
-| `pages/` | `overview`, `routes`, `logs`, `configuration` (with `config_editor`), `profile_settings`, `diagnostics`, `app_settings`, `setup`. A profile's five pages are one `AdwViewStack`, built when the profile is first selected. |
+| `sidebar` | The Routing row, the profile list (a dot in the profile's colour, context menu, Delete key, drag to reorder) and the footer rows. |
+| `pages/` | `routing` (the patch bay of the Windows app: routes, lines and tunnels, drawn with GSK; a list of routes with chips below 640 px), `overview`, `routes`, `logs`, `configuration` (with `config_editor`), `profile_settings`, `diagnostics`, `app_settings`, `setup`. A profile's five pages are one `AdwViewStack`, built when the profile is first selected. |
 | `dialogs`, `platform`, `secret_service`, `systemd`, `login_item` | The adapters of the ports. |
 | `tray/` | `status_notifier` (`org.kde.StatusNotifierItem`), `dbusmenu` (`com.canonical.dbusmenu`), `controller` (watches `org.kde.StatusNotifierWatcher`, keeps the item in step with the models). |
-| `widgets`, `style`, `theme` | `StateGlyph`, `Sparkline`, `PageSwitcher`, `NoticeBar`, `name_widget`; the CSS; colours for text tags that follow light, dark and high contrast. |
+| `widgets`, `style`, `theme` | `StateGlyph`, `HueDot`, `Sparkline`, `PageSwitcher`, `NoticeBar`, `name_widget`; the CSS; colours for text tags that follow light, dark and high contrast. |
 
 ## Conventions
 

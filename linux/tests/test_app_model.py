@@ -7,6 +7,7 @@ from plaitway.client.errors import DaemonFailure, FailureKind
 from plaitway.client.types import CredentialKind, Credentials, ProfileState
 from plaitway.core.app_model import (
     DIAGNOSTICS,
+    ROUTING,
     SETTINGS,
     DiagnosticsPage,
     ProfileSection,
@@ -180,17 +181,24 @@ class ManagementTests(AppTestCase):
     def test_reconciling_keeps_a_selection_that_still_exists(self):
         app = self.make_app()
         a = self.import_fixture(app, "a.ovpn")
-        self.import_fixture(app, "b.ovpn")
+        b = self.import_fixture(app, "b.ovpn")
         app.model.select(Selection.profile(a))
         app.model.reconcile_selection()
         self.assertEqual(app.model.selection, Selection.profile(a))
-        for page in (DIAGNOSTICS, SETTINGS):
+        for page in (ROUTING, DIAGNOSTICS, SETTINGS):
             app.model.select(page)
             app.model.reconcile_selection()
             self.assertEqual(app.model.selection, page)
         app.model.select(None)
         app.model.reconcile_selection()
-        self.assertEqual(app.model.selection, Selection.profile(app.store.profiles[0].id), "something is selected as soon as there is something")
+        self.assertEqual(app.model.selection, ROUTING, "something is selected as soon as there is something")
+        app.model.select(Selection.profile("gone"))
+        app.model.reconcile_selection()
+        self.assertEqual(app.model.selection, Selection.profile(app.store.profiles[0].id), "a profile that is gone gives way to the first")
+        app.model.select(ROUTING)
+        app.model.delete(a)
+        app.model.delete(b)
+        app.wait_until(lambda: len(app.store.profiles) == 0 and app.model.selection is None, "the Routing page to give way to nothing")
 
     def test_dragging_a_profile_sets_the_priority_order(self):
         app = self.make_app()
@@ -262,11 +270,11 @@ class ManagementTests(AppTestCase):
         app.wait_until(lambda: app.dialogs.alerts, "the alert")
         self.assertEqual(app.dialogs.alerts[0], ("Connect failed", "Helper unavailable"))
 
-    def test_the_first_profile_is_selected_as_soon_as_it_appears(self):
+    def test_the_routing_page_is_selected_as_soon_a_profile_appears(self):
         app = self.make_app()
         self.assertIsNone(app.model.selection)
-        profile_id = self.import_fixture(app, "office.ovpn")
-        app.wait_until(lambda: app.model.selection == Selection.profile(profile_id), "the selection")
+        self.import_fixture(app, "office.ovpn")
+        app.wait_until(lambda: app.model.selection == ROUTING, "the selection")
 
     def test_pages_are_remembered_and_the_first_profile_opens_for_a_page(self):
         app = self.make_app()
