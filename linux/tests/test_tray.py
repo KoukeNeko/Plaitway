@@ -163,6 +163,22 @@ class DBusMenuTests(unittest.TestCase):
         self.asked("Event", GLib.Variant("(isvu)", (4, "clicked", GLib.Variant("s", ""), 0)), "()")
         self.assertEqual(clicked, ["office", "quit"])
 
+    def test_a_submenu_has_its_entries_under_it_and_they_can_be_clicked(self):
+        clicked = []
+        self.menu.set_entries([
+            MenuEntry("File", children=(MenuEntry("Import", on_activate=lambda: clicked.append("import")), MenuEntry.divider())),
+            MenuEntry("Help", children=(MenuEntry("About", on_activate=lambda: clicked.append("about")),)),
+        ])
+        _, (_, _, top) = self.asked("GetLayout", GLib.Variant("(iias)", (0, -1, [])), "(u(ia{sv}av))")
+        self.assertEqual([(child[0], child[1]["label"], child[1]["children-display"]) for child in top],
+                         [(1, "File", "submenu"), (4, "Help", "submenu")])
+        self.assertEqual([child[0] for child in top[0][2]], [2, 3])
+        _, (_, _, only_file) = self.asked("GetLayout", GLib.Variant("(iias)", (1, 1, [])), "(u(ia{sv}av))")
+        self.assertEqual([child[0] for child in only_file], [2, 3])
+        self.asked("Event", GLib.Variant("(isvu)", (5, "clicked", GLib.Variant("s", ""), 0)), "()")
+        self.asked("Event", GLib.Variant("(isvu)", (2, "clicked", GLib.Variant("s", ""), 0)), "()")
+        self.assertEqual(clicked, ["about", "import"])
+
     def test_a_change_makes_a_new_revision_and_is_announced(self):
         heard = []
         self.host.signal_subscribe(

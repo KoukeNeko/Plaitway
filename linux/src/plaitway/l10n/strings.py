@@ -67,11 +67,13 @@ _TABLES: dict[str, dict[str, str]] = {
         'ethernet': 'Ethernet',
         'exclude_private_ips': 'Exclude private IPs',
         'failed': 'Failed',
+        'file': 'File',
         'file_holds_no_key': 'File for {0} holds no certificate or key: {1}',
         'file_not_found': 'File for {0} not found: {1}',
         'file_outside_folder': "File for {0} is outside the profile's folder: {1}",
         'file_too_large': 'File too large: {0}',
         'full_tunnel': 'Full tunnel',
+        'help': 'Help',
         'helper': 'Helper',
         'helper_failed': 'Helper failed',
         'helper_log': 'Helper log',
@@ -199,6 +201,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'unsaved_changes_message': "Changes to a profile's text are not saved.",
         'uptime': 'Uptime',
         'username': 'Username',
+        'view': 'View',
         'warnings_and_errors': 'Warnings and errors',
         'wi_fi': 'Wi-Fi',
     },
@@ -261,11 +264,13 @@ _TABLES: dict[str, dict[str, str]] = {
         'ethernet': '乙太網路',
         'exclude_private_ips': '排除私有 IP',
         'failed': '失敗',
+        'file': '檔案',
         'file_holds_no_key': '{0} 所指的檔案不含憑證或金鑰：{1}',
         'file_not_found': '找不到 {0} 所指的檔案：{1}',
         'file_outside_folder': '{0} 所指的檔案不在設定檔所在的資料夾內：{1}',
         'file_too_large': '檔案過大：{0}',
         'full_tunnel': '完整通道',
+        'help': '說明',
         'helper': '輔助程式',
         'helper_failed': '輔助程式失敗',
         'helper_log': '輔助程式記錄',
@@ -393,6 +398,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'unsaved_changes_message': '設定檔內容的變更尚未儲存。',
         'uptime': '連線時間',
         'username': '使用者名稱',
+        'view': '檢視',
         'warnings_and_errors': '警告與錯誤',
         'wi_fi': 'Wi-Fi',
     },
@@ -688,6 +694,11 @@ class Strings:
     def failed(self) -> str:
         return self._table['failed']
 
+    # macOS: File
+    @property
+    def file(self) -> str:
+        return self._table['file']
+
     # macOS: File for %@ holds no certificate or key: %@
     def file_holds_no_key(self, directive: str, path: str) -> str:
         return self._table['file_holds_no_key'].format(directive, path)
@@ -708,6 +719,11 @@ class Strings:
     @property
     def full_tunnel(self) -> str:
         return self._table['full_tunnel']
+
+    # Linux: Help
+    @property
+    def help(self) -> str:
+        return self._table['help']
 
     # macOS: Helper
     @property
@@ -1325,6 +1341,11 @@ class Strings:
     @property
     def username(self) -> str:
         return self._table['username']
+
+    # macOS: View
+    @property
+    def view(self) -> str:
+        return self._table['view']
 
     # macOS: Warnings and errors
     @property

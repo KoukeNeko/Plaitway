@@ -13,6 +13,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from ..client.types import ProfileState  # noqa: E402
 from ..core.app_model import (  # noqa: E402
     DIAGNOSTICS,
+    ROUTING,
     SETTINGS,
     AppModel,
     DiagnosticsPage,
@@ -22,6 +23,7 @@ from ..core.app_model import (  # noqa: E402
 from ..core.app_state import WindowGeometry  # noqa: E402
 from ..core.setup import SetupState  # noqa: E402
 from .paths import APP_NAME  # noqa: E402
+from .appmenu import AppMenu  # noqa: E402
 from .pages.app_settings import AppSettingsPage  # noqa: E402
 from .pages.diagnostics import build_diagnostics_pages  # noqa: E402
 from .pages.profile_page import build_profile_pages  # noqa: E402
@@ -60,6 +62,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._build_actions()
         self._build_drop_target()
         self._build_breakpoint()
+        self._app_menu = AppMenu(self, application, model)
         for name in ("default-width", "default-height", "maximized"):
             self.connect(f"notify::{name}", self._geometry_changed)
 
@@ -230,6 +233,10 @@ class MainWindow(Adw.ApplicationWindow):
             if 0 <= index < len(sections):
                 self._model.show_section(sections[index])
                 self._split.set_show_content(True)
+
+    def show_routing(self) -> None:
+        self._model.select(ROUTING)
+        self._split.set_show_content(True)
 
     def show_diagnostics(self) -> None:
         self._model.select(DIAGNOSTICS)

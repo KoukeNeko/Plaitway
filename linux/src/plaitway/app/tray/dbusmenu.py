@@ -1,7 +1,8 @@
-"""com.canonical.dbusmenu: the menu of the tray item, as the desktop's tray host asks for it.
+"""com.canonical.dbusmenu: the menu of the tray item and the menu bar of the window (the global
+menu), as the desktop's host asks for it.
 
-The menu is a flat list of entries under the root; each change of the model makes a
-new layout with a new revision.
+The menu is a tree of entries under the root, numbered from 1 in the order they are listed;
+each change of the model makes a new layout with a new revision.
 """
 
 from __future__ import annotations
@@ -90,6 +91,8 @@ class MenuEntry:
     # None: no check mark; 1 checked, 0 not, -1 in between.
     check: int | None = None
     on_activate: Callable[[], None] | None = None
+    # A submenu: the label is its title.
+    children: tuple[MenuEntry, ...] = ()
 
     @staticmethod
     def divider() -> MenuEntry:
@@ -97,8 +100,12 @@ class MenuEntry:
 
 
 class DBusMenu:
-    def __init__(self) -> None:
+    def __init__(self, object_path: str = OBJECT_PATH) -> None:
+        self._object_path = object_path
         self._entries: list[MenuEntry] = []
+        # Every entry of the tree by its id (the first is 1), and the ids under each parent (0 is the root).
+        self._numbered: dict[int, MenuEntry] = {}
+        self._under: dict[int, list[int]] = {0: []}
         self._revision = 1
         self._connection: Gio.DBusConnection | None = None
         self._registration = 0
@@ -110,7 +117,7 @@ class DBusMenu:
         self._connection = connection
         self._icon_theme_path = icon_theme_path
         self._registration = connection.register_object(
-            OBJECT_PATH, self._info, self._method_call, self._get_property, None
+            self._object_path, self._info, self._method_call, self._get_property, None
         )
 
     def unexport(self) -> None:
@@ -126,8 +133,18 @@ class DBusMenu:
         if entries == self._entries:
             return
         self._entries = entries
+        self._numbered, self._under = {}, {0: []}
+        self._number(entries, 0)
         self._revision += 1
         self._emit("LayoutUpdated", GLib.Variant("(ui)", (self._revision, 0)))
+
+    def _number(self, entries: list[MenuEntry] | tuple[MenuEntry, ...], parent: int) -> None:
+        for entry in entries:
+            item_id = len(self._numbered) + 1
+            self._numbered[item_id] = entry
+            self._under[parent].append(item_id)
+            self._under[item_id] = []
+            self._number(entry.children, item_id)
 
     @property
     def entries(self) -> list[MenuEntry]:
@@ -135,11 +152,11 @@ class DBusMenu:
 
     def _emit(self, signal: str, parameters: GLib.Variant) -> None:
         if self._connection is not None:
-            self._connection.emit_signal(None, OBJECT_PATH, INTERFACE, signal, parameters)
+            self._connection.emit_signal(None, self._object_path, INTERFACE, signal, parameters)
 
     # MARK: The host's side
 
-    def _properties(self, index: int, entry: MenuEntry) -> dict[str, GLib.Variant]:
+    def _properties(self, entry: MenuEntry) -> dict[str, GLib.Variant]:
         if entry.separator:
             return {"type": GLib.Variant("s", "separator")}
         properties = {
@@ -147,22 +164,25 @@ class DBusMenu:
             "enabled": GLib.Variant("b", entry.enabled),
             "visible": GLib.Variant("b", True),
         }
+        if entry.children:
+            properties["children-display"] = GLib.Variant("s", "submenu")
         if entry.check is not None:
             properties["toggle-type"] = GLib.Variant("s", "checkmark")
             properties["toggle-state"] = GLib.Variant("i", entry.check)
         return properties
 
-    def _layout(self) -> tuple:
-        """The root and its entries, as the (ia{sv}av) the host reads: each child is a variant."""
-        children = [
-            GLib.Variant("(ia{sv}av)", (index + 1, self._properties(index, entry), []))
-            for index, entry in enumerate(self._entries)
-        ]
-        root = {"children-display": GLib.Variant("s", "submenu")}
-        return 0, root, children
+    def _layout(self, parent: int = 0, depth: int = -1) -> tuple:
+        """`parent` and what is under it, as the (ia{sv}av) the host reads: each child is a variant.
+        `depth` is how many levels below `parent` to give, -1 for all of them."""
+        properties = {"children-display": GLib.Variant("s", "submenu")} if parent == 0 else self._properties(self._numbered[parent])
+        children = []
+        if depth != 0:
+            for item_id in self._under[parent]:
+                children.append(GLib.Variant("(ia{sv}av)", self._layout(item_id, depth - 1)))
+        return parent, properties, children
 
     def _entry(self, item_id: int) -> MenuEntry | None:
-        return self._entries[item_id - 1] if 1 <= item_id <= len(self._entries) else None
+        return self._numbered.get(item_id)
 
     def _filtered(self, properties: dict[str, GLib.Variant], names: list[str]) -> dict[str, GLib.Variant]:
         return {k: v for k, v in properties.items() if not names or k in names}
@@ -180,20 +200,23 @@ class DBusMenu:
         args = parameters.unpack()
         match method:
             case "GetLayout":
-                return GLib.Variant("(u(ia{sv}av))", (self._revision, self._layout()))
+                parent, depth, _ = args
+                if parent != 0 and parent not in self._numbered:
+                    raise ValueError(f"no menu item {parent}")
+                return GLib.Variant("(u(ia{sv}av))", (self._revision, self._layout(parent, depth)))
             case "GetGroupProperties":
                 ids, names = args
                 found = []
-                for item_id in ids or range(len(self._entries) + 1):
+                for item_id in ids or range(len(self._numbered) + 1):
                     if item_id == 0:
                         found.append((0, {}))
                     elif (entry := self._entry(item_id)) is not None:
-                        found.append((item_id, self._filtered(self._properties(item_id - 1, entry), names)))
+                        found.append((item_id, self._filtered(self._properties(entry), names)))
                 return GLib.Variant("(a(ia{sv}))", (found,))
             case "GetProperty":
                 item_id, name = args
                 entry = self._entry(item_id)
-                value = self._properties(item_id - 1, entry).get(name) if entry else None
+                value = self._properties(entry).get(name) if entry else None
                 return GLib.Variant("(v)", (value if value is not None else GLib.Variant("s", ""),))
             case "Event":
                 item_id, event, _, _ = args

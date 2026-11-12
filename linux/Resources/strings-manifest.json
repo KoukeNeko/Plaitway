@@ -7,7 +7,6 @@
     "Development build",
     "Edit",
     "Fallback: sudo scripts/dev-install-daemon.sh",
-    "File",
     "Find…",
     "Helper not found",
     "Hide Others",
@@ -42,7 +41,6 @@
     "Uninstall",
     "Uninstall Helper…",
     "Uninstall helper?",
-    "View",
     "Window",
     "Zoom"
   ],

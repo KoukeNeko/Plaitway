@@ -131,6 +131,16 @@
         }
       }
     },
+    "Help" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "說明"
+          }
+        }
+      }
+    },
     "Helper not running" : {
       "localizations" : {
         "zh-Hant" : {
