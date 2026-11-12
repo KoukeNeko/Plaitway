@@ -41,7 +41,7 @@ jobs:
 
   # The helper and the command line client build and test on each system they run on.
   # The tests that change the routing table need root and the rootintegration tag, and are
-  # run by hand (README, Development).
+  # run by hand (Docs/technical-reference.md, Development).
   go:
     name: go (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
