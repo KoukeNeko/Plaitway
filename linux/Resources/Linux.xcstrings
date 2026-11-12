@@ -111,6 +111,16 @@
         }
       }
     },
+    "Blur Sidebar" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模糊側邊欄"
+          }
+        }
+      }
+    },
     "Credentials not saved" : {
       "localizations" : {
         "zh-Hant" : {

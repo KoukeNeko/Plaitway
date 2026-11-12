@@ -383,7 +383,7 @@ class SetupTests(SmokeTestCase):
         app.model.refresh_helper()
         app.model._end_settling()
         self.pump(app, 0.5)
-        self.assertEqual(window._root.get_visible_child_name(), "setup")
+        self.assertIs(window._root.get_child(), window._root_views["setup"])
         buttons = [d for d in descendants(window._setup) if isinstance(d, Gtk.Button)]
         self.assertEqual([button.get_label() for button in buttons], ["Start Helper"])
         self.assertEqual(self.unnamed(window), [])

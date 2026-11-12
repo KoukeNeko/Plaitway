@@ -23,6 +23,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'auto_connect': 'Auto-connect',
         'awaiting_credentials': 'Awaiting credentials',
         'blocked_by_local_network': 'Blocked by local network',
+        'blur_sidebar': 'Blur Sidebar',
         'bypass': 'Bypass',
         'cancel': 'Cancel',
         'cannot_read': 'Cannot read {0}: {1}',
@@ -216,6 +217,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'auto_connect': '自動連線',
         'awaiting_credentials': '等待登入資訊',
         'blocked_by_local_network': '被本機網路阻擋',
+        'blur_sidebar': '模糊側邊欄',
         'bypass': '旁路',
         'cancel': '取消',
         'cannot_read': '無法讀取 {0}：{1}',
@@ -474,6 +476,11 @@ class Strings:
     @property
     def blocked_by_local_network(self) -> str:
         return self._table['blocked_by_local_network']
+
+    # Linux: Blur Sidebar
+    @property
+    def blur_sidebar(self) -> str:
+        return self._table['blur_sidebar']
 
     # macOS: Bypass
     @property

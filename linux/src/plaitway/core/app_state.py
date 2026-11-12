@@ -84,3 +84,13 @@ class AppState:
         with self._lock:
             self._data["show_tray_icon"] = shown
             self._write()
+
+    @property
+    def blur_sidebar(self) -> bool:
+        with self._lock:
+            return self._data.get("blur_sidebar") is True
+
+    def set_blur_sidebar(self, blurred: bool) -> None:
+        with self._lock:
+            self._data["blur_sidebar"] = blurred
+            self._write()

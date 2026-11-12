@@ -44,6 +44,13 @@ button.bay-card.selected { border: 2px solid currentColor; padding: 0 13px; }
 .bay-chip { border: 1px solid alpha(currentColor, .15); border-radius: 10px; padding: 1px 9px; }
 .bay-why { font-weight: 600; padding: 16px 0; }
 
+/* A translucent sidebar: the window has no background of its own, the content pane brings its own,
+and a compositor that blurs what is behind a translucent window (KDE, Blur my Shell) shows it blurred. */
+window.blur-sidebar, window.blur-sidebar.background, window.blur-sidebar.csd { background-color: transparent; background-image: none; }
+window.blur-sidebar .sidebar-pane { background-color: alpha(@sidebar_bg_color, .5); }
+window.blur-sidebar .sidebar-pane headerbar { background: none; box-shadow: none; }
+window.blur-sidebar .content-pane { background-color: @window_bg_color; }
+
 /* Files dragged over the window. */
 .drop-over { box-shadow: inset 0 0 0 3px @accent_bg_color; border-radius: 8px; }
 

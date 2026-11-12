@@ -68,7 +68,10 @@ class MainWindow(Adw.ApplicationWindow):
     # MARK: Building
 
     def _build_content(self) -> None:
-        self._root = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        # Not a Gtk.Stack: a global gtk.css that makes sidebars translucent (such as Tuneup's) paints
+        # every other container behind the window's content, and a stack would hide the sidebar's backdrop.
+        self._root = Adw.Bin()
+        self._root_views: dict[str, Gtk.Widget] = {}
         self.set_content(self._root)
 
         self._setup = SetupPage(model=self._model)
@@ -77,12 +80,13 @@ class MainWindow(Adw.ApplicationWindow):
         setup_header.set_show_title(False)
         setup_view.add_top_bar(setup_header)
         setup_view.set_content(self._setup)
-        self._root.add_named(setup_view, "setup")
+        self._root_views["setup"] = setup_view
 
         self._split = Adw.NavigationSplitView(min_sidebar_width=250, max_sidebar_width=320, sidebar_width_fraction=0.28)
         self._split.set_sidebar(self._build_sidebar())
         self._split.set_content(self._build_page())
-        self._root.add_named(self._split, "main")
+        self._root_views["main"] = self._split
+        self._root.set_child(self._split)
 
     def _build_sidebar(self) -> Adw.NavigationPage:
         s = self._strings
@@ -255,10 +259,14 @@ class MainWindow(Adw.ApplicationWindow):
         model = self._model
         usable = model.setup.is_usable
         showing_setup = model.setup_content is not None
-        self._root.set_visible_child_name("setup" if showing_setup else "main")
+        self._root.set_child(self._root_views["setup" if showing_setup else "main"])
         if showing_setup:
             return
 
+        if model.blur_sidebar:
+            self.add_css_class("blur-sidebar")
+        else:
+            self.remove_css_class("blur-sidebar")
         self._prune_pages()
         selection = model.selection
         profile = model.selected_profile

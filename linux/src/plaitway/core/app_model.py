@@ -358,6 +358,15 @@ class AppModel:
 
     def set_show_tray_icon(self, shown: bool) -> None:
         self.app_state.set_show_tray_icon(shown)
+
+    @property
+    def blur_sidebar(self) -> bool:
+        """The sidebar is translucent, for a compositor that blurs what is behind it."""
+        return self.app_state.blur_sidebar
+
+    def set_blur_sidebar(self, blurred: bool) -> None:
+        self.app_state.set_blur_sidebar(blurred)
+        self.changed.notify()
         self.changed.notify()
 
     def editor(self, profile: Profile) -> ProfileEditor:

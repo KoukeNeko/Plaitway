@@ -664,6 +664,12 @@ class AppStateTests(unittest.TestCase):
         self.assertEqual(again.window, WindowGeometry(900, 700, True))
         self.assertFalse(again.show_tray_icon)
 
+    def test_the_sidebar_is_not_blurred_until_the_person_says_so(self):
+        state = AppState(self.path)
+        self.assertFalse(state.blur_sidebar)
+        state.set_blur_sidebar(True)
+        self.assertTrue(AppState(self.path).blur_sidebar)
+
     def test_a_file_that_makes_no_sense_gives_the_defaults(self):
         self.path.parent.mkdir(parents=True)
         for content in ["not json", "[]", '{"window": {"width": "wide"}}', '{"window": {"width": -1, "height": 5}}', '{"show_tray_icon": 3}']:
