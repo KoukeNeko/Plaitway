@@ -41,6 +41,8 @@ SECTION_GAP = 20
 LINE_TOP = 26
 LINE_PITCH = 14
 DRAW_IN = 0.6
+# How far a line runs on beneath the card it joins.
+UNDER_CARD = 12
 
 Rect = tuple[float, float, float, float]
 
@@ -292,6 +294,13 @@ class Bay(Gtk.Widget):
         self._drawn_at = time.monotonic()
         if not self._tick:
             self._tick = self.add_tick_callback(self._animate)
+        # The last frame must be drawn, even if the frame clock stops (the window is hidden or covered)
+        # before it: a line that stops short of its tunnel would stay so.
+        GLib.timeout_add(int(DRAW_IN * 1000) + 100, self._finish_animation)
+
+    def _finish_animation(self) -> bool:
+        self.queue_draw()
+        return GLib.SOURCE_REMOVE
 
     def _animate(self, *_) -> bool:
         self.queue_draw()
@@ -310,14 +319,15 @@ class Bay(Gtk.Widget):
         width = self.get_width()
         routes, tunnels, _ = self._layout(width)
         ink = self.get_color()
-        for profile, rect in zip(self._profiles, tunnels):
-            self._tint_tunnel(snapshot, profile, rect, ink, 10 if width >= WIDE_FROM else 8)
+        # The lines first: they run on under the cards, which hide their ends, so that no gap can show.
         if width >= WIDE_FROM:
             self._draw_lines(snapshot, routes, tunnels, ink)
         child = self.get_first_child()
         while child is not None:
             self.snapshot_child(child, snapshot)
             child = child.get_next_sibling()
+        for profile, rect in zip(self._profiles, tunnels):
+            self._tint_tunnel(snapshot, profile, rect, ink, 10 if width >= WIDE_FROM else 8)
 
     def _hue(self, profile_id: str) -> Gdk.RGBA:
         return HUES[routing.hue_index(self._profiles, profile_id)].current()
@@ -347,11 +357,11 @@ class Bay(Gtk.Widget):
                     continue
                 lit = self._lit(route, slot)
                 alpha = (1.0 if standing is Standing.HOLDS else 0.7) if lit else 0.12
-                x0, y0 = routes[index][0] + ROUTE_W, routes[index][1] + ROUTE_H / 2
-                x1, y1 = tunnels[slot][0], tunnels[slot][1] + LINE_TOP + n * LINE_PITCH
+                x0, y0 = routes[index][0] + ROUTE_W - UNDER_CARD, routes[index][1] + ROUTE_H / 2
+                x1, y1 = tunnels[slot][0] + UNDER_CARD, tunnels[slot][1] + LINE_TOP + n * LINE_PITCH
                 n += 1
                 points = _bezier(x0, y0, x1, y1)
-                shown = points[: math.ceil((len(points) - 1) * progress) + 1]
+                shown = _drawn_part(points, progress)
                 stroke = Gsk.Stroke.new(3 if standing is Standing.HOLDS else 2.5)
                 stroke.set_line_cap(Gsk.LineCap.ROUND)
                 if standing is not Standing.HOLDS:
@@ -382,6 +392,17 @@ def with_alpha(colour: Gdk.RGBA, alpha: float) -> Gdk.RGBA:
     result = colour.copy()
     result.alpha = alpha
     return result
+
+
+def _drawn_part(points: list[tuple[float, float]], progress: float) -> list[tuple[float, float]]:
+    """The start of the line that `progress` (0 to 1) of it makes."""
+    if progress >= 1.0:
+        return points
+    at = (len(points) - 1) * progress
+    whole = int(at)
+    (x0, y0), (x1, y1) = points[whole], points[whole + 1]
+    fraction = at - whole
+    return [*points[: whole + 1], (x0 + (x1 - x0) * fraction, y0 + (y1 - y0) * fraction)]
 
 
 def _path(points: list[tuple[float, float]]) -> Gsk.Path:

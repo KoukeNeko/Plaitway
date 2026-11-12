@@ -35,11 +35,12 @@ row.drop-below { box-shadow: inset 0 -2px 0 0 @accent_bg_color; }
 row.dragged { opacity: .5; }
 
 /* The Routing page. A tunnel's tint is drawn by the page itself, in the colour of its profile. */
-.bay-card { background-color: @card_bg_color; border: 1px solid alpha(currentColor, .15); border-radius: 8px; padding: 0 14px; box-shadow: none; }
+/* Opaque: the lines run on beneath the cards, and the card colour of the dark style is translucent. */
+.bay-card { background-color: @window_bg_color; background-image: linear-gradient(@card_bg_color, @card_bg_color); border: 1px solid alpha(currentColor, .15); border-radius: 8px; padding: 0 14px; box-shadow: none; }
 button.bay-card:hover { border-color: alpha(currentColor, .4); }
 button.bay-card.selected { border: 2px solid currentColor; padding: 0 13px; }
-.bay-tunnel { padding: 12px 16px; }
-.bay-tunnel.compact { padding: 0 12px; }
+.bay-tunnel { padding: 12px 16px; background-color: @window_bg_color; border-radius: 10px; }
+.bay-tunnel.compact { padding: 0 12px; border-radius: 8px; }
 .bay-pill { border: 1px solid alpha(currentColor, .15); border-radius: 9px; padding: 1px 7px; font-weight: bold; opacity: .7; }
 .bay-chip { border: 1px solid alpha(currentColor, .15); border-radius: 10px; padding: 1px 9px; }
 .bay-why { font-weight: 600; padding: 16px 0; }
