@@ -136,9 +136,12 @@ class HueDot(Gtk.Widget):
         self.queue_draw()
 
     def do_snapshot(self, snapshot) -> None:
-        size = min(self.get_width(), self.get_height())
+        # The row asks for more width than the dot: the dot sits in the middle of what it gets.
+        size = self._size
         circle = Gsk.RoundedRect()
-        circle.init_from_rect(Graphene.Rect().init(0, 0, size, size), size / 2)
+        circle.init_from_rect(
+            Graphene.Rect().init((self.get_width() - size) / 2, (self.get_height() - size) / 2, size, size), size / 2
+        )
         if self._on:
             snapshot.push_rounded_clip(circle)
             snapshot.append_color(theme.HUES[self._hue].current(), circle.bounds)
