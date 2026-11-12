@@ -8,6 +8,7 @@ from pathlib import Path
 # The product name is not translated.
 APP_NAME = "Plaitway"
 APP_ID = "io.github.koukeneko.Plaitway"
+LICENSE_NAME = "MIT"
 
 _MARKER = Path("icons/hicolor/symbolic/apps/plaitway-state-idle-symbolic.svg")
 

@@ -6,6 +6,7 @@ import unittest
 from plaitway.client.errors import DaemonFailure, FailureKind
 from plaitway.client.types import CredentialKind, Credentials, ProfileState
 from plaitway.core.app_model import (
+    ABOUT,
     DIAGNOSTICS,
     ROUTING,
     SETTINGS,
@@ -185,7 +186,7 @@ class ManagementTests(AppTestCase):
         app.model.select(Selection.profile(a))
         app.model.reconcile_selection()
         self.assertEqual(app.model.selection, Selection.profile(a))
-        for page in (ROUTING, DIAGNOSTICS, SETTINGS):
+        for page in (ROUTING, DIAGNOSTICS, SETTINGS, ABOUT):
             app.model.select(page)
             app.model.reconcile_selection()
             self.assertEqual(app.model.selection, page)

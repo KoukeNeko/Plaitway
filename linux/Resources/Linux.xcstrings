@@ -91,6 +91,16 @@
         }
       }
     },
+    "About" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關於"
+          }
+        }
+      }
+    },
     "All internet traffic" : {
       "localizations" : {
         "zh-Hant" : {
@@ -117,6 +127,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "模糊側邊欄"
+          }
+        }
+      }
+    },
+    "Contributors" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "貢獻者"
           }
         }
       }
@@ -177,6 +197,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請安裝 plaitway 套件。"
+          }
+        }
+      }
+    },
+    "License" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "授權"
           }
         }
       }
@@ -297,6 +327,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "優先順序 %lld · 未連線"
+          }
+        }
+      }
+    },
+    "Repository" : {
+      "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存庫"
           }
         }
       }

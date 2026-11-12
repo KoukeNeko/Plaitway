@@ -693,5 +693,36 @@ class AppStateTests(unittest.TestCase):
         self.assertTrue(str(default_path({})).endswith(".local/state/plaitway/state.json"))
 
 
+class ContributorsTests(unittest.TestCase):
+    ANSWER = [
+        {"login": "ana", "html_url": "https://github.com/ana", "contributions": 3, "type": "User"},
+        {"login": "dependabot[bot]", "html_url": "https://github.com/apps/dependabot", "contributions": 9, "type": "Bot"},
+        {"login": "ben", "html_url": "https://github.com/ben", "contributions": 12, "type": "User"},
+    ]
+
+    def test_the_answer_of_github_lists_people_most_active_first_and_no_bots(self):
+        from plaitway.core import contributors
+
+        self.assertEqual(
+            contributors.parse(self.ANSWER),
+            [contributors.Contributor("ben", "https://github.com/ben", 12), contributors.Contributor("ana", "https://github.com/ana", 3)],
+        )
+        with self.assertRaises(ValueError):
+            contributors.parse({"message": "API rate limit exceeded"})
+
+    def test_the_list_a_build_saved_is_read_back_and_a_missing_or_broken_one_is_empty(self):
+        from plaitway.core import contributors
+
+        directory = Path(tempfile.mkdtemp(prefix="pw-contributors-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        path = directory / "contributors.json"
+        self.assertEqual(contributors.baked(path), [])
+        people = contributors.parse(self.ANSWER)
+        contributors.save(people, path)
+        self.assertEqual(contributors.baked(path), people)
+        path.write_text("{not json", encoding="utf-8")
+        self.assertEqual(contributors.baked(path), [])
+
+
 if __name__ == "__main__":
     unittest.main()

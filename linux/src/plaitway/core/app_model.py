@@ -62,6 +62,7 @@ class SelectionKind(enum.Enum):
     PROFILE = "profile"
     DIAGNOSTICS = "diagnostics"
     SETTINGS = "settings"
+    ABOUT = "about"
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ class Selection:
 ROUTING = Selection(SelectionKind.ROUTING)
 DIAGNOSTICS = Selection(SelectionKind.DIAGNOSTICS)
 SETTINGS = Selection(SelectionKind.SETTINGS)
+ABOUT = Selection(SelectionKind.ABOUT)
 
 
 class ProfileSection(enum.Enum):

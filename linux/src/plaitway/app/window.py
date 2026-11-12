@@ -12,6 +12,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from ..client.types import ProfileState  # noqa: E402
 from ..core.app_model import (  # noqa: E402
+    ABOUT,
     DIAGNOSTICS,
     ROUTING,
     SETTINGS,
@@ -24,6 +25,7 @@ from ..core.app_state import WindowGeometry  # noqa: E402
 from ..core.setup import SetupState  # noqa: E402
 from .paths import APP_NAME  # noqa: E402
 from .appmenu import AppMenu  # noqa: E402
+from .pages.about import AboutPage  # noqa: E402
 from .pages.app_settings import AppSettingsPage  # noqa: E402
 from .pages.diagnostics import build_diagnostics_pages  # noqa: E402
 from .pages.profile_page import build_profile_pages  # noqa: E402
@@ -144,6 +146,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._diagnostics = build_diagnostics_pages(self._model)
         self._content.add_named(self._diagnostics, "diagnostics")
         self._content.add_named(AppSettingsPage(self._model), "settings")
+        self._content.add_named(AboutPage(self._model), "about")
 
         self._switcher_bar = Adw.ViewSwitcherBar()
         self._actions = _ProfileActionBar(self._model)
@@ -242,6 +245,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._model.select(DIAGNOSTICS)
         self._split.set_show_content(True)
 
+    def show_about(self) -> None:
+        self._model.select(ABOUT)
+        self._split.set_show_content(True)
+
     def show_settings(self) -> None:
         self._model.select(SETTINGS)
         self._split.set_show_content(True)
@@ -293,6 +300,10 @@ class MainWindow(Adw.ApplicationWindow):
             self._content.set_visible_child_name("settings")
             self._use_stack(None)
             title, subtitle = self._strings.settings, ""
+        elif selection.kind is SelectionKind.ABOUT:
+            self._content.set_visible_child_name("about")
+            self._use_stack(None)
+            title, subtitle = self._strings.about, ""
         else:
             page = self._profile_pages.get(profile.id)
             if page is None:

@@ -211,16 +211,7 @@ class PlaitwayApplication(Adw.Application):
         self.show_window().show_settings()
 
     def _show_about(self) -> None:
-        dialog = Adw.AboutDialog(
-            application_name=paths.APP_NAME,
-            application_icon=paths.APP_ID,
-            developer_name="KoukeNeko",
-            version=__version__,
-            website="https://github.com/KoukeNeko/Plaitway",
-            license_type=Gtk.License.MIT_X11,
-            copyright="© KoukeNeko",
-        )
-        dialog.present(self.show_window())
+        self.show_window().show_about()
 
     # MARK: Quitting
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 # language -> accessor -> template; {0}, {1} are the arguments of the accessor.
 _TABLES: dict[str, dict[str, str]] = {
     'en': {
+        'about': 'About',
         'about_plaitway': 'About Plaitway',
         'addresses': 'Addresses',
         'administrator_required': 'Administrator required',
@@ -42,6 +43,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'connected_profiles_stay_connected': 'Connected profiles stay connected.',
         'connecting': 'Connecting',
         'console_user_only': 'Only the console user and administrators can use the helper.',
+        'contributors': 'Contributors',
         'copy': 'Copy',
         'copy_report': 'Copy Report',
         'credentials': 'Credentials',
@@ -101,6 +103,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'launch_at_login': 'Launch at Login',
         'launch_at_login_failed': 'Launch at Login failed',
         'level': 'Level',
+        'license': 'License',
         'limited': 'Limited',
         'line_number': 'Line {0}',
         'logs': 'Logs',
@@ -156,6 +159,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'remove_route_title': 'Remove route {0}?',
         'remove_saved_credentials': 'Remove Saved Credentials',
         'reorder_failed': 'Reorder failed',
+        'repository': 'Repository',
         'resolver_entries': 'Resolver entries',
         'restart': 'Restart',
         'restart_helper': 'Restart Helper',
@@ -206,6 +210,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'wi_fi': 'Wi-Fi',
     },
     'zh-Hant': {
+        'about': '關於',
         'about_plaitway': '關於 Plaitway',
         'addresses': '位址',
         'administrator_required': '需要管理員權限',
@@ -239,6 +244,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'connected_profiles_stay_connected': '已連線的設定檔會保持連線。',
         'connecting': '連線中',
         'console_user_only': '只有主控台使用者與管理員可以使用輔助程式。',
+        'contributors': '貢獻者',
         'copy': '拷貝',
         'copy_report': '拷貝報告',
         'credentials': '登入資訊',
@@ -298,6 +304,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'launch_at_login': '登入時啟動',
         'launch_at_login_failed': '登入時啟動失敗',
         'level': '層級',
+        'license': '授權',
         'limited': '受限',
         'line_number': '第 {0} 行',
         'logs': '記錄',
@@ -353,6 +360,7 @@ _TABLES: dict[str, dict[str, str]] = {
         'remove_route_title': '移除路由 {0}？',
         'remove_saved_credentials': '移除已儲存的登入資訊',
         'reorder_failed': '重新排序失敗',
+        'repository': '儲存庫',
         'resolver_entries': '解析器項目',
         'restart': '重新啟動',
         'restart_helper': '重新啟動輔助程式',
@@ -413,6 +421,11 @@ class Strings:
     def __init__(self, language: str = "en") -> None:
         self.language = language if language in _TABLES else "en"
         self._table = _TABLES[self.language]
+
+    # Linux: About
+    @property
+    def about(self) -> str:
+        return self._table['about']
 
     # macOS: About Plaitway
     @property
@@ -570,6 +583,11 @@ class Strings:
     @property
     def console_user_only(self) -> str:
         return self._table['console_user_only']
+
+    # Linux: Contributors
+    @property
+    def contributors(self) -> str:
+        return self._table['contributors']
 
     # macOS: Copy
     @property
@@ -858,6 +876,11 @@ class Strings:
     def level(self) -> str:
         return self._table['level']
 
+    # Linux: License
+    @property
+    def license(self) -> str:
+        return self._table['license']
+
     # macOS: Limited
     @property
     def limited(self) -> str:
@@ -1122,6 +1145,11 @@ class Strings:
     @property
     def reorder_failed(self) -> str:
         return self._table['reorder_failed']
+
+    # Linux: Repository
+    @property
+    def repository(self) -> str:
+        return self._table['repository']
 
     # macOS: Resolver entries
     @property

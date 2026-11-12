@@ -111,7 +111,7 @@ def run(arguments: argparse.Namespace, daemon) -> None:
     from plaitway.app.application import PlaitwayApplication
     from plaitway.app.window import MainWindow
     from plaitway.client.errors import DaemonFailure, FailureKind
-    from plaitway.core.app_model import DIAGNOSTICS, ROUTING, SETTINGS, DiagnosticsPage, ProfileSection, Selection
+    from plaitway.core.app_model import ABOUT, DIAGNOSTICS, ROUTING, SETTINGS, DiagnosticsPage, ProfileSection, Selection
     from plaitway.core.app_state import WindowGeometry
     from plaitway.core.fakes import FakeHelperService
     from plaitway.core.ports import HelperRegistration
@@ -259,6 +259,9 @@ def run(arguments: argparse.Namespace, daemon) -> None:
             model.show_diagnostics_page(DiagnosticsPage.OVERVIEW)
             model.select(SETTINGS)
             yield from shot("app-settings")
+            model.select(ABOUT)
+            yield 1.5
+            yield from shot("about")
 
             model.select(Selection.profile(office))
             model.request_deletion(office)

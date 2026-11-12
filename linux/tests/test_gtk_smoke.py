@@ -13,7 +13,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 from plaitway.app import style  # noqa: E402
 from plaitway.app.widgets import ACCESSIBLE_NAME  # noqa: E402
 from plaitway.client.types import ProfileState  # noqa: E402
-from plaitway.core.app_model import DIAGNOSTICS, ROUTING, SETTINGS, DiagnosticsPage, ProfileSection, Selection  # noqa: E402
+from plaitway.core.app_model import ABOUT, DIAGNOSTICS, ROUTING, SETTINGS, DiagnosticsPage, ProfileSection, Selection  # noqa: E402
 from plaitway.core import routing  # noqa: E402
 from plaitway.core.app_state import WindowGeometry  # noqa: E402
 from plaitway.core.ports import HelperRegistration  # noqa: E402
@@ -175,6 +175,8 @@ class WindowTests(SmokeTestCase):
         self.pump(app, 0.8)
         app.model.select(SETTINGS)
         self.pump(app)
+        app.model.select(ABOUT)
+        self.pump(app)
         self.assertEqual(MESSAGES, [])
 
     def test_the_sent_column_stays_put_when_the_received_numbers_change(self):
@@ -210,6 +212,8 @@ class WindowTests(SmokeTestCase):
         self.pump(app, 0.8)
         app.model.select(SETTINGS)
         self.pump(app)
+        app.model.select(ABOUT)
+        self.pump(app)
         # A profile that asks for credentials, and one in the narrow layout.
         self.assertEqual(self.unnamed(window), [])
 
@@ -233,7 +237,7 @@ class WindowTests(SmokeTestCase):
             app.model.show_diagnostics_page(page)
             self.pump(app, 0.4)
             self.assertLessEqual(window.measure(Gtk.Orientation.HORIZONTAL, -1)[0], 360, page)
-        for page in (ROUTING, SETTINGS):
+        for page in (ROUTING, SETTINGS, ABOUT):
             app.model.select(page)
             self.pump(app, 0.3)
             self.assertLessEqual(window.measure(Gtk.Orientation.HORIZONTAL, -1)[0], 360, page)

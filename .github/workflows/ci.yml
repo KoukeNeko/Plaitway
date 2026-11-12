@@ -207,6 +207,10 @@ jobs:
       # The repository belongs to another user than the container's root.
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: make test-packaging-linux
+      # The people the About page lists; a failure is a warning and the package has none.
+      - run: python3 linux/tools/gen_contributors.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: make deb
       - run: make verify-deb
       - uses: actions/upload-artifact@v7
