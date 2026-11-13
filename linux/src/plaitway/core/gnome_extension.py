@@ -24,6 +24,8 @@ class ExtensionStatus:
     user_installed: bool = False
     #: Installed or enabled, but the running Shell has not loaded it: it reads its extensions when it starts.
     needs_login: bool = False
+    #: The running Shell has loaded it: its top bar item is on screen.
+    active: bool = False
 
     @staticmethod
     def of(
@@ -35,4 +37,4 @@ class ExtensionStatus:
         if not installed:
             return ExtensionStatus(ExtensionState.NOT_INSTALLED)
         state = ExtensionState.ENABLED if enabled else ExtensionState.DISABLED
-        return ExtensionStatus(state, user_installed, needs_login=enabled and loaded is False)
+        return ExtensionStatus(state, user_installed, needs_login=enabled and loaded is False, active=enabled and loaded is True)

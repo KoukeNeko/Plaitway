@@ -176,6 +176,8 @@ class AppModel:
         self.changed = Notifier(platform.scheduler)
         #: The byte counters were read again; the graphs of the Overview page redraw.
         self.traffic_changed = Notifier(platform.scheduler)
+        #: The GNOME Shell extension was installed, removed, enabled or disabled.
+        self.extension_changed = Notifier(platform.scheduler)
         self._runner = runner
         self._lock = threading.RLock()
         self._selection: Selection | None = None
@@ -484,7 +486,11 @@ class AppModel:
 
     def change_extension(self, change: Callable[[], object], done: Callable[[], None]) -> None:
         """Installs, removes, enables or disables the GNOME Shell extension; `done` is called on the UI thread, whatever came of it."""
-        self._run(change, AlertTitle.EXTENSION_FAILED, done=lambda _: done())
+        def finished(_) -> None:
+            self.extension_changed.notify()
+            done()
+
+        self._run(change, AlertTitle.EXTENSION_FAILED, done=finished)
 
     # MARK: Profiles
 

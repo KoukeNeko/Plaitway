@@ -745,6 +745,12 @@ class GnomeExtensionTests(unittest.TestCase):
         self.assertFalse(self.status(enabled=True, loaded=None).needs_login, "a Shell that cannot be asked says nothing")
         self.assertFalse(self.status(enabled=False, loaded=False).needs_login)
 
+    def test_the_top_bar_item_is_on_screen_only_for_an_extension_the_shell_has_loaded(self):
+        self.assertTrue(self.status(enabled=True, loaded=True).active)
+        self.assertFalse(self.status(enabled=True, loaded=False).active)
+        self.assertFalse(self.status(enabled=True, loaded=None).active, "a tray item stays where the Shell cannot be asked")
+        self.assertFalse(self.status(enabled=False, loaded=True).active)
+
     def test_only_a_copy_in_the_users_folder_can_be_removed(self):
         self.assertTrue(self.status(user_installed=True).user_installed)
         self.assertFalse(self.status().user_installed)

@@ -16,7 +16,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from ..core.app_model import AppModel  # noqa: E402
 from ..version import __version__  # noqa: E402
-from . import bootstrap, paths, style  # noqa: E402
+from . import bootstrap, gnome_extension, paths, style  # noqa: E402
 from .appmenu import menu_model  # noqa: E402
 from .tray.controller import TrayCommands, TrayController  # noqa: E402
 from .window import MainWindow  # noqa: E402
@@ -54,6 +54,8 @@ class PlaitwayApplication(Adw.Application):
         self._window: MainWindow | None = None
         self._tray: TrayController | None = None
         self._tray_available = False
+        # The top bar item of the GNOME Shell extension shows what the tray item would: one of them is enough.
+        self._extension_active = False
         self._held = False
         self._background = False
         self._quitting = False
@@ -109,7 +111,9 @@ class PlaitwayApplication(Adw.Application):
         self.model.start()
         self.model.changed.connect(self._model_changed)
         self._tray.start()
-        self._tray.set_wanted(self.model.show_tray_icon)
+        self._wanted_tray()
+        self.model.extension_changed.connect(self._check_extension)
+        self._check_extension()
         self._update_actions()
 
     def do_activate(self) -> None:
@@ -182,8 +186,18 @@ class PlaitwayApplication(Adw.Application):
         if not available and self._services is not None and self._window is not None and not self._window.get_visible():
             self.show_window()
 
+    def _wanted_tray(self) -> None:
+        self._tray.set_wanted(self.model.show_tray_icon and not self._extension_active)
+
+    def _check_extension(self) -> None:
+        def inspected(outcome) -> None:
+            self._extension_active = outcome.ok and outcome.value.active
+            self._wanted_tray()
+
+        self.model.run_job(gnome_extension.inspect, inspected)
+
     def _model_changed(self) -> None:
-        self._tray.set_wanted(self.model.show_tray_icon)
+        self._wanted_tray()
         self._update_actions()
         if self.model.needs_window and (self._window is None or not self._window.get_visible()):
             self.show_window()
