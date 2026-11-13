@@ -39,6 +39,15 @@ function plaitway(args) {
     });
 }
 
+// A switch that stays in the menu when it is pressed, so that several profiles can be switched in one go.
+const KeepOpenSwitch = GObject.registerClass(
+class PlaitwayKeepOpenSwitch extends PopupMenu.PopupSwitchMenuItem {
+    activate(_event) {
+        if (this._switch.mapped)
+            this.toggle();
+    }
+});
+
 const Indicator = GObject.registerClass(
 class PlaitwayIndicator extends PanelMenu.Button {
     _init() {
@@ -47,6 +56,10 @@ class PlaitwayIndicator extends PanelMenu.Button {
         this._profiles = [];
         this._available = false;
         this._shown = null;
+        // The profiles a switch has been pressed for and `plaitway` has not answered yet: the next poll must not move their switch back.
+        this._pending = new Set();
+        this._items = new Map();
+        this._built = null;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
         this._icon = new St.Icon({icon_name: 'plaitway-state-idle-symbolic', style_class: 'system-status-icon'});
@@ -96,21 +109,39 @@ class PlaitwayIndicator extends PanelMenu.Button {
         this._count.visible = this._available && summary.count !== '';
         this._words = this._available ? summary.words : this._texts.unavailable;
 
+        // The menu is built again only when the profiles change: one that is open keeps its items.
+        const built = JSON.stringify([this._available, this._profiles.map(p => [p.id, p.name])]);
+        if (built !== this._built) {
+            this._built = built;
+            this._build();
+        }
+        this._header.label.text = this._words;
+        for (const profile of this._profiles) {
+            if (!this._pending.has(profile.id))
+                this._items.get(profile.id)?.setToggleState(profile.enabled);
+        }
+        this._off?.setSensitive(this._profiles.some(profile => profile.enabled));
+    }
+
+    _build() {
         const menu = this.menu;
         menu.removeAll();
-        menu.addMenuItem(new PopupMenu.PopupMenuItem(this._words, {reactive: false, can_focus: false}));
+        this._items.clear();
+        this._off = null;
+        this._header = new PopupMenu.PopupMenuItem('', {reactive: false, can_focus: false});
+        menu.addMenuItem(this._header);
         if (this._available && this._profiles.length > 0) {
             menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             for (const profile of this._profiles) {
-                const item = new PopupMenu.PopupSwitchMenuItem(profile.name, profile.enabled);
+                const item = new KeepOpenSwitch(profile.name, profile.enabled);
                 item.connect('toggled', (_, active) => this._switch(profile, active));
+                this._items.set(profile.id, item);
                 menu.addMenuItem(item);
             }
             menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            const off = new PopupMenu.PopupMenuItem(this._texts.disconnectAll);
-            off.setSensitive(this._profiles.some(profile => profile.enabled));
-            off.connect('activate', () => this._disconnectAll());
-            menu.addMenuItem(off);
+            this._off = new PopupMenu.PopupMenuItem(this._texts.disconnectAll);
+            this._off.connect('activate', () => this._disconnectAll());
+            menu.addMenuItem(this._off);
         }
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         const open = new PopupMenu.PopupMenuItem(this._texts.open);
@@ -120,7 +151,14 @@ class PlaitwayIndicator extends PanelMenu.Button {
 
     // `connect` waits until the tunnel is up, which can take long: the next poll shows how it went.
     _switch(profile, active) {
-        plaitway([active ? 'connect' : 'disconnect', profile.id]).catch(error => console.error(`Plaitway: ${error.message}`));
+        this._pending.add(profile.id);
+        this._items.get(profile.id)?.setToggleState(active);
+        plaitway([active ? 'connect' : 'disconnect', profile.id])
+            .catch(error => console.error(`Plaitway: ${error.message}`))
+            .finally(() => {
+                this._pending.delete(profile.id);
+                this._shown = null; // the next poll draws again, to put right a switch whose command failed
+            });
     }
 
     _disconnectAll() {
