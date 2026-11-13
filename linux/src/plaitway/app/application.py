@@ -143,7 +143,7 @@ class PlaitwayApplication(Adw.Application):
         return GLib.SOURCE_REMOVE
 
     def _background_resolved(self) -> bool:
-        if not self._tray_available:
+        if not self._reachable():
             self.show_window()
         self.release()
         return GLib.SOURCE_REMOVE
@@ -162,11 +162,11 @@ class PlaitwayApplication(Adw.Application):
         return self._window
 
     def _close_requested(self, window: Gtk.Window) -> bool:
-        """With a tray the window is hidden and the app stays; without one, closing it quits."""
+        """With a tray or the extension's top bar item the window is hidden and the app stays; without one, closing it quits."""
         if self._quitting:
             return False
         window.remember_geometry()
-        if self._tray_available:
+        if self._reachable():
             window.set_visible(False)
         else:
             self._request_quit()
@@ -174,16 +174,24 @@ class PlaitwayApplication(Adw.Application):
 
     # MARK: The tray
 
+    def _reachable(self) -> bool:
+        """Something on the desktop opens the window again: the tray item, or the top bar item of the extension."""
+        return self._tray_available or self._extension_active
+
     def _tray_availability(self, available: bool) -> None:
         self._tray_available = available
-        if available and not self._held:
+        self._keep_alive()
+
+    def _keep_alive(self) -> None:
+        reachable = self._reachable()
+        if reachable and not self._held:
             self.hold()
             self._held = True
-        elif not available and self._held:
+        elif not reachable and self._held:
             self.release()
             self._held = False
-        # An app with no window and no tray cannot be reached.
-        if not available and self._services is not None and self._window is not None and not self._window.get_visible():
+        # An app with no window that nothing can open again cannot be reached.
+        if not reachable and self._services is not None and self._window is not None and not self._window.get_visible():
             self.show_window()
 
     def _wanted_tray(self) -> None:
@@ -193,6 +201,7 @@ class PlaitwayApplication(Adw.Application):
         def inspected(outcome) -> None:
             self._extension_active = outcome.ok and outcome.value.active
             self._wanted_tray()
+            self._keep_alive()
 
         self.model.run_job(gnome_extension.inspect, inspected)
 
