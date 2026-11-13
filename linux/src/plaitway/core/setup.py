@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from ..client.errors import FailureKind
 from ..l10n.strings import Strings
+from ..version import DEVELOPMENT_VERSION
 from .ports import HelperRegistration
 from .profile_store import Connection
 
@@ -64,7 +65,7 @@ def resolve_setup(
     is_settling: the helper was just started or retried and may still be starting.
     """
     if connection is Connection.CONNECTED:
-        if not is_overridden and app_version and daemon_version and app_version != daemon_version:
+        if not is_overridden and app_version and daemon_version and app_version != daemon_version and app_version != DEVELOPMENT_VERSION:
             return DaemonSetup(SetupState.VERSION_MISMATCH, daemon_version, app_version)
         return DaemonSetup(SetupState.READY)
 

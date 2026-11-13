@@ -78,6 +78,7 @@ class SetupTests(unittest.TestCase):
             (dict(connection=Connection.CONNECTED, daemon_version="0.1.0"), READY),
             (dict(connection=Connection.CONNECTED, daemon_version="0.0.9"), mismatch),
             (dict(connection=Connection.CONNECTED, daemon_version="0.0.0-dev", app_version=None), READY),
+            (dict(connection=Connection.CONNECTED, daemon_version="0.10.3", app_version="0.0.0-dev"), READY),
             (dict(connection=Connection.CONNECTED, daemon_version="0.0.0-dev", is_overridden=True), READY),
             (dict(connection=Connection.CONNECTED, registration=HelperRegistration.NOT_INSTALLED), READY),
             (dict(connection=Connection.CONNECTED, registration=None, daemon_version="0.1.0"), READY),
