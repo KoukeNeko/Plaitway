@@ -48,6 +48,23 @@ export function parseProfiles(text) {
     }));
 }
 
+// What a profile's row shows beside its switch: a spinner while it is under way, a check, a cross, or a dim
+// dot for a profile that is not connected. `style` is a class of the Shell's own style sheet.
+export function badge(state) {
+    switch (state) {
+    case 'connecting':
+        return {spinner: true, icon: null, style: ''};
+    case 'connected':
+        return {spinner: false, icon: 'object-select-symbolic', style: ''};
+    case 'failed':
+        return {spinner: false, icon: 'window-close-symbolic', style: 'error'};
+    case 'credentials':
+        return {spinner: false, icon: 'dialog-password-symbolic', style: 'warning'};
+    default:
+        return {spinner: false, icon: 'plaitway-state-idle-symbolic', style: 'dim-label'};
+    }
+}
+
 // What the icon, the number beside it and the tooltip say about all profiles together. What needs the
 // person comes before what is under way, as in the app's tray (core/aggregate.py).
 export function summarize(profiles, texts) {

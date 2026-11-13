@@ -1,5 +1,5 @@
 // gjs -m linux/tests/gnome_status_test.js : the logic of the GNOME Shell extension's top bar item.
-import {parseProfiles, summarize, textsFor} from '../data/share/gnome-shell/extensions/plaitway@koukeneko.github.io/status.js';
+import {badge, parseProfiles, summarize, textsFor} from '../data/share/gnome-shell/extensions/plaitway@koukeneko.github.io/status.js';
 
 function check(condition, what) {
     if (!condition) {
@@ -30,4 +30,8 @@ check(summary.icon === 'plaitway-state-connecting-symbolic' && summary.words ===
 summary = summarize(parseProfiles(answer([])), en);
 check(summary.icon === 'plaitway-state-idle-symbolic' && summary.words === 'Not connected' && summary.count === '', 'nothing');
 check(parseProfiles('{}').length === 0, 'an answer with no profiles');
+check(badge('connecting').spinner, 'a spinner while connecting');
+check(badge('connected').icon === 'object-select-symbolic' && !badge('connected').spinner, 'a check when connected');
+check(badge('failed').icon === 'window-close-symbolic' && badge('failed').style === 'error', 'a cross when it failed');
+check(badge('idle').style === 'dim-label' && badge('nonsense').icon === 'plaitway-state-idle-symbolic', 'a dim dot otherwise');
 print('ok');

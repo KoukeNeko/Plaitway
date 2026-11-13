@@ -9,7 +9,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-import {parseProfiles, summarize, textsFor} from './status.js';
+import * as Animation from 'resource:///org/gnome/shell/ui/animation.js';
+
+import {badge, parseProfiles, summarize, textsFor} from './status.js';
 
 const POLL_SECONDS = 2;
 const APP_DESKTOP_ID = 'io.github.koukeneko.Plaitway.desktop';
@@ -120,7 +122,26 @@ class PlaitwayIndicator extends PanelMenu.Button {
             if (!this._pending.has(profile.id))
                 this._items.get(profile.id)?.setToggleState(profile.enabled);
         }
+        for (const profile of this._profiles)
+            this._showBadge(profile);
         this._off?.setSensitive(this._profiles.some(profile => profile.enabled));
+    }
+
+    // The state of a profile beside its switch. It is drawn again only when the state changes.
+    _showBadge(profile) {
+        const item = this._items.get(profile.id);
+        if (!item || item._badgeState === profile.state)
+            return;
+        item._badgeState = profile.state;
+        const {spinner, icon, style} = badge(profile.state);
+        item._badge.child?.destroy();
+        if (spinner) {
+            const animation = new Animation.Spinner(16);
+            item._badge.child = animation;
+            animation.play();
+        } else {
+            item._badge.child = new St.Icon({icon_name: icon, style_class: `popup-menu-icon ${style}`, icon_size: 16});
+        }
     }
 
     _build() {
@@ -135,6 +156,8 @@ class PlaitwayIndicator extends PanelMenu.Button {
             for (const profile of this._profiles) {
                 const item = new KeepOpenSwitch(profile.name, profile.enabled);
                 item.connect('toggled', (_, active) => this._switch(profile, active));
+                item._badge = new St.Bin({y_align: Clutter.ActorAlign.CENTER, style_class: 'plaitway-badge'});
+                item.insert_child_below(item._badge, item._statusBin);
                 this._items.set(profile.id, item);
                 menu.addMenuItem(item);
             }
