@@ -21,7 +21,8 @@ DMG="$BUILD_DIR/Plaitway-$VERSION.dmg"
 signature="$(codesign -dvv "$APP" 2>&1)"
 grep -q '^Authority=Developer ID Application' <<<"$signature" ||
     die "$APP is not signed with a Developer ID Application certificate; notarization would reject it"
-xcrun notarytool history "${NOTARY_AUTH[@]}" >/dev/null 2>&1 ||
+# Its error stays on stderr: Apple's reason (an expired agreement, a revoked key) is told only there.
+xcrun notarytool history "${NOTARY_AUTH[@]}" >/dev/null ||
     die "notarytool refuses the credentials (${NOTARY_AUTH[*]}); for a keychain profile create it with: xcrun notarytool store-credentials ${PLAITWAY_NOTARY_PROFILE:-plaitway-notary}"
 
 # submit FILE: uploads FILE, waits for the verdict and prints the notary log
