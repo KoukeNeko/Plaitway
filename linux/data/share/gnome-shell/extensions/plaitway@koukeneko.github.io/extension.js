@@ -172,11 +172,12 @@ class PlaitwayIndicator extends PanelMenu.Button {
         menu.addMenuItem(open);
     }
 
-    // `connect` waits until the tunnel is up, which can take long: the next poll shows how it went.
+    // `connect` does not wait: with no terminal it cannot answer a request for credentials and would
+    // stop the profile, so the app answers it, from the keyring or its dialog. The next poll shows how it went.
     _switch(profile, active) {
         this._pending.add(profile.id);
         this._items.get(profile.id)?.setToggleState(active);
-        plaitway([active ? 'connect' : 'disconnect', profile.id])
+        plaitway(active ? ['connect', '--no-wait', profile.id] : ['disconnect', profile.id])
             .catch(error => console.error(`Plaitway: ${error.message}`))
             .finally(() => {
                 this._pending.delete(profile.id);
