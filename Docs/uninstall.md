@@ -17,7 +17,16 @@ In this order, so that the helper removes its routes and DNS entries before it g
 [packaging/README.md](../packaging/README.md#uninstall) lists what is left where, and has
 the steps for a helper installed with `scripts/dev-install-daemon.sh`.
 
-**Uninstall on Linux**, in this order:
+**Uninstall on Linux** in one step, for an install from the package or the apt repository: run
+`packaging/linux/uninstall.sh` as yourself, not with sudo. It lists what it removes and asks
+first: the app, the GNOME Shell extension, the passwords saved in your keyring, the app's files
+in your home, the package with every stored profile and its private keys, and the apt repository.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/KoukeNeko/Plaitway/main/packaging/linux/uninstall.sh | sh
+```
+
+By hand, in this order:
 
 1. In Plaitway, delete the profiles you do not want to keep. This also deletes their
    saved passwords from the Secret Service (GNOME Keyring, KWallet)

@@ -391,6 +391,65 @@ expect "dev-uninstall with nothing installed succeeds" 'test "$STATUS" -eq 0'
 dev dev-uninstall-daemon.sh --purge
 expect "dev-uninstall --purge deletes the profiles" 'test "$STATUS" -eq 0 -a ! -e "$DEVROOT/var/lib/plaitway"'
 
+# --- uninstall.sh against fakes (sudo, apt-get, dpkg-query, pkill, the Python) --
+
+UNROOT="$TMP/unroot"
+UNHOME="$TMP/unhome"
+UNBIN="$TMP/unbin"
+mkdir -p "$UNBIN"
+for tool in apt-get pkill; do
+    printf '#!/bin/sh\necho "%s $*" >>"$FAKE_CALLS"\n' "$tool" >"$UNBIN/$tool"
+done
+printf '#!/bin/sh\necho "sudo $*" >>"$FAKE_CALLS"\nexec "$@"\n' >"$UNBIN/sudo"
+printf '#!/bin/sh\nprintf %%s "$FAKE_DPKG_STATUS"\n' >"$UNBIN/dpkg-query"
+printf '#!/bin/sh\necho "python $*" >>"$FAKE_CALLS"\ncat >/dev/null\n' >"$UNBIN/python3"
+chmod +x "$UNBIN"/*
+
+# uninstall [ARGS...]: uninstall.sh with the home and the system paths in TMP.
+uninstall() {
+    : >"$TMP/calls"
+    OUTPUT="$(HOME="$UNHOME" XDG_DATA_HOME="" XDG_STATE_HOME="" XDG_CONFIG_HOME="" \
+        PLAITWAY_DEV_ROOT="$UNROOT" PLAITWAY_PYTHON="$UNBIN/python3" PATH="$UNBIN:$PATH" \
+        sh "$HERE/uninstall.sh" "$@" 2>&1)"
+    STATUS=$?
+}
+# installed_everything: Plaitway's files in the home and the apt repository.
+installed_everything() {
+    mkdir -p "$UNHOME/.local/share/gnome-shell/extensions/plaitway@koukeneko.github.io" \
+        "$UNHOME/.local/state/plaitway" "$UNHOME/.config/autostart" \
+        "$UNROOT/etc/apt/sources.list.d" "$UNROOT/etc/apt/keyrings"
+    touch "$UNHOME/.config/autostart/io.github.koukeneko.Plaitway.desktop" "$UNHOME/.config/autostart/other.desktop" \
+        "$UNROOT/etc/apt/sources.list.d/plaitway.list" "$UNROOT/etc/apt/keyrings/plaitway.asc"
+}
+
+installed_everything
+export FAKE_DPKG_STATUS=installed
+uninstall --dry-run
+expect "uninstall --dry-run says what goes and changes nothing" \
+    'test "$STATUS" -eq 0 -a -e "$UNROOT/etc/apt/sources.list.d/plaitway.list" -a -d "$UNHOME/.local/state/plaitway" -a ! -s "$TMP/calls" && output_has "nothing was changed" && output_has "DELETED"'
+uninstall
+expect "uninstall without a terminal or --yes changes nothing" 'test "$STATUS" -ne 0 -a -d "$UNHOME/.local/state/plaitway" && output_has "pass --yes"'
+
+uninstall --yes
+expect "uninstall succeeds" 'test "$STATUS" -eq 0'
+expect "uninstall quits the app and cleans the extension setting and the keyring" \
+    'calls_have "pkill -TERM -u $(id -u) -f /plaitway-app" && calls_have "python - plaitway@koukeneko.github.io io.github.koukeneko.plaitway.credentials"'
+expect "uninstall deletes the extension, the app's state and its login item, and nothing else" \
+    'test ! -e "$UNHOME/.local/share/gnome-shell/extensions/plaitway@koukeneko.github.io" -a ! -e "$UNHOME/.local/state/plaitway" -a ! -e "$UNHOME/.config/autostart/io.github.koukeneko.Plaitway.desktop" -a -e "$UNHOME/.config/autostart/other.desktop"'
+expect "uninstall purges the package before it removes the apt repository" \
+    'line_before "sudo apt-get purge -y plaitway" "sudo rm -f" && test ! -e "$UNROOT/etc/apt/sources.list.d/plaitway.list" -a ! -e "$UNROOT/etc/apt/keyrings/plaitway.asc" && calls_have "apt-get update"'
+
+export FAKE_DPKG_STATUS=config-files
+uninstall --yes
+expect "uninstall purges a package that was removed but not purged" 'test "$STATUS" -eq 0 && calls_have "apt-get purge -y plaitway"'
+
+export FAKE_DPKG_STATUS=not-installed
+mkdir -p "$UNROOT/var/lib/plaitway"
+uninstall --yes
+expect "uninstall with nothing installed succeeds, purges nothing and says what is left" \
+    'test "$STATUS" -eq 0 && calls_lack "apt-get" && output_has "/var/lib/plaitway is still there"'
+unset FAKE_DPKG_STATUS
+
 # The commands that add the apt repository are in the README and on every release page.
 source_line() { grep -h '^ *echo "deb \[signed-by=' "$1" | sed 's/^ *//'; }
 expect "the apt source of the release page is the one of the README" \
