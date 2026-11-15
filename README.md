@@ -122,7 +122,7 @@ press **Connect**. A second profile connects the same way; the sidebar order is 
 |---|---|
 | `status [profile]` | State, interface, addresses, uptime and traffic |
 | `list` | Profiles with their ids |
-| `connect profile` · `disconnect profile` | Switch a profile on or off; `connect` waits until it is up, `disconnect -all` switches off every profile |
+| `connect profile` · `disconnect profile` | Switch a profile on or off; `connect` waits until it is up, and on Linux answers a request for credentials with those the app saved before it asks; `disconnect -all` switches off every profile |
 | `import file` | Add a profile from an `.ovpn` or a wg-quick `.conf` |
 | `show profile` | The profile's text, secrets hidden unless `-secrets` is given |
 | `edit profile` | Change the text in `$VISUAL` or `$EDITOR` |

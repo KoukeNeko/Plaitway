@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pb "github.com/KoukeNeko/Plaitway/internal/gen/plaitway/v1"
 )
 
 const waitTimeout = 10 * time.Second
@@ -313,6 +315,84 @@ func TestConnectCredentials(t *testing.T) {
 		r := d.runWith(context.Background(), "", terminal(answers, &asked), "connect", "cred")
 		if r.code != 0 || !strings.Contains(r.stderr, "cred: authentication failed") || len(asked) != 3 {
 			t.Errorf("connect: %+v, asked %v", r, asked)
+		}
+	})
+
+	// keyring gives the app saved credentials, and counts the reads.
+	keyring := func(username, password string, readErr error, reads *int) func(*app) {
+		return func(a *app) {
+			a.saved = func(_ context.Context, _ string, kind pb.CredentialKind) (string, string, bool, error) {
+				*reads++
+				if kind != pb.CredentialKind_CREDENTIAL_KIND_USER_PASSWORD {
+					t.Errorf("asked the keyring for %v", kind)
+				}
+				return username, password, password != "" && readErr == nil, readErr
+			}
+		}
+	}
+	both := func(tweaks ...func(*app)) func(*app) {
+		return func(a *app) {
+			for _, tweak := range tweaks {
+				tweak(a)
+			}
+		}
+	}
+
+	t.Run("saved credentials connect without asking", func(t *testing.T) {
+		t.Parallel()
+		d := setup(t)
+		reads := 0
+		r := d.runWith(context.Background(), "", keyring("alice", "s3cret", nil, &reads), "connect", "cred")
+		if r.code != 0 || reads != 1 || !strings.Contains(r.stderr, "cred: using the saved credentials") {
+			t.Errorf("connect: %+v, %d reads", r, reads)
+		}
+		if strings.Contains(r.stdout+r.stderr, "s3cret") {
+			t.Errorf("the password was printed: %+v", r)
+		}
+	})
+
+	t.Run("refused saved credentials are asked for once more", func(t *testing.T) {
+		t.Parallel()
+		d := setup(t)
+		reads := 0
+		var asked []prompted
+		answers := map[string][]string{"Username for cred: ": {"alice"}, "Password for cred: ": {"right"}}
+		r := d.runWith(context.Background(), "", both(keyring("alice", "wrong", nil, &reads), terminal(answers, &asked)), "connect", "cred")
+		if r.code != 0 || reads != 1 || len(asked) != 2 || !strings.Contains(r.stderr, "cred: authentication failed") {
+			t.Errorf("connect: %+v, %d reads, asked %v", r, reads, asked)
+		}
+	})
+
+	t.Run("refused saved credentials without a terminal", func(t *testing.T) {
+		t.Parallel()
+		d := setup(t)
+		reads := 0
+		r := d.runWith(context.Background(), "", keyring("alice", "wrong", nil, &reads), "connect", "cred")
+		if r.code != exitFailure || !strings.Contains(r.stderr, "cred: authentication failed") {
+			t.Errorf("connect: %+v", r)
+		}
+		stopped(t, d)
+	})
+
+	t.Run("an unreadable keyring is said and the password asked for", func(t *testing.T) {
+		t.Parallel()
+		d := setup(t)
+		reads := 0
+		var asked []prompted
+		answers := map[string][]string{"Username for cred: ": {"alice"}, "Password for cred: ": {"s3cret"}}
+		r := d.runWith(context.Background(), "", both(keyring("", "", errors.New("the keyring is locked"), &reads), terminal(answers, &asked)), "connect", "cred")
+		if r.code != 0 || len(asked) != 2 || !strings.Contains(r.stderr, "cred: the saved credentials cannot be read: the keyring is locked") {
+			t.Errorf("connect: %+v, asked %v", r, asked)
+		}
+	})
+
+	t.Run("-username skips the saved credentials", func(t *testing.T) {
+		t.Parallel()
+		d := setup(t)
+		reads := 0
+		r := d.runWith(context.Background(), "s3cret\n", keyring("bob", "other", nil, &reads), "connect", "-username", "alice", "cred")
+		if r.code != 0 || reads != 0 {
+			t.Errorf("connect: %+v, %d reads", r, reads)
 		}
 	})
 

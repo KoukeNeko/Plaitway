@@ -12,6 +12,8 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+
+	pb "github.com/KoukeNeko/Plaitway/internal/gen/plaitway/v1"
 )
 
 // version is set at build time: -ldflags "-X main.version=1.2.3".
@@ -43,12 +45,14 @@ type app struct {
 	color bool
 	// prompt asks the person at the terminal; nil when stdin is not one.
 	prompt func(ctx context.Context, label string, secret bool) (string, error)
+	// saved reads the credentials the app saved for a profile; nil where there are none to read.
+	saved func(ctx context.Context, profileID string, kind pb.CredentialKind) (username, password string, found bool, err error)
 	// socket is the -socket flag, empty when not given.
 	socket string
 }
 
 func main() {
-	a := &app{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, getenv: os.Getenv}
+	a := &app{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, getenv: os.Getenv, saved: savedCredentials}
 	a.color = isTerminal(os.Stdout) && a.getenv("NO_COLOR") == "" && a.getenv("TERM") != "dumb"
 	if isTerminal(os.Stdin) {
 		a.prompt = terminalPrompt(os.Stdin, os.Stderr)

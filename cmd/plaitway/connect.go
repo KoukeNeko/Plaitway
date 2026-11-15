@@ -26,7 +26,7 @@ const (
 
 func (a *app) connect(ctx context.Context, args []string) error {
 	fs := a.flagSet("connect")
-	username := fs.String("username", "", "user name, for a profile that asks for one; the password comes from a prompt or from stdin")
+	username := fs.String("username", "", "user name, for a profile that asks for one; the password comes from a prompt or from stdin, and the credentials the app saved are not used")
 	noWait := fs.Bool("no-wait", false, "return as soon as the daemon has started connecting")
 	timeout := fs.Duration("timeout", defaultConnectTimeout, "how long to wait for the daemon to make progress")
 	rest, err := a.parse(fs, args, 1, 1)
@@ -57,6 +57,8 @@ func (a *app) connect(ctx context.Context, args []string) error {
 // earlier run left open.
 func (a *app) waitConnected(ctx context.Context, c *client, p *pb.Profile, username string, timeout time.Duration) error {
 	answers := 0
+	// The credentials the app saved are tried once, unless -username asks for other ones.
+	triedSaved := username != ""
 	for {
 		cur, err := c.awaitSettled(ctx, p, timeout)
 		if err != nil {
@@ -81,9 +83,16 @@ func (a *app) waitConnected(ctx context.Context, c *client, p *pb.Profile, usern
 			}
 			fmt.Fprintf(a.stderr, "%s: %s\n", clean(p.Name), clean(refused))
 		}
-		req, err := a.askCredentials(ctx, cur, &username)
-		if err != nil {
-			return c.abandon(ctx, p, err)
+		var req *pb.ProvideCredentialsRequest
+		if !triedSaved {
+			triedSaved = true
+			req = a.savedRequest(ctx, cur)
+		}
+		if req == nil {
+			req, err = a.askCredentials(ctx, cur, &username)
+			if err != nil {
+				return c.abandon(ctx, p, err)
+			}
 		}
 		callCtx, cancel := callContext(ctx)
 		_, err = c.api.ProvideCredentials(callCtx, req)
@@ -181,6 +190,26 @@ func (c *client) awaitSettled(parent context.Context, p *pb.Profile, timeout tim
 			}
 		}
 	}
+}
+
+// savedRequest answers the profile's request with the credentials the app
+// saved, or returns nil to have them asked for: none are saved, or they cannot
+// be read, which is said.
+func (a *app) savedRequest(ctx context.Context, p *pb.Profile) *pb.ProvideCredentialsRequest {
+	if a.saved == nil {
+		return nil
+	}
+	kind := p.GetCredentialRequest().GetKind()
+	username, password, found, err := a.saved(ctx, p.Id, kind)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "%s: the saved credentials cannot be read: %s\n", clean(p.Name), clean(err.Error()))
+		return nil
+	}
+	if !found {
+		return nil
+	}
+	fmt.Fprintf(a.stderr, "%s: using the saved credentials\n", clean(p.Name))
+	return &pb.ProvideCredentialsRequest{ProfileId: p.Id, Kind: kind, Username: username, Password: password}
 }
 
 // askCredentials collects what the profile asks for. The password comes from
