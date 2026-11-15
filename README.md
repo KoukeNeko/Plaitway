@@ -122,14 +122,16 @@ press **Connect**. A second profile connects the same way; the sidebar order is 
 |---|---|
 | `status [profile]` | State, interface, addresses, uptime and traffic |
 | `list` | Profiles with their ids |
-| `connect profile` · `disconnect profile` | Switch a profile on or off; `connect` waits until it is up |
+| `connect profile` · `disconnect profile` | Switch a profile on or off; `connect` waits until it is up, `disconnect -all` switches off every profile |
 | `import file` | Add a profile from an `.ovpn` or a wg-quick `.conf` |
 | `show profile` | The profile's text, secrets hidden unless `-secrets` is given |
 | `edit profile` | Change the text in `$VISUAL` or `$EDITOR` |
 | `set profile` | Change the name and the settings |
+| `move profile place` | Change the priority: `top`, `bottom`, `up`, `down` or a place from 1 |
 | `remove profile` | Disconnect and delete a profile |
 | `logs [profile]` | A profile's log, or the helper's own |
 | `diagnostics` · `resync` | The network and the owned routes · rebuild them |
+| `remove-route key` | Delete a stale route that `diagnostics` lists |
 | `watch` | Print profile changes as they happen |
 
 ## Update and uninstall

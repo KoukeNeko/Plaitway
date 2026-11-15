@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,7 +114,61 @@ func (a *app) list(ctx context.Context, args []string) error {
 
 func (a *app) disconnect(ctx context.Context, args []string) error {
 	fs := a.flagSet("disconnect")
-	rest, err := a.parse(fs, args, 1, 1)
+	all := fs.Bool("all", false, "disconnect every profile that is on")
+	rest, err := a.parse(fs, args, 0, 1)
+	if err != nil {
+		return err
+	}
+	if *all == (len(rest) == 1) {
+		return usageErrorf("disconnect takes a profile or -all")
+	}
+	c, err := a.dial()
+	if err != nil {
+		return err
+	}
+	defer c.close()
+	if !*all {
+		p, err := c.find(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		return a.switchOff(ctx, c, p)
+	}
+
+	profiles, err := c.profiles(ctx)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, p := range profiles {
+		if p.DesiredEnabled {
+			errs = append(errs, a.switchOff(ctx, c, p))
+		}
+	}
+	if len(errs) == 0 {
+		fmt.Fprintln(a.stdout, "no profile is on")
+	}
+	return errors.Join(errs...)
+}
+
+// switchOff disconnects one profile and says so.
+func (a *app) switchOff(ctx context.Context, c *client, p *pb.Profile) error {
+	stopped, err := c.setEnabled(ctx, p.Id, false)
+	if err != nil {
+		return err
+	}
+	// The daemon reports an engine that would not stop as FAILED.
+	if stopped.State == pb.ProfileState_PROFILE_STATE_FAILED {
+		return fmt.Errorf("%s: could not disconnect: %s", p.Name, stopped.LastError)
+	}
+	fmt.Fprintf(a.stdout, "%s: disconnected\n", clean(p.Name))
+	return nil
+}
+
+// move changes a profile's place in the priority order.
+func (a *app) move(ctx context.Context, args []string) error {
+	fs := a.flagSet("move")
+	rest, err := a.parse(fs, args, 2, 2)
 	if err != nil {
 		return err
 	}
@@ -126,15 +181,75 @@ func (a *app) disconnect(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	stopped, err := c.setEnabled(ctx, p.Id, false)
+	profiles, err := c.profiles(ctx)
 	if err != nil {
 		return err
 	}
-	// The daemon reports an engine that would not stop as FAILED.
-	if stopped.State == pb.ProfileState_PROFILE_STATE_FAILED {
-		return fmt.Errorf("%s: could not disconnect: %s", p.Name, stopped.LastError)
+	ids := make([]string, 0, len(profiles))
+	from := -1
+	for i, q := range profiles {
+		if q.Id == p.Id {
+			from = i
+		}
+		ids = append(ids, q.Id)
 	}
-	fmt.Fprintf(a.stdout, "%s: disconnected\n", clean(p.Name))
+	if from < 0 {
+		return fmt.Errorf("%s: no longer exists", p.Name)
+	}
+	to, err := movePosition(rest[1], from, len(ids))
+	if err != nil {
+		return err
+	}
+	ids = append(ids[:from], ids[from+1:]...)
+	ids = append(ids[:to], append([]string{p.Id}, ids[to:]...)...)
+
+	callCtx, cancel := callContext(ctx)
+	defer cancel()
+	if _, err := c.api.ReorderProfiles(callCtx, &pb.ReorderProfilesRequest{Ids: ids}); err != nil {
+		return c.failure(err)
+	}
+	fmt.Fprintf(a.stdout, "%s: priority %d of %d\n", clean(p.Name), to+1, len(ids))
+	return nil
+}
+
+// movePosition turns top, bottom, up, down or a 1-based place into the index
+// the profile at from moves to, among n profiles.
+func movePosition(arg string, from, n int) (int, error) {
+	switch arg {
+	case "top":
+		return 0, nil
+	case "bottom":
+		return n - 1, nil
+	case "up":
+		return max(from-1, 0), nil
+	case "down":
+		return min(from+1, n-1), nil
+	}
+	place, err := strconv.Atoi(arg)
+	if err != nil || place < 1 || place > n {
+		return 0, usageErrorf("the place is top, bottom, up, down or a number from 1 to %d, got %q", n, arg)
+	}
+	return place - 1, nil
+}
+
+// removeRoute deletes a stale route that diagnostics lists, by its key.
+func (a *app) removeRoute(ctx context.Context, args []string) error {
+	fs := a.flagSet("remove-route")
+	rest, err := a.parse(fs, args, 1, 1)
+	if err != nil {
+		return err
+	}
+	c, err := a.dial()
+	if err != nil {
+		return err
+	}
+	defer c.close()
+	callCtx, cancel := callContext(ctx)
+	defer cancel()
+	if _, err := c.api.RemoveStaleRoute(callCtx, &pb.RemoveStaleRouteRequest{Key: rest[0]}); err != nil {
+		return c.failure(err)
+	}
+	fmt.Fprintf(a.stdout, "removed the stale route %s\n", clean(rest[0]))
 	return nil
 }
 

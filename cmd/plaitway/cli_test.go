@@ -659,3 +659,80 @@ func TestWatchEndsWhenTheDaemonStops(t *testing.T) {
 		t.Errorf("watch after the daemon stopped: exit %d, stderr %q", code, watch.stderr)
 	}
 }
+
+func TestDisconnectAll(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t)
+	d.importText("home", wgProfile)
+	d.importText("work", ovpnProfile)
+	d.importText("idle", wgProfile)
+	d.mustRun("", "connect", "home")
+	d.mustRun("", "connect", "work")
+
+	r := d.mustRun("", "disconnect", "-all")
+	if r.stdout != "home: disconnected\nwork: disconnected\n" {
+		t.Errorf("disconnect -all printed %q", r.stdout)
+	}
+	for _, name := range []string{"home", "work"} {
+		if p := d.profile(name); p.DesiredEnabled || p.State != "PROFILE_STATE_DISCONNECTED" {
+			t.Errorf("%s after disconnect -all: %+v", name, p)
+		}
+	}
+	if r := d.mustRun("", "disconnect", "-all"); r.stdout != "no profile is on\n" {
+		t.Errorf("disconnect -all with nothing on printed %q", r.stdout)
+	}
+	for _, args := range [][]string{{"disconnect"}, {"disconnect", "-all", "home"}} {
+		if r := d.run("", args...); r.code != exitUsage {
+			t.Errorf("%v: %+v, want a usage error", args, r)
+		}
+	}
+}
+
+func TestMoveChangesThePriorityOrder(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t)
+	d.importText("a", wgProfile)
+	d.importText("b", wgProfile)
+	d.importText("c", wgProfile)
+	order := func() string {
+		var out struct{ Profiles []jsonProfile }
+		if err := json.Unmarshal([]byte(d.mustRun("", "status", "-json").stdout), &out); err != nil {
+			t.Fatal(err)
+		}
+		names := make([]string, len(out.Profiles))
+		for i, p := range out.Profiles {
+			names[i] = p.Name
+		}
+		return strings.Join(names, " ")
+	}
+
+	for _, step := range []struct{ name, place, printed, order string }{
+		{"c", "top", "c: priority 1 of 3\n", "c a b"},
+		{"c", "down", "c: priority 2 of 3\n", "a c b"},
+		{"a", "bottom", "a: priority 3 of 3\n", "c b a"},
+		{"a", "up", "a: priority 2 of 3\n", "c a b"},
+		{"b", "1", "b: priority 1 of 3\n", "b c a"},
+		{"b", "up", "b: priority 1 of 3\n", "b c a"},
+	} {
+		if r := d.mustRun("", "move", step.name, step.place); r.stdout != step.printed {
+			t.Errorf("move %s %s printed %q, want %q", step.name, step.place, r.stdout, step.printed)
+		}
+		if got := order(); got != step.order {
+			t.Errorf("after move %s %s the order is %q, want %q", step.name, step.place, got, step.order)
+		}
+	}
+	for _, place := range []string{"0", "4", "first"} {
+		if r := d.run("", "move", "a", place); r.code != exitUsage || !strings.Contains(r.stderr, "from 1 to 3") {
+			t.Errorf("move a %s: %+v, want a usage error", place, r)
+		}
+	}
+}
+
+func TestRemoveRouteOfAnUnknownKey(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t)
+	r := d.run("", "remove-route", "no-such-key")
+	if r.code != exitFailure || !strings.Contains(r.stderr, "not found") {
+		t.Errorf("remove-route of an unknown key: %+v", r)
+	}
+}
