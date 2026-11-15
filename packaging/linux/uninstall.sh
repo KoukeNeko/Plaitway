@@ -64,7 +64,7 @@ if [ "$DRY_RUN" = 1 ]; then
     echo "(dry run: nothing was changed)"
     exit 0
 fi
-[ "$(id -u)" -ne 0 ] || die "run it as yourself, not with sudo: your keyring and home directory are cleaned too"
+[ -n "$DEV_ROOT" ] || [ "$(id -u)" -ne 0 ] || die "run it as yourself, not with sudo: your keyring and home directory are cleaned too"
 if [ "$ASSUME_YES" != 1 ]; then
     # true, not the special builtin `:`, whose failed redirection would end the shell.
     { true </dev/tty; } 2>/dev/null || die "no terminal to ask on; pass --yes to proceed"
