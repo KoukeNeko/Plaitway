@@ -113,6 +113,12 @@ class PlaitwayApplication(Adw.Application):
         self._tray.start()
         self._wanted_tray()
         self.model.extension_changed.connect(self._check_extension)
+        # At login the app can start before the Shell has loaded the extension; the Shell says when it has.
+        # Its own object, not org.gnome.Shell.Extensions, a service that runs only while asked.
+        Gio.bus_get_sync(Gio.BusType.SESSION, None).signal_subscribe(
+            None, "org.gnome.Shell.Extensions", "ExtensionStateChanged", "/org/gnome/Shell",
+            gnome_extension.UUID, Gio.DBusSignalFlags.NONE, lambda *_: self._check_extension(),
+        )
         self._check_extension()
         self._update_actions()
 
