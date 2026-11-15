@@ -168,6 +168,10 @@ jobs:
       - name: Allow user namespaces and load the modules
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || echo "::warning::the AppArmor restriction cannot be lifted"
+          # Its profile lets wg read only /etc/wireguard; the tests give the peer a temporary file.
+          if [ -e /etc/apparmor.d/wg ]; then
+            sudo apparmor_parser -R /etc/apparmor.d/wg || echo "::warning::the AppArmor profile of wg cannot be unloaded"
+          fi
           sudo modprobe tun || echo "::warning::the tun module cannot be loaded"
           sudo modprobe wireguard || echo "::warning::the wireguard module cannot be loaded"
       - run: scripts/linux/root-tests.sh

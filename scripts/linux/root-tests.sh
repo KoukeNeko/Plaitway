@@ -33,6 +33,16 @@ unshare -Urnm true 2>/dev/null || die "cannot make a user, network and mount nam
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Ubuntu's AppArmor profile of wg lets it read files only below /etc/wireguard,
+# and the tests hand the peer its configuration in a temporary file.
+if command -v wg >/dev/null 2>&1; then
+    printf '[Interface]\n' >"$WORK/probe.conf"
+    if unshare -Urn sh -c 'ip link add wg0 type wireguard 2>/dev/null || exit 0; wg setconf wg0 "$1"' sh "$WORK/probe.conf" 2>&1 |
+        grep -q 'Permission denied'; then
+        die "AppArmor keeps wg from reading the tests' files; unload its profile first: sudo apparmor_parser -R /etc/apparmor.d/wg (it loads again at boot)"
+    fi
+fi
+
 # run_in_namespace DIRECTORY TEST_BINARY [TEST_FLAGS...]: the binary as the root
 # of a private namespace, with a tmpfs on /run (ip-netns keeps the peer's
 # namespace there, and it hides the machine's D-Bus and systemd-resolved sockets)
