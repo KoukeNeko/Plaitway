@@ -409,11 +409,20 @@ func TestEventsWakeFailureDoesNotStopRouteChanges(t *testing.T) {
 	events := m.Events(ctx)
 	notify := <-changed
 
-	notify()
+	// The failed wake registration signals a change of its own first. It is taken
+	// on its own: a signal that reached the loop only after the clock moved would
+	// push the burst back, and the change would not come when the test fires.
 	clk.waitPending(t, watchRetry)
 	clk.waitPending(t, burstQuiet)
 	clk.advance(burstQuiet)
-	// The failed wake registration also signalled a change; both are in one burst.
+	clk.fire(t, burstQuiet)
+	if got := receive(t, events); got.Reason != osnet.ChangeRoute {
+		t.Errorf("reason of the failed registration %q, want route", got.Reason)
+	}
+
+	notify()
+	clk.waitPending(t, burstQuiet)
+	clk.advance(burstQuiet)
 	clk.fire(t, burstQuiet)
 	if got := receive(t, events); got.Reason != osnet.ChangeRoute {
 		t.Errorf("reason %q, want route", got.Reason)
